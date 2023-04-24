@@ -4,7 +4,6 @@ from PIL import Image
 import tqdm, cv2, json, shutil, os, io, re
 import numpy as np
 import warnings
-import matplotlib.patches as patches
 
 # Initialization
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -64,7 +63,6 @@ def ExtractText(folder_path):
             contours,hierarchy = cv2.findContours(img_dilated,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_NONE)
             c = max(contours,key=cv2.contourArea)
             x,y,w,h = cv2.boundingRect(c)
-            rect = patches.Rectangle((x,y),w,h,linewidth=1,edgecolor='r',facecolor='none')
 
             # Extract the text from the image using pytesseract
             text = pytesseract.image_to_string(img[y:y+h+1,x:x+w+1])
