@@ -1,20 +1,18 @@
 import os
 from data_parser import set_tesseract_path, PerformEntry
 from val_split import PerformVal
-
+import shutil
 
 ########### Config ###########
 set_tesseract_path("C:/Users/Tristan/AppData/Local/Tesseract-OCR/tesseract.exe")
-
-val_split = .2
 
 #List of all labels to use:
 data_labels = {
     "database.json": [
                     "id",
                     "filename", 
-                    "dicom_hash", 
-                    "image_hash", 
+                    #"dicom_hash", 
+                    #"image_hash", 
                     "anonymized_accession_num", 
                     #"biopsy", 
                     #"birads",
@@ -42,9 +40,9 @@ data_labels = {
 }
 
 
-# Experimental 
-reparse_data = False
-
+reparse_data = True
+val_split = .2
+# enable_overwritting = True
 
 #############################
 
@@ -64,7 +62,9 @@ if not reparse_data:
     
     PerformEntry('downloads', data_labels, reparse_data)
 else:
-    for index, entry in enumerate(os.listdir(f"{env}/raw_data/"), start=1):
+    if os.path.exists(f"{env}/database/"):
+        shutil.rmtree(f"{env}/database/")
+    for index, entry in enumerate(os.listdir(f"{env}/raw_data/"), start=0):
         print(f"\nAdding Entry {index}")
         entry = f'raw_data/{entry}'
         PerformEntry(entry, data_labels, reparse_data)

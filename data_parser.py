@@ -10,7 +10,6 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 env = os.path.dirname(os.path.abspath(__file__))
 
 # Static
-new_images = f"{env}/downloads/images/"
 database_CSV = f"{env}/database/data.csv"
 
 
@@ -298,6 +297,7 @@ def PerformEntry(folder, data_labels, reparse_data):
     
     
     # if Stage 1
+    new_images = f"{env}/{folder}/images/"
     if os.path.exists(new_images):
         print("Performing OCR...")
         image_df = ExtractText(new_images)
