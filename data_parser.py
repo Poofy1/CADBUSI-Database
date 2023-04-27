@@ -275,7 +275,7 @@ def TransformJSON(data_labels, folder):
 
 
 
-def PerformEntry(folder, data_labels, reparse_data):
+def PerformEntry(folder, data_labels, reparse_data, enable_overwritting):
     
     # Check Dirs
     if not os.path.exists(f"{env}/database/"):
@@ -334,7 +334,11 @@ def PerformEntry(folder, data_labels, reparse_data):
         combined_df = combined_df.drop_duplicates(subset=['id'], keep='last')
         
     else: #Stage 2
-        combined_df = MergeSess(existing_df, df)
+        if enable_overwritting:
+            combined_df = MergeSess(existing_df, df)
+        else:
+            combined_df = MergeSess(existing_df, df)
+            #combined_df = existing_df.apply(lambda col: existing_df.fillna(df[col.name]), axis=0)
         
         
     # Save the updated DataFrame back to the CSV file

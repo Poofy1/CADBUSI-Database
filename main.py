@@ -40,9 +40,10 @@ data_labels = {
 }
 
 
-reparse_data = True
+reparse_data = False
+enable_overwritting = True #Only true currently works
 val_split = .2
-# enable_overwritting = True
+
 
 #############################
 
@@ -60,14 +61,14 @@ if not reparse_data:
         entry_index += 1
     print(f"Adding Entry {entry_index} to Database")
     
-    PerformEntry('downloads', data_labels, reparse_data)
+    PerformEntry('downloads', data_labels, reparse_data, enable_overwritting)
 else:
     if os.path.exists(f"{env}/database/"):
         shutil.rmtree(f"{env}/database/")
     for index, entry in enumerate(os.listdir(f"{env}/raw_data/"), start=0):
         print(f"\nAdding Entry {index}")
         entry = f'raw_data/{entry}'
-        PerformEntry(entry, data_labels, reparse_data)
+        PerformEntry(entry, data_labels, reparse_data, enable_overwritting)
 
 
 #Create duplicate database with validation split
