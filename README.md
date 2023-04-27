@@ -38,7 +38,8 @@ All input data will be controlled from the `main` script, you will need to confi
 - `data_labels`: Define the labels you want to extract and store from the imported data. The labels must be specified in a dictionary where the keys represent the input file names and the values are lists of the desired labels. This will only accept `.json` files with the expected Mayo Clinic format and/or `.csv` files with any format. Each entry must include either `id` or `anonymized_accession_num`.
 - `reparse_data`: Set this flag to `True` if you want to re-parse existing data held in `raw_data`, otherwise to add data set it to `False`. Re-parsing will conform to the provided `data_labels` entry. Include all file formats, any missing files will be ignored while cycling through the `raw_data` entries.
 
-All input files must be held in the `downloads` folder, images must be stored in `downloads/images/`
+All input files must be held in the `downloads` folder, images must be stored in `downloads/images/`.
+Only new data rows will be added if there is an image refrencing it
 
 ### Example Inputs
 
