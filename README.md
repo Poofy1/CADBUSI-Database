@@ -37,9 +37,10 @@ All input data will be controlled from the `main` script, you will need to confi
 - `val_split`: Set the validation split ratio. A value of 0.2 means 20% of the accession studies will be allocated for validation.
 - `data_labels`: Define the labels you want to extract and store from the imported data. The labels must be specified in a dictionary where the keys represent the input file names and the values are lists of the desired labels. This will only accept `.json` files with the expected Mayo Clinic format and/or `.csv` files with any format. Each entry must include either `id` or `anonymized_accession_num`.
 - `reparse_data`: Set this flag to `True` if you want to re-parse existing data held in `raw_data`, otherwise to add data set it to `False`. Re-parsing will conform to the provided `data_labels` entry. Include all file formats, any missing files will be ignored while cycling through the `raw_data` entries.
+- `enable_overwritting`: Set this flag to `True` if you want and data to overwrite old data if they have the same `id` or `anonymized_accession_num` otherwise set to `False`
 
 All input files must be held in the `downloads` folder, images must be stored in `downloads/images/`.
-Only new data rows will be added if there is an image refrencing it
+Only new data rows will be added if the path `downloads/images/` exists and there is an image refrencing the data row
 
 ### Example Inputs
 
