@@ -41,7 +41,7 @@ data_labels = {
 
 
 reparse_data = False
-enable_overwritting = True #Only true currently works
+enable_overwritting = True 
 val_split = .2
 
 

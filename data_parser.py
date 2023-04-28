@@ -216,6 +216,81 @@ def MergeSess(combined_df, merged_df):
         combined_df = pd.concat([combined_df, updated_rows_df]).drop_duplicates(subset=['id'], keep='last').reset_index(drop=True)
         return combined_df     
 
+def merge_without_overwrite_old(existing_df, df):
+    # Concatenate the two dataframes and drop duplicates based on the 'id' column
+    updated_existing_df = pd.concat([existing_df, df]).drop_duplicates(subset=['id'], keep='first')
+
+    # Reset the index
+    updated_existing_df.reset_index(drop=True, inplace=True)
+
+    return updated_existing_df
+
+
+def merge_without_overwrite(combined_df, merged_df):
+    if combined_df.empty:
+        return merged_df
+    elif 'id' in merged_df.columns: # Check if the 'id' column is present merged_df
+
+        # Iterate through the columns in merged_df
+        for col in merged_df.columns:
+            # Check if the column is not in combined_df
+            if col not in combined_df.columns:
+                # Add the new column to combined_df with empty values
+                combined_df[col] = ''
+
+            # Check if the column is empty in any row of combined_df
+            empty_rows = combined_df[combined_df[col] == '']
+            if not empty_rows.empty:
+                # Update the empty rows with the values from merged_df
+                merged_rows = merged_df.loc[empty_rows.index][col]
+                combined_df.loc[empty_rows.index, col] = merged_rows
+
+        # Drop duplicates based on the 'id' column and keep the last occurrence
+        combined_df = combined_df.drop_duplicates(subset=['id'], keep='last')
+    else: 
+        # Find the new columns in merged_df that are not present in combined_df
+        new_columns = [col for col in merged_df.columns if col not in combined_df.columns]
+        
+        # Add the new columns to combined_df with NaN values
+        for col in new_columns:
+            combined_df[col] = ''
+
+        updated_rows = []
+
+        # Iterate through unique 'anonymized_accession_num' values in merged_df
+        for unique_num in merged_df['anonymized_accession_num'].unique():
+            # Filter rows from both dataframes with matching 'anonymized_accession_num'
+            combined_rows = combined_df[combined_df['anonymized_accession_num'] == unique_num].copy()
+            merged_rows = merged_df[merged_df['anonymized_accession_num'] == unique_num]
+
+            # Merge the filtered rows on 'anonymized_accession_num' and update the new columns
+            combined_rows = combined_rows.merge(merged_rows, on='anonymized_accession_num', suffixes=('', '_y'))
+
+            # Copy the new column values to the original columns in combined_rows only if the slot is empty
+            for col in new_columns:
+                empty_rows = combined_rows[combined_rows[col].isna()]
+                merged_rows = merged_rows.loc[empty_rows.index, col]
+                combined_rows.loc[empty_rows.index, col] = merged_rows
+
+            # Drop the '_y' suffix from merged columns
+            combined_rows = combined_rows.drop([col for col in combined_rows.columns if '_y' in col], axis=1)
+
+            updated_rows.append(combined_rows)
+
+        # Concatenate updated rows and drop the original rows from combined_df
+        updated_rows_df = pd.concat(updated_rows, ignore_index=True)
+        combined_df = pd.concat([combined_df, updated_rows_df]).drop_duplicates(subset=['id'], keep='last').reset_index(drop=True)
+
+    
+    #add new rows
+    updated_existing_df = pd.concat([combined_df, merged_df]).drop_duplicates(subset=['id'], keep='first')
+
+    # Reset the index
+    updated_existing_df.reset_index(drop=True, inplace=True)
+
+    return updated_existing_df
+
+
 def TransformJSON(data_labels, folder):
     combined_df = pd.DataFrame()
     
@@ -275,6 +350,8 @@ def TransformJSON(data_labels, folder):
 
 
 
+
+
 def PerformEntry(folder, data_labels, reparse_data, enable_overwritting):
     
     # Check Dirs
@@ -327,18 +404,21 @@ def PerformEntry(folder, data_labels, reparse_data, enable_overwritting):
             existing_df[col] = ''
 
 
-        # Append the new dataframe (df) to the existing dataframe (existing_df)
-        combined_df = existing_df.append(df, ignore_index=True)
 
-        # Remove duplicate rows
-        combined_df = combined_df.drop_duplicates(subset=['id'], keep='last')
-        
-    else: #Stage 2
+
         if enable_overwritting:
-            combined_df = MergeSess(existing_df, df)
+            # Append the new dataframe (df) to the existing dataframe (existing_df)
+            combined_df = existing_df.append(df, ignore_index=True)
+
+            # Remove duplicate rows
+            combined_df = combined_df.drop_duplicates(subset=['id'], keep='last')
         else:
-            combined_df = MergeSess(existing_df, df)
-            #combined_df = existing_df.apply(lambda col: existing_df.fillna(df[col.name]), axis=0)
+            combined_df = merge_without_overwrite(existing_df, df)
+             
+    else: #Stage 2
+        combined_df = MergeSess(existing_df, df)
+        
+            
         
         
     # Save the updated DataFrame back to the CSV file
@@ -368,6 +448,5 @@ def PerformEntry(folder, data_labels, reparse_data, enable_overwritting):
 
         # Recreate the "downloads" folder as an empty folder
         os.mkdir(os.path.join(env, "downloads"))
-
 
     print("Entry Complete")
