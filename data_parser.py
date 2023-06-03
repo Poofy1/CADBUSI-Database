@@ -448,5 +448,3 @@ def PerformEntry(folder, data_labels, reparse_data, enable_overwritting):
 
         # Recreate the "downloads" folder as an empty folder
         os.mkdir(os.path.join(env, "downloads"))
-
-    print("Entry Complete")
