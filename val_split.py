@@ -6,8 +6,8 @@ import numpy as np
 env = os.path.dirname(os.path.abspath(__file__))
 
 # Config
-database_CSV = f"{env}/database/data.csv"
-output_CSV = f"{env}/database/train.csv"
+database_CSV = f"{env}/database/unlabeled_data.csv"
+output_CSV = f"{env}/database/unlabeled_data.csv"
 
 def PerformVal(val_split):
     # Read the CSV file into a DataFrame
@@ -34,3 +34,5 @@ def PerformVal(val_split):
 
     # Save the modified DataFrame to a new CSV file
     df.to_csv(output_CSV, index=False)
+    
+    print("Updated val split")

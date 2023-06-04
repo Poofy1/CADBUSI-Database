@@ -1,10 +1,33 @@
 import labelbox, requests, os, re, shutil
 import pandas as pd
+import PIL
 from PIL import Image
 from io import BytesIO
 from PIL import ImageChops
+import time
 import numpy as np
 env = os.path.dirname(os.path.abspath(__file__))
+
+
+# Need retry method becauyse labelbox servers are unreliable
+def get_with_retry(url, max_retries=5):
+    retries = 0
+    while retries < max_retries:
+        try:
+            response = requests.get(url)
+            if response.status_code == 200:
+                return response
+            else:
+                print(f"Failed to download mask image, status code: {response.status_code}")
+        except requests.exceptions.RequestException as e:
+            print(f"Request failed: {e}")
+        
+        # Sleep for a bit before retrying
+        time.sleep(2 * retries)
+        retries += 1
+    
+    # If we've exhausted all retries, return None
+    return None
 
 
 # Returns df with all labels in respective columns
@@ -48,7 +71,15 @@ def Get_Labels(response):
                         bad_images.append([single_segmentation_row['point.x'], single_segmentation_row['point.y']])
                     else:
                         # Get the mask image
-                        mask_response = requests.get(single_segmentation_row['instanceURI'])
+                        mask_response = get_with_retry(single_segmentation_row['instanceURI'])
+                        if mask_response is None:
+                            print(f"Failed to download image after multiple retries: {single_segmentation_row['instanceURI']}")
+                        else:
+                            try:
+                                mask_img = Image.open(BytesIO(mask_response.content))
+                            except PIL.UnidentifiedImageError:
+                                print(f"Cannot identify image file: {single_segmentation_row['instanceURI']}")
+                                
                         mask_img = Image.open(BytesIO(mask_response.content))
                         mask_path = f"{external_id_digits}_{data_type}.png"
                         mask_img.save(f"{env}/temp/{mask_path}")
@@ -130,7 +161,7 @@ def Find_Images(df, crop_data, df_cords_col, df_image_names_col):
                     
     return df
 
-def Find_Masks(df, crop_data, df_mask_names_col, df_image_names_col):
+def Find_Masks(df, crop_data, df_mask_names_col, df_image_names_col, original_images):
     # Create Mask Folder
     os.makedirs(f"{env}/database/masks/", exist_ok=True)
     
@@ -201,41 +232,32 @@ def Find_Masks(df, crop_data, df_mask_names_col, df_image_names_col):
     #Delete old masks
     shutil.rmtree(f"{env}/temp/")
     
-    return df
+    return df 
 
 
-print("Newly created data in labelbox will take time to update and appear here")
+def Read_Labelbox_Data(LB_API_KEY, PROJECT_ID, original_images):
+    client = labelbox.Client(api_key = LB_API_KEY)
+    project = client.get_project(PROJECT_ID)
+    export_url = project.export_labels()
 
-# Path Config
-selection_images = f'{env}/selection_images'
-original_images = 'F:/CODE/CASBUSI/Datasets/bus_2018-19/image/'
+    # Download the export file from the provided URL
+    response = requests.get(export_url)
 
-# Find Label Box
-LB_API_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJjbGc5emFjOTIyMDZzMDcyM2E2MW0xbnpuIiwib3JnYW5pemF0aW9uSWQiOiJja290NnVvMWgxcXR0MHlhczNuNmlmZnRjIiwiYXBpS2V5SWQiOiJjbGh1dm5rMTAwYnV2MDcybjlpZ3g4NGdzIiwic2VjcmV0IjoiZmRhZjcxYzBhNDM3MmNkYWNkNWIxODU5MzUyNjc1ODMiLCJpYXQiOjE2ODQ1MTk4OTgsImV4cCI6MjMxNTY3MTg5OH0.DMecSgJDDZrX1qw2T4HLs5Sv62lLLT-ePcMjyxpn0aE'
-PROJECT_ID = 'clgr3eeyn00tr071n6tjgatsu'
-client = labelbox.Client(api_key = LB_API_KEY)
-project = client.get_project(PROJECT_ID)
-export_url = project.export_labels()
+    # Parse Data from labelbox
+    print("Parsing Labelbox Data")
+    df = Get_Labels(response)
 
-# Download the export file from the provided URL
-response = requests.get(export_url)
+    print("Locating Images")
+    crop_data = pd.read_csv(f'{env}/labelbox_data/crop_data.csv')
+    df = Find_Images(df, crop_data, 'doppler_image', 'doppler_image_names')
+    df = Find_Images(df, crop_data, 'bad_images', 'bad_image_names')
+    df = Find_Masks(df, crop_data, 'mask_names', 'masked_original_names', original_images)
 
-# Parse Data from labelbox
-print("Parsing Labelbox Data")
-df = Get_Labels(response)
-
-print("Locating Images")
-crop_data = pd.read_csv(f'{env}/crop_data.csv')
-df = Find_Images(df, crop_data, 'doppler_image', 'doppler_image_names')
-df = Find_Images(df, crop_data, 'bad_images', 'bad_image_names')
-df = Find_Masks(df, crop_data, 'mask_names', 'masked_original_names')
-
-# Reorder Columns
-ordering = ['patient_id', 'mask_names', 'masked_original_names', 'bad_images', 'bad_image_names', 'doppler_image', 'doppler_image_names']
-cols = ordering + [col for col in df.columns if col not in ordering]
-df = df.reindex(columns=cols)
+    # Reorder Columns
+    ordering = ['patient_id', 'mask_names', 'masked_original_names', 'bad_images', 'bad_image_names', 'doppler_image', 'doppler_image_names']
+    cols = ordering + [col for col in df.columns if col not in ordering]
+    df = df.reindex(columns=cols)
 
 
-# Write final csv to disk
-df.to_csv(f'{env}/labels.csv', index=False)
-
+    # Write final csv to disk
+    df.to_csv(f'{env}/database/labeled_data.csv', index=False)

@@ -10,7 +10,7 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 env = os.path.dirname(os.path.abspath(__file__))
 
 # Static
-database_CSV = f"{env}/database/data.csv"
+database_CSV = f"{env}/database/unlabeled_data.csv"
 
 
 def set_tesseract_path(tesseract_path):
@@ -341,10 +341,12 @@ def TransformJSON(data_labels, folder):
         #combined_df['id'] = combined_df['id'].astype(int)
         #combined_df = combined_df[combined_df['id'] >= 10]
         
-
+        
     # Convert the combined DataFrame to CSV and read it back
     csv_string = io.StringIO()
     combined_df.to_csv(csv_string, index=False)
+    
+    
     
     return pd.read_csv(io.StringIO(csv_string.getvalue())).astype(str).replace('nan', '')
 

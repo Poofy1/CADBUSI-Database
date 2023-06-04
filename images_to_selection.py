@@ -16,6 +16,9 @@ def Crop_and_save_images(csv_file_path, image_input_folder, output_csv, output_f
     
     # Filter rows where 'Area' column is 'breast'
     data = data[data['area'].str.lower() == 'breast']
+    
+    # Exclude rows where 'size' column has any text
+    data = data[data['size'].isna()]
 
     
     # If there are no matching data, return
