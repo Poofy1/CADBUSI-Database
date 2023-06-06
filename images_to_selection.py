@@ -30,10 +30,10 @@ def Crop_and_save_images(csv_file_path, image_input_folder, output_csv, output_f
     data['orientation'] = data['orientation'].apply(lambda x: x if x in ['long', 'trans'] else 'other')
     
     # Create a new column to group the data
-    data['group'] = data.apply(lambda row: 'doppler' if row['image_type'] == 'RGB' else row['orientation'], axis=1)
+    data['group'] = data.apply(lambda row: 'doppler' if row['PhotometricInterpretation'] == 'RGB' else row['orientation'], axis=1)
 
     # Group the data by 'patient_id'
-    grouped_patient = data.groupby('patient_id')
+    grouped_patient = data.groupby('id')
 
     #Open the output CSV file
     with open(output_csv, 'w', newline='') as f:
@@ -163,3 +163,11 @@ def Crop_and_save_images(csv_file_path, image_input_folder, output_csv, output_f
 # image_type (RGB = Doppler images)
 # area (if not "breast" put in other)
 # orientation (Long, Trans, anything else put in other)
+
+env = os.path.dirname(os.path.abspath(__file__))
+image_input = f"{env}/downloads/images/"
+image_output = f"{env}/labelbox_data/labelbox_images/"
+input_csv = f"{env}/database/temp.csv"
+output_csv = f"{env}/labelbox_data/crop_data.csv"
+
+Crop_and_save_images(input_csv, image_input, output_csv, image_output, 4)

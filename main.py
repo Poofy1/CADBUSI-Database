@@ -1,5 +1,5 @@
 import os
-from data_parser import set_tesseract_path, PerformEntry
+from data_parser import set_tesseract_path, PerformEntry, Store_Raw_Data
 from val_split import PerformVal
 from images_to_selection import Crop_and_save_images
 import shutil
@@ -58,7 +58,7 @@ only_retreive_labelbox_data = False
 env = os.path.dirname(os.path.abspath(__file__))
 image_input = f"{env}/downloads/images/"
 image_output = f"{env}/labelbox_data/labelbox_images/"
-input_csv = f"{env}/image_input/database_total_v4.csv"
+input_csv = f"{env}/database/temp.csv"
 output_csv = f"{env}/labelbox_data/crop_data.csv"
 
 if only_append_to_database:
@@ -73,6 +73,9 @@ if only_append_to_database:
     #Label box prep
     print("Transforming Images for Labeling")
     Crop_and_save_images(input_csv, image_input, output_csv, image_output, images_per_row)
+    
+    # Move data
+    Store_Raw_Data()
     
     # Update val split amount
     PerformVal(val_split)
@@ -104,7 +107,7 @@ if only_retreive_labelbox_data:
     print("(Newly created data in labelbox will take time to update!)")
 
     # Path Config
-    original_images = 'F:/CODE/CASBUSI/Datasets/bus_2018-19/image/'
+    original_images = f"{env}/database/images/"
 
     Read_Labelbox_Data(LB_API_KEY, PROJECT_ID, original_images)
     

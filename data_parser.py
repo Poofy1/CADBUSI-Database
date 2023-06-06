@@ -433,20 +433,21 @@ def PerformEntry(folder, data_labels, reparse_data, enable_overwritting):
 
 
 
-    if not reparse_data:
-        print("Storing Raw Data...")  
-        #Finding index
-        entry_index = 0
-        while os.path.exists(f"{env}/raw_data/entry_{entry_index}"):
-            entry_index += 1
-        
-        #Move data
-        raw_folder = f"{env}/raw_data/entry_{entry_index}"
 
-        shutil.copytree(os.path.join(env, "downloads"), raw_folder)
+def Store_Raw_Data():
+    print("Storing Raw Data...")  
+    #Finding index
+    entry_index = 0
+    while os.path.exists(f"{env}/raw_data/entry_{entry_index}"):
+        entry_index += 1
+    
+    #Move data
+    raw_folder = f"{env}/raw_data/entry_{entry_index}"
 
-        # Remove the "downloads" folder and its contents
-        shutil.rmtree(os.path.join(env, "downloads"))
+    shutil.copytree(os.path.join(env, "downloads"), raw_folder)
 
-        # Recreate the "downloads" folder as an empty folder
-        os.mkdir(os.path.join(env, "downloads"))
+    # Remove the "downloads" folder and its contents
+    shutil.rmtree(os.path.join(env, "downloads"))
+
+    # Recreate the "downloads" folder as an empty folder
+    os.mkdir(os.path.join(env, "downloads"))
