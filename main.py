@@ -2,6 +2,7 @@ import os
 from data_parser import set_tesseract_path, PerformEntry, Store_Raw_Data
 from val_split import PerformVal
 from images_to_selection import Crop_and_save_images
+from pre_image_processing import Pre_Process
 import shutil
 from selection_to_images import Read_Labelbox_Data
 
@@ -57,9 +58,9 @@ only_retreive_labelbox_data = False
 # Static vars
 env = os.path.dirname(os.path.abspath(__file__))
 image_input = f"{env}/downloads/images/"
-image_output = f"{env}/labelbox_data/labelbox_images/"
-input_csv = f"{env}/database/temp.csv"
-output_csv = f"{env}/labelbox_data/crop_data.csv"
+image_output = f"{env}/database/labelbox_images/"
+input_csv = f"{env}/database/unlabeled_data.csv"
+output_csv = f"{env}/database/crop_data.csv"
 
 if only_append_to_database:
     #Finding index
@@ -69,6 +70,9 @@ if only_append_to_database:
     print(f"Adding Entry {entry_index} to Database")
     
     PerformEntry('downloads', data_labels, only_reparse_raw_data, enable_overwritting)
+    
+    print("Transforming CSV for Image Processing")
+    Pre_Process()
     
     #Label box prep
     print("Transforming Images for Labeling")
@@ -89,6 +93,9 @@ if only_reparse_raw_data:
         entry_path = f'raw_data/{entry}'
         PerformEntry(entry_path, data_labels, only_reparse_raw_data, enable_overwritting)
         
+        print("Transforming CSV for Image Processing")
+        Pre_Process()
+    
         #Label box prep
         print(f"Transforming Images For Labeling")
         entry_path = f'{env}/{entry_path}/images/'

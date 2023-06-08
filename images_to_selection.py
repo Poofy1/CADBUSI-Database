@@ -20,7 +20,6 @@ def Crop_and_save_images(csv_file_path, image_input_folder, output_csv, output_f
     # Exclude rows where 'size' column has any text
     data = data[data['size'].isna()]
 
-    
     # If there are no matching data, return
     if data.empty:
         print("No data for 'breast' area found.")
@@ -33,35 +32,39 @@ def Crop_and_save_images(csv_file_path, image_input_folder, output_csv, output_f
     data['group'] = data.apply(lambda row: 'doppler' if row['PhotometricInterpretation'] == 'RGB' else row['orientation'], axis=1)
 
     # Group the data by 'patient_id'
-    grouped_patient = data.groupby('id')
+    grouped_patient = data.groupby('anonymized_accession_num')
 
-    #Open the output CSV file
-    with open(output_csv, 'w', newline='') as f:
+    # Check if the output CSV file exists
+    csv_exists = os.path.isfile(output_csv)
+
+    # Open the output CSV file in append mode if it exists, otherwise in write mode
+    with open(output_csv, 'a' if csv_exists else 'w', newline='') as f:
         writer = csv.writer(f)
-
         
-        
-        # Write the header row
-        writer.writerow(['patient_id', 'group', 'image_filename', 'x', 'y', 'width', 'height', 'us_x0', 'us_y0', 'us_x1', 'us_y1'])
+        # If the CSV file doesn't exist, write the header row
+        if not csv_exists:
+            writer.writerow(['patient_id', 'group', 'image_filename', 'x', 'y', 'width', 'height', 'us_x0', 'us_y0', 'us_x1', 'us_y1'])
     
         for patient_id, patient_group in tqdm.tqdm(grouped_patient):
             images = []
             image_records = []
             total_height = 0
             total_width = 0 
+
             
             for group_val in ['long', 'trans', 'doppler', 'other']:
                 group = patient_group[patient_group['group'] == group_val]
                 group_images = []
+
                 
                 for index, row in group.iterrows():
-                    image_path = os.path.join(image_input_folder, row['filename'])
+                    image_path = os.path.join(image_input_folder, row['image_filename'])
                     if os.path.isfile(image_path):
                         img = Image.open(image_path)
                         # Crop the image
-                        cropped_img = img.crop((row['us_x0'], row['us_y0'], row['us_x1'], row['us_y1']))
+                        cropped_img = img.crop((row['RegionLocationMinX0'], row['RegionLocationMinY0'], row['RegionLocationMaxX1'], row['RegionLocationMaxY1']))
                         group_images.append(cropped_img)
-
+                
                 if group_images:
                     # Create a title bar
                     if group_val == 'long':
@@ -83,14 +86,14 @@ def Crop_and_save_images(csv_file_path, image_input_folder, output_csv, output_f
                     total_height += 100
 
                     for index, row in group.iterrows():
-                        image_path = os.path.join(image_input_folder, row['filename'])
+                        image_path = os.path.join(image_input_folder, row['image_filename'])
                         if os.path.isfile(image_path):
                             image_records.append({'group': group_val, 
-                                                'filename': row['filename'], 
-                                                'us_x0': row['us_x0'], 
-                                                'us_y0': row['us_y0'], 
-                                                'us_x1': row['us_x1'], 
-                                                'us_y1': row['us_y1']})
+                                                'image_filename': row['image_filename'], 
+                                                'us_x0': row['RegionLocationMinX0'], 
+                                                'us_y0': row['RegionLocationMinY0'], 
+                                                'us_x1': row['RegionLocationMaxX1'], 
+                                                'us_y1': row['RegionLocationMaxY1']})
                     
                     row_width = 0
                     for i in range(0, len(group_images), images_per_row):
@@ -101,7 +104,7 @@ def Crop_and_save_images(csv_file_path, image_input_folder, output_csv, output_f
                                 images.append(group_images[i+j])
                             except IndexError:  # If there is an odd number of images
                                 img2 = Image.new('RGB', img1.size, (0, 0, 0))  # Create an empty image
-                                image_records.append({'group': "empty_space", 'filename': ''})
+                                image_records.append({'group': "empty_space", 'image_filename': ''})
                                 images.append(img2)
                         
                         total_width = max(total_width, row_width)
@@ -116,7 +119,7 @@ def Crop_and_save_images(csv_file_path, image_input_folder, output_csv, output_f
                 reset_row = 0
                 # Add the images to the new image
                 for index, img in enumerate(images):
-                    
+                
                     record = image_records[index]
                     
                     if record is None:
@@ -127,16 +130,16 @@ def Crop_and_save_images(csv_file_path, image_input_folder, output_csv, output_f
                     else:
                         if record['group'] != "empty_space": # Skip Empty Spaces
                             writer.writerow([patient_id, 
-                                             record['group'], 
-                                             record['filename'], 
-                                             x_offset, 
-                                             y_offset, 
-                                             img.width, 
-                                             img.height,
-                                             record['us_x0'],
-                                             record['us_y0'], 
-                                             record['us_x1'], 
-                                             record['us_y1']])
+                                            record['group'], 
+                                            record['image_filename'], 
+                                            x_offset, 
+                                            y_offset, 
+                                            img.width, 
+                                            img.height,
+                                            record['us_x0'],
+                                            record['us_y0'], 
+                                            record['us_x1'], 
+                                            record['us_y1']])
                         
                         new_img.paste(img, (x_offset, y_offset))
                         
@@ -147,13 +150,11 @@ def Crop_and_save_images(csv_file_path, image_input_folder, output_csv, output_f
                             y_offset += img.height
                         else:
                             x_offset += img.width
-                        
-                        
-                    
-
-                # Save the new image
-                new_img.save(os.path.join(output_folder, f'{patient_id}.png'))
-
+                            
+                            
+                    # Save the new image
+                    new_img.save(os.path.join(output_folder, f'{patient_id}.png'))
+                            
         print("Image processing completed.")
     
 
@@ -164,10 +165,10 @@ def Crop_and_save_images(csv_file_path, image_input_folder, output_csv, output_f
 # area (if not "breast" put in other)
 # orientation (Long, Trans, anything else put in other)
 
-env = os.path.dirname(os.path.abspath(__file__))
+"""env = os.path.dirname(os.path.abspath(__file__))
 image_input = f"{env}/downloads/images/"
 image_output = f"{env}/labelbox_data/labelbox_images/"
 input_csv = f"{env}/database/temp.csv"
 output_csv = f"{env}/labelbox_data/crop_data.csv"
 
-Crop_and_save_images(input_csv, image_input, output_csv, image_output, 4)
+Crop_and_save_images(input_csv, image_input, output_csv, image_output, 4)"""
