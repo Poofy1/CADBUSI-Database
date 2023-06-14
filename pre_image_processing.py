@@ -2,7 +2,6 @@ import pandas as pd
 from PIL import Image
 import cv2, os, re
 import numpy as np
-from matplotlib import pyplot as plt
 import largestinteriorrectangle as lir
 from tqdm import tqdm
 import easyocr

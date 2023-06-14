@@ -1,8 +1,5 @@
 import pandas as pd
-import pytesseract
-from PIL import Image
-import tqdm, cv2, json, shutil, os, io, re
-import numpy as np
+import json, shutil, os, io
 import warnings
 
 # Initialization
@@ -12,172 +9,6 @@ env = os.path.dirname(os.path.abspath(__file__))
 # Static
 database_CSV = f"{env}/database/unlabeled_data.csv"
 
-
-def set_tesseract_path(tesseract_path):
-    pytesseract.pytesseract.tesseract_cmd = tesseract_path
-
-
-#text extraction function
-def ExtractText(folder_path):
-    # Initialize an empty list to store the extracted text and filenames
-    text_list = []
-    files = os.listdir(folder_path)
-    
-    # Initialize a progress bar with the total number of files
-    pbar = tqdm.tqdm(total=len(files))
-    
-    # Loop through all the files in the folder
-    for file_name in files:
-        # Check if the file is an image
-        if file_name.endswith(('.png', '.jpg', '.jpeg', '.bmp')):
-            # Extract the ID from the filename
-            id = file_name.split("_")[0].lstrip('0')
-            
-            # Construct the full path to the image file
-            image_path = os.path.join(folder_path, file_name)
-            
-            # Open the image file and store it in an image object
-            img = Image.open(image_path)
-            
-            # recast image as numpy array
-            img = np.array(img)
-            
-            # if image has multiple channels convert it to grayscale (could probably improve this)
-            if len(img.shape)>2:
-                img = cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
-            
-            # crop to include only bottom of image
-            # note in most images the ultrasound part is between 10 and 665 for the first coord (y), and 2 and 853 for the second coord (x)
-            img = img[ 500:, 22:833 ]
-            
-            # convert to black and white to increase contrast
-            threshold = 160
-            th,img = cv2.threshold(img,threshold,255,cv2.THRESH_BINARY)
-            
-            
-            # show a dilated image
-            #A larger kernel size will result in a more dilated image, which can make it easier to find contours.
-            kernel = np.ones((7,7),np.uint8)
-            img_dilated = cv2.dilate(img,kernel,iterations=5)
-            contours,hierarchy = cv2.findContours(img_dilated,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_NONE)
-            c = max(contours,key=cv2.contourArea)
-            x,y,w,h = cv2.boundingRect(c)
-
-            # Extract the text from the image using pytesseract
-            text = pytesseract.image_to_string(img[y:y+h+1,x:x+w+1])
-            text = text.replace("\n"," ")
-            
-            # If the extracted text is empty, try extracting text from the entire image
-            if not text or '¢' in text or len(text.split()) == 1:
-                text = pytesseract.image_to_string(img)
-                text = text.replace("\n"," ")
-
-            # Append the extracted text and filename to the list
-            text_list.append((id, file_name, text[:-1])) # exclude the last character which is usually a newline character
-
-        
-        # Update the progress bar after processing each file
-        pbar.update(1)
-    
-    # Close the progress bar
-    pbar.close()
-    
-    # Create a pandas DataFrame from the text list
-    df = pd.DataFrame(text_list, columns=['id', 'image_filename', 'text'])
-    
-    return df
-
-
-
-def CleanData(data):
-    """
-    This function takes a pandas DataFrame column as input, removes noisy data and returns the cleaned text.
-    """
-    cleaned_data = []
-    for text in data:
-        text = text.upper()
-        if pd.isnull(text):
-            # Skip null values
-            continue
-        
-        # Remove newline characters
-        text = text.replace('\n', ' ')
-        
-       # Add space before and after certain words
-        text = re.sub(r'(?<![ \t])(TRANS|RADIAL|LONG|RT|LT|ANTI RADIAL|FN)(?![ \t])', r' \1 ', text)
-        
-        # Remove text after [ or { bracket
-        text = re.sub(r'([\[}]).+', r'\1', text)
-        text = re.sub(r'(ol|es|on|eer)\b', '', text)
-        #text = re.sub(r'1L\d*\.?\d*\b', '', text)
-        text = re.sub(r'\d+L.*', '', text)
-
-        
-        # Add space after pattern '8:00' or anything in this pattern if not there
-        text = re.sub(r'(8:\d\d)(?!\s)', r'\1 ', text)
-        
-        # Remove noisy data at the end of the text
-        text = re.sub(r'\b\d+¢|\b\d+L\b|\b\d+L\s+\d+\s*\b', '', text)
-        
-        # Extract relevant information
-        match = re.search(r'(TRANS|RADIAL|LONG|RT|LT|ANTI RADIAL|OBLIQUE)', text)
-        if match:
-            text = text[match.start():]
-        
-        # Remove noisy characters
-        cleaned_text = re.sub(r'[^\w\s:-]', '', text)
-        
-        # Remove extra spaces
-        cleaned_text = ' '.join(cleaned_text.split())
-       
-        # Remove '.' character at the end of the text
-        cleaned_text = cleaned_text.rstrip('.')
-        
-        cleaned_data.append(cleaned_text)
-    
-    return pd.Series(cleaned_data)
-
-
-def PopulateFromOCR(df):
-    # create new columns in the existing dataframe
-    df[['Scanning_Area', 'Location', 'Time', 'Distance_FN']] = pd.DataFrame([['']*4]*len(df))
-
-    # iterate over each row in the dataframe
-    for index, row in df.iterrows():
-        # get the input string from the 'String' column
-        input_string = row['cleaned_text']
-        
-        # split string by space
-        split_string = input_string.split()
-
-        # iterate over each word in the split string
-        for i, word in enumerate(split_string):
-            if 'TRANS' in word or 'LONG' in word or'RADIAL' in word:
-                # check if word contains 'TRANS' or 'LONG' or 'RADIAL'
-                if i > 0 and split_string[i-1] == 'ANTI':
-                    df.loc[index, 'Scanning_Area'] = 'ANTI RADIAL'
-                else:
-                    df.loc[index, 'Scanning_Area'] = word
-            elif word == 'LT' or word == 'RT' or word == 'RIGHT' or word == 'LEFT':
-                # check if word is 'LT' or 'RT'
-                df.loc[index, 'Location'] = word
-                #resetting distance to empty string to avoid carrying over any potentially incorrect or irrelevant distance values
-                df.loc[index, 'Distance_FN'] = ''
-            elif re.match(r'\d{1,2}\s*:\s*\d{2}$', word) and df.loc[index, 'Time'] == '':
-                # check if word is a time in the format 'HH:MM' and the 'Time' column is still empty
-                df.loc[index, 'Time'] = word
-            elif re.match(r'\d+\.?\d*\s?CM', word):
-                # check if word contains a distance in centimeters
-                df.loc[index, 'Distance_FN'] = word
-
-        # use a regular expression to extract the time range
-        match = re.search(r'\d+:\d+\s*-\s*\d+:\d+', input_string)
-        if match:
-            # if a match is found, extract the substring and assign it to the 'Time' column
-            df.loc[index, 'Time'] = match.group()
-    
-    return df
-            
 
 def MergeSess(combined_df, merged_df):
     # Merge the current file's DataFrame to the combined DataFrame using 'id' column
@@ -215,16 +46,6 @@ def MergeSess(combined_df, merged_df):
         updated_rows_df = pd.concat(updated_rows, ignore_index=True)
         combined_df = pd.concat([combined_df, updated_rows_df]).drop_duplicates(subset=['id'], keep='last').reset_index(drop=True)
         return combined_df     
-
-def merge_without_overwrite_old(existing_df, df):
-    # Concatenate the two dataframes and drop duplicates based on the 'id' column
-    updated_existing_df = pd.concat([existing_df, df]).drop_duplicates(subset=['id'], keep='first')
-
-    # Reset the index
-    updated_existing_df.reset_index(drop=True, inplace=True)
-
-    return updated_existing_df
-
 
 def merge_without_overwrite(combined_df, merged_df):
     if combined_df.empty:
@@ -378,11 +199,6 @@ def PerformEntry(folder, data_labels, reparse_data, enable_overwritting):
     # if Stage 1
     new_images = f"{env}/{folder}/images/"
     if os.path.exists(new_images):
-        #print("Performing OCR...")
-        #image_df = ExtractText(new_images)
-        #image_df['cleaned_text'] = CleanData(image_df['text'])
-        #image_df = PopulateFromOCR(image_df)
-        #df = pd.merge(image_df, df, on='id', how='inner') # Merge both df with ids and remove incomplete rows
         
         # Initialize an empty list to store the extracted text and filenames
         text_list = []

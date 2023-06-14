@@ -1,5 +1,5 @@
 import os
-from data_parser import set_tesseract_path, PerformEntry, Store_Raw_Data
+from data_parser import PerformEntry, Store_Raw_Data
 from val_split import PerformVal
 from images_to_selection import Crop_and_save_images
 from pre_image_processing import Pre_Process, Perform_OCR
@@ -7,7 +7,6 @@ import shutil
 from selection_to_images import Read_Labelbox_Data
 
 ########### Config ###########
-set_tesseract_path("C:/Users/Tristan/AppData/Local/Tesseract-OCR/tesseract.exe")
 
 #List of all labels to use:
 data_labels = {
@@ -107,7 +106,7 @@ if only_append_to_database:
         Crop_and_save_images(input_csv, image_input, output_csv, image_output, images_per_row)
     
     # Move data
-    #Store_Raw_Data()
+    Store_Raw_Data()
     
     # Update val split amount
     PerformVal(val_split)

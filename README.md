@@ -14,18 +14,12 @@ This program is designed to process Breast Ultrasound data from multiple sources
 
 ### Prerequisites
 
-- Python 3.8
-- Tesseract OCR (Download from [here](https://github.com/UB-Mannheim/tesseract/wiki))
+- Install Python 3.8
 - Install required Python packages with pip:
 
 ```
 pip install -r requirements.txt
 ```
-
-In the `main` script, you need to configure the following parameter:
-- `set_tesseract_path`: Set the path to the Tesseract-OCR executable file. (Found in `./AppData/Local/Tesseract-OCR/`)
-
-
 
 
 ## Input Data Requirements
