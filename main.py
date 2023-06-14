@@ -48,15 +48,17 @@ only_update_val = False
 
 only_retreive_labelbox_data = False
 
-# Add progressive steps
-
-
-
-
 #############################
+
+
+
+
+
+
 
 # Start Opterations
 # Static vars
+
 env = os.path.dirname(os.path.abspath(__file__))
 image_input = f"{env}/downloads/images/"
 image_output = f"{env}/database/labelbox_images/"

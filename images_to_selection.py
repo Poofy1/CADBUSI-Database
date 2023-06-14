@@ -8,6 +8,7 @@ import tqdm
 
 
 def Crop_and_save_images(csv_file_path, image_input_folder, output_csv, output_folder, images_per_row):
+
     # Create the output folder if it doesn't exist
     os.makedirs(output_folder, exist_ok=True)
     
