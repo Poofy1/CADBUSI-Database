@@ -2,7 +2,7 @@ import os
 from data_parser import set_tesseract_path, PerformEntry, Store_Raw_Data
 from val_split import PerformVal
 from images_to_selection import Crop_and_save_images
-from pre_image_processing import Pre_Process
+from pre_image_processing import Pre_Process, Perform_OCR
 import shutil
 from selection_to_images import Read_Labelbox_Data
 
@@ -71,17 +71,43 @@ if only_append_to_database:
         entry_index += 1
     print(f"Adding Entry {entry_index} to Database")
     
-    PerformEntry('downloads', data_labels, only_reparse_raw_data, enable_overwritting)
     
-    print("Transforming CSV for Image Processing")
-    Pre_Process()
     
-    #Label box prep
-    print("Transforming Images for Labeling")
-    Crop_and_save_images(input_csv, image_input, output_csv, image_output, images_per_row)
+    user_input = input("Continue with Tranform_JSON step? (y/n): ")
+    if user_input.lower() == "n":
+        print("Skipping PerformEntry step")
+    else:
+        PerformEntry('downloads', data_labels, only_reparse_raw_data, enable_overwritting)
+    
+    
+    
+    user_input = input("Continue with OCR step? (y/n): ")
+    if user_input.lower() == "n":
+        print("Skipping OCR step")
+    else:
+        print("Generating Image OCR Data")
+        Perform_OCR()
+    
+    
+    
+    user_input = input("Continue with Similar_Images step? (y/n): ")
+    if user_input.lower() == "n":
+        print("Skipping Similar_Images step")
+    else:
+        print("Finding Similar Images")
+        Pre_Process()
+    
+    
+    
+    user_input = input("Continue with Labelbox_Tranform step? (y/n): ")
+    if user_input.lower() == "n":
+        print("Skipping Labelbox_Tranform step")
+    else:
+        print("Transforming Images for Labelbox")
+        Crop_and_save_images(input_csv, image_input, output_csv, image_output, images_per_row)
     
     # Move data
-    Store_Raw_Data()
+    #Store_Raw_Data()
     
     # Update val split amount
     PerformVal(val_split)

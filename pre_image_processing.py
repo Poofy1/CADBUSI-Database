@@ -873,24 +873,25 @@ def find_nearest_images(db, patient_id, image_folder_path):
     num_images = len(idx)
     result = {}
 
-    for j, c in enumerate(idx):
+    for j,c in enumerate(idx):
         x = int(db.loc[c]['crop_x'])
         y = int(db.loc[c]['crop_y'])
         w = int(db.loc[c]['crop_w'])
         h = int(db.loc[c]['crop_h'])
-        img_stack = np.zeros((num_images, w * h))
-        for i, image_id in enumerate(idx):
+        img_stack = np.zeros((num_images,w*h)).astype(np.uint8)
+        for i,image_id in enumerate(idx):
             file_name = db.loc[image_id]['image_filename']
             full_filename = os.path.join(image_folder_path, file_name)
             img = Image.open(full_filename)
-            img = np.array(img)
-            img, _ = make_grayscale(img)
-            img = img[y:y + h, x:x + w]
-            img_flattened = img.flatten()
-            if img_flattened.shape[0] != w * h:
-                print(f"Skipping image {file_name} due to unexpected dimensions after cropping")
-                continue
-            img_stack[i, :] = img_flattened
+            img = np.array(img).astype(np.uint8)
+            (rows, cols) = img.shape[0:2]
+            if rows >= y + h and cols >= x + w:
+                img,_ = make_grayscale(img)
+                img = img[y:y+h,x:x+w] # this can break if the root image is too big
+            else: # fill in all ones for an image that will be distant
+                img = np.full((h,w),255,dtype=np.uint8)
+            img = img.flatten()
+            img_stack[i,:] = img
         img_stack = np.abs(img_stack - img_stack[j, :])
         img_stack = np.mean(img_stack, axis=1)
         img_stack[j] = 1000
@@ -970,7 +971,7 @@ def add_labeling_categories(db):
 
 
 # Main method to prefrom operations
-def Pre_Process():
+def Perform_OCR():
     image_folder_path = f"{env}/database/images/"
     proc_images_folder = f"{env}/database/test/"
 
@@ -1051,10 +1052,20 @@ def Pre_Process():
                     img_orig = add_rect(img_orig, img_dict['rect_crop'])
                     img_orig = add_text(img_orig, display_str)
                     cv2.imwrite(image_out_path,img_orig)
-           
+
+
+
     db_out = extract_descript_features_df( db_out, description_labels_dict )
-    
     db_out.to_csv(input_file,index=False)
+
+
+
+
+def Pre_Process():
+    
+    input_file = f'{env}/database/unlabeled_data.csv'
+    image_folder_path = f"{env}/database/images/"
+    db_out = pd.read_csv(input_file)
     
     # Finding closest images
     patient_ids = db_out['anonymized_accession_num'].unique()

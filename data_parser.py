@@ -404,7 +404,7 @@ def PerformEntry(folder, data_labels, reparse_data, enable_overwritting):
         df = pd.merge(image_df, df, on='id', how='inner')
 
     
-        print("Compiling Database...")
+        print("Moving Images...")
         #Copy all images into database
         for filename in os.listdir(new_images):
             source_file = os.path.join(new_images, filename)
