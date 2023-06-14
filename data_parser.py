@@ -378,11 +378,31 @@ def PerformEntry(folder, data_labels, reparse_data, enable_overwritting):
     # if Stage 1
     new_images = f"{env}/{folder}/images/"
     if os.path.exists(new_images):
-        print("Performing OCR...")
-        image_df = ExtractText(new_images)
-        image_df['cleaned_text'] = CleanData(image_df['text'])
-        image_df = PopulateFromOCR(image_df)
-        df = pd.merge(image_df, df, on='id', how='inner') # Merge both df with ids and remove incomplete rows
+        #print("Performing OCR...")
+        #image_df = ExtractText(new_images)
+        #image_df['cleaned_text'] = CleanData(image_df['text'])
+        #image_df = PopulateFromOCR(image_df)
+        #df = pd.merge(image_df, df, on='id', how='inner') # Merge both df with ids and remove incomplete rows
+        
+        # Initialize an empty list to store the extracted text and filenames
+        text_list = []
+        files = os.listdir(new_images)
+        
+        # Loop through all the files in the folder
+        for file_name in files:
+            # Check if the file is an image
+            if file_name.endswith(('.png', '.jpg', '.jpeg', '.bmp')):
+                # Extract the ID from the filename
+                id = file_name.split("_")[0].lstrip('0')
+
+                # Append the extracted text and filename to the list
+                text_list.append((id, file_name))
+
+
+        # Create a pandas DataFrame from the text list
+        image_df = pd.DataFrame(text_list, columns=['id', 'image_filename'])
+        df = pd.merge(image_df, df, on='id', how='inner')
+
     
         print("Compiling Database...")
         #Copy all images into database

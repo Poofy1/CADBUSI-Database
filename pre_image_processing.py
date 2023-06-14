@@ -833,7 +833,7 @@ def extract_descript_features( input_str, labels_dict ):
     
     return output_dict
     
-def extract_descript_features_df(df, labels_dict, col = 'cleaned_text'):
+def extract_descript_features_df(df, labels_dict, col = 'description'):
 
     # first extract simple text features
     for feature in labels_dict.keys():
@@ -886,8 +886,11 @@ def find_nearest_images(db, patient_id, image_folder_path):
             img = np.array(img)
             img, _ = make_grayscale(img)
             img = img[y:y + h, x:x + w]
-            img = img.flatten()
-            img_stack[i, :] = img
+            img_flattened = img.flatten()
+            if img_flattened.shape[0] != w * h:
+                print(f"Skipping image {file_name} due to unexpected dimensions after cropping")
+                continue
+            img_stack[i, :] = img_flattened
         img_stack = np.abs(img_stack - img_stack[j, :])
         img_stack = np.mean(img_stack, axis=1)
         img_stack[j] = 1000
@@ -917,8 +920,6 @@ def find_mixed_lateralities( db ):
     db['latIsLeft']=(db['laterality']=='left')
     df = db.groupby(['anonymized_accession_num']).agg({'anonymized_accession_num':'count', 'latIsLeft':'sum'})
     df['notPure'] = ~( (df['latIsLeft']==0) |  (df['latIsLeft']==df['anonymized_accession_num']) )
-    
-    db = db.drop(columns=['latIsLeft'])
     
     mixedPatientIDs = df[df['notPure']].index.tolist()
     return mixedPatientIDs
@@ -976,24 +977,15 @@ def Pre_Process():
     input_file = f'{env}/database/unlabeled_data.csv'
 
     # processing configuration
-    debug = False
     write_images = False
-    display_images = False
+
 
     # open database and get filenames to be processed
-    db_in = pd.read_csv(input_file)
+    db_out = pd.read_csv(input_file)
 
-    #Get first part of data
-    db_in = extract_descript_features_df( db_in, description_labels_dict )
-
-    files = db_in['image_filename']
+    files = db_out['image_filename']
     image_numbers = np.arange(len(files))
 
-    # open or create output database
-
-    db_in = pd.read_csv(input_file)  # Read the input file
-    db_out = db_in.copy()
-    
     new_features = ['processed', 'crop_x', 'crop_y', 'crop_w', 'crop_h', 'description', 'size', 'sector_detected', 'darkness', 'area', 'laterality', 'orientation', 'clock_pos', 'nipple_dist']
     
     # Check if any new features are missing in db_out and add them
@@ -1007,19 +999,16 @@ def Pre_Process():
     for i in tqdm(image_numbers):
         #sleep(0.01)
         if not db_out['processed'][i]:
-            file_name = db_in['image_filename'][i]
-            us_x = min(db_in['RegionLocationMinX0'][i],0)
-            us_y = db_in['RegionLocationMinY0'][i]
-            us_w = db_in['RegionLocationMaxX1'][i]-us_x
-            us_h = db_in['RegionLocationMaxY1'][i]-us_y
+            file_name = db_out['image_filename'][i]
+            us_x = min(db_out['RegionLocationMinX0'][i],0)
+            us_y = db_out['RegionLocationMinY0'][i]
+            us_w = db_out['RegionLocationMaxX1'][i]-us_x
+            us_h = db_out['RegionLocationMaxY1'][i]-us_y
             rect_us = (us_x, us_y, us_w, us_h)
             #print('rect_us: ', rect_us)
-            # Check if the file is an image
+            # Check if the file is an 
             if file_name.endswith(('.png', '.jpg', '.jpeg', '.bmp')):
                 # Construct the full path to the image file
-
-                if debug:
-                    print('Processing: ', file_name )
 
                 
                 full_filename = os.path.join(image_folder_path, file_name)
@@ -1035,10 +1024,6 @@ def Pre_Process():
                 img_dict = img_processor(img, reader, 
                                             rect_US = rect_us,
                                             kw_list = description_kw)
-                
-                if debug: 
-                    print(img_dict)
-                    print('Processing Complete: ', file_name)
 
                 # insert into total database
                 new_features = ['crop_x', 'crop_y', 'crop_w', 'crop_h', 'description', 'size', 'is_sector', 'darkness']
@@ -1062,49 +1047,33 @@ def Pre_Process():
                 else:
                     display_str = ''
 
-                if write_images or display_images: # add description and crop region to image
+                if write_images: # add description and crop region to image
                     img_orig = add_rect(img_orig, img_dict['rect_crop'])
                     img_orig = add_text(img_orig, display_str)
-
-                if write_images:
                     cv2.imwrite(image_out_path,img_orig)
-                if display_images:
-                    img2 = img_orig.copy()
-                    img2 = add_rect(img2, img_dict['rect_machine'])
-                    img2 = add_rect(img2, img_dict['rect_description'])
-                    img2 = add_rect(img2, img_dict['rect_colorbar'])
-                    if len(img_dict['rect_sizebox'])>0:
-                        img2 = add_rect(img2, img_dict['rect_sizebox'])
-                        
-                    fig, (ax1,ax2) = plt.subplots(1,2,figsize=(20, 15)) 
-
-                    ax1.imshow(img_orig,cmap='gray')   
-                    ax2.imshow(img2,cmap='gray')
-                    fig.show()                
-                    
-    db_out.to_csv(output_file,index=False)
-
+           
+    db_out = extract_descript_features_df( db_out, description_labels_dict )
+    
+    db_out.to_csv(input_file,index=False)
     
     # Finding closest images
-
-    db_in = pd.read_csv(input_file)
-    patient_ids = db_in['anonymized_accession_num'].unique()
+    patient_ids = db_out['anonymized_accession_num'].unique()
             
-    db_in['closest_fn']=''
-    db_in['distance'] = -1
+    db_out['closest_fn']=''
+    db_out['distance'] = -1
 
     for pid in tqdm(patient_ids):
-        result = find_nearest_images(db_in, pid, image_folder_path)
+        result = find_nearest_images(db_out, pid, image_folder_path)
         idxs = result.keys()
         for i in idxs:
-            db_in.loc[i,'closest_fn'] = result[i]['sister_filename']
-            db_in.loc[i,'distance'] = result[i]['distance']
-            
-    db_in.to_csv(output_file,index=False)
-    
-    
-    db = pd.read_csv(input_file)
-    db = choose_images_to_label(db)
-    db = add_labeling_categories(db)
+            db_out.loc[i,'closest_fn'] = result[i]['sister_filename']
+            db_out.loc[i,'distance'] = result[i]['distance']
 
-    db.to_csv(output_file,index=False)
+    
+    db_out = choose_images_to_label(db_out)
+    db_out = add_labeling_categories(db_out)
+    
+    
+    db_out = db_out.drop(columns=['latIsLeft'])
+
+    db_out.to_csv(input_file,index=False)

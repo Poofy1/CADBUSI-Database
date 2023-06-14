@@ -15,10 +15,12 @@ def Crop_and_save_images(csv_file_path, image_input_folder, output_csv, output_f
     data = pd.read_csv(csv_file_path)
     
     # Filter rows where 'Area' column is 'breast'
-    data = data[data['area'].str.lower() == 'breast']
+    #data = data[data['area'].str.lower() == 'breast']
     
     # Exclude rows where 'size' column has any text
-    data = data[data['size'].isna()]
+    #data = data[data['size'].isna()]
+    
+    data = data[data['label'] == True]
 
     # If there are no matching data, return
     if data.empty:
@@ -26,10 +28,11 @@ def Crop_and_save_images(csv_file_path, image_input_folder, output_csv, output_f
         return
     
     # Transform the 'orientation' column
-    data['orientation'] = data['orientation'].apply(lambda x: x if x in ['long', 'trans'] else 'other')
+    #data['orientation'] = data['orientation'].apply(lambda x: x if x in ['long', 'trans'] else 'other')
     
     # Create a new column to group the data
-    data['group'] = data.apply(lambda row: 'doppler' if row['PhotometricInterpretation'] == 'RGB' else row['orientation'], axis=1)
+    #data['group'] = data.apply(lambda row: 'doppler' if row['PhotometricInterpretation'] == 'RGB' else row['orientation'], axis=1)
+    data['group'] = data['label_cat']
 
     # Group the data by 'patient_id'
     grouped_patient = data.groupby('anonymized_accession_num')
