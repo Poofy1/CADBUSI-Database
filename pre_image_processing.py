@@ -5,7 +5,6 @@ import numpy as np
 import largestinteriorrectangle as lir
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-from numba import jit
 import easyocr
 env = os.path.dirname(os.path.abspath(__file__))
 
