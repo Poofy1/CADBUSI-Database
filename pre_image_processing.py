@@ -5,6 +5,7 @@ import numpy as np
 import largestinteriorrectangle as lir
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+from numba import jit
 import easyocr
 env = os.path.dirname(os.path.abspath(__file__))
 
@@ -550,6 +551,8 @@ def size_box_extracter(img, reader):
     size_string = result[0][1]
     
     return rect_box, size_string
+
+
 
 def img_processor(img, reader, rect_US = (0,101,818,554) , debug = False, kw_list = None):
     """Process Ultrasound Image from LOGIQ E9
