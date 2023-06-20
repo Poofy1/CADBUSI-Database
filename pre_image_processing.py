@@ -4,6 +4,7 @@ import cv2, os, re
 import numpy as np
 import largestinteriorrectangle as lir
 from tqdm import tqdm
+import matplotlib.pyplot as plt
 import easyocr
 env = os.path.dirname(os.path.abspath(__file__))
 
@@ -247,7 +248,7 @@ def extract_largest_connected(img_bw):
 
     return img_dilated
     
-def find_colorbar(img, color_image = False):
+def find_colorbar(img, color_image = False, debug = False):
     """Compute rectangle containing "colorbar" on left side of Logiq E9 images
     
     Args:
@@ -264,12 +265,43 @@ def find_colorbar(img, color_image = False):
     
     # make this configurable so that we can setup templates depending on the machine
 
-    img_bw = make_mask(img, thresh = 140)
-    img_bw = blackout_rectangle_exterior(img_bw,(10,300,50,60))
+    config = {'thresh': 140, 
+              'rectangle': (10,300,50,60), 
+              'color_rect': (0, -20, 60, 220), 
+              'bw_rect': (0, 0, 0, 165)}
+    
+    img_bw = make_mask(img, thresh = config['thresh'])
+    img_bw = blackout_rectangle_exterior(img_bw, config['rectangle'])
+    
+    if debug:
+        plt.figure()
+        plt.imshow(img_bw, cmap='gray')
+        plt.title('Image after thresholding and blackout')
+        plt.show()
 
-    contours, _ = cv2.findContours(img_bw, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
-    c = max(contours,key=cv2.contourArea)
+    try:
+        contours, _ = cv2.findContours(img_bw, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
+        c = max(contours,key=cv2.contourArea)
+    except:
+        config = {'thresh': 140, 
+              'rectangle': (10,390,60,80), 
+              'color_rect': (0, -20, 60, 220), 
+              'bw_rect': (0, 0, 0, 165)}
+        
+        img_bw = make_mask(img, thresh = config['thresh'])
+        img_bw = blackout_rectangle_exterior(img_bw, config['rectangle'])
+        
+        contours, _ = cv2.findContours(img_bw, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
+        c = max(contours,key=cv2.contourArea)
+        
     x,y,w,h = cv2.boundingRect(c)
+    
+    if debug:
+        img_contours = cv2.drawContours(img.copy(), [c], -1, (0, 255, 0), 3)
+        plt.figure()
+        plt.imshow(img_contours)
+        plt.title('Image with max contour highlighted')
+        plt.show()
 
     # make adjustments to snip out entire colorbar
     if color_image:
@@ -426,7 +458,21 @@ def get_text_box(img, reader, rect = (22,500,811,220), kw_list = None):
     # FUTURE: add the ability to handle empty kw_list
     
     img_focused = blackout_rectangle_exterior( img, rect)
+    
+    # Apply blur to help OCR
+    img_focused = cv2.GaussianBlur(img_focused, (3, 3), 0)
+
+    
+    
     result = reader.readtext(img_focused,paragraph=True)
+    if False: #Debug
+        plt.figure()
+        plt.imshow(img_focused)
+        plt.title('Image')
+        plt.show()
+    
+    #Fix OCR miss read
+    result = [[r[0], 'logiq' if r[1].lower() == 'loc' or r[1].lower() == 'lo' else r[1].lower()] for r in result]
     
     result = [ [r[0], r[1].lower()] for r in result if contains_substring(r[1].lower(), kw_list) ]
     
