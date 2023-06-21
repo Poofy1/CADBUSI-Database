@@ -175,7 +175,8 @@ def TransformJSON(data_labels, folder):
 
 
 
-def PerformEntry(folder, data_labels, enable_overwritting, max_images=6308):
+def PerformEntry(folder, data_labels, enable_overwritting, data_range=None):
+    
     
     # Check Dirs
     if not os.path.exists(f"{env}/database/"):
@@ -205,7 +206,7 @@ def PerformEntry(folder, data_labels, enable_overwritting, max_images=6308):
         files = os.listdir(new_images)
         
         # Loop through all the files in the folder
-        for file_name in files[:max_images]:
+        for file_name in files[data_range[0]:data_range[1]]:
             # Check if the file is an image
             if file_name.endswith(('.png', '.jpg', '.jpeg', '.bmp')):
                 # Extract the ID from the filename
@@ -222,7 +223,7 @@ def PerformEntry(folder, data_labels, enable_overwritting, max_images=6308):
     
         print("Moving Images...")
         #Copy all images into database
-        for filename in os.listdir(new_images)[:max_images]:
+        for filename in os.listdir(new_images)[data_range[0]:data_range[1]]:
             source_file = os.path.join(new_images, filename)
             
                 

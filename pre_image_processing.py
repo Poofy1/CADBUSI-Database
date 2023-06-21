@@ -292,7 +292,7 @@ def find_colorbar(img, color_image = False, debug = False):
         img_bw = blackout_rectangle_exterior(img_bw, config['rectangle'])
         
         contours, _ = cv2.findContours(img_bw, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
-        c = max(contours,key=cv2.contourArea)
+        c = max(contours, key=cv2.contourArea)
         
     x,y,w,h = cv2.boundingRect(c)
     
@@ -430,12 +430,6 @@ def easyocr_coord_to_rect( coord ):
     w = coord[1][0]-x
     h = coord[2][1]-y
     return (x,y,w,h)
-
-def contains_substring(input_string, substring_list):
-    for substring in substring_list:
-        if substring in input_string:
-            return True
-    return False
 
 def get_text_box(img, reader, rect = (22,500,811,220), kw_list = None):
     """Extract text from rectangular region and ensure each detected string contains one keyword
@@ -610,16 +604,23 @@ def img_processor(img, reader, rect_US = (0,101,818,554) , debug = False, kw_lis
             img_bw = blackout_rectangle(img_bw, rect_sizebox)
 
     # delete color bar from left side of image
-    rect_colorbar = find_colorbar(img_gray, isColor )
-    img_gray = blackout_rectangle(img_gray, rect_colorbar )
-    img_bw = blackout_rectangle(img_bw, rect_colorbar )
+    rect_colorbar = None
+    #rect_colorbar = find_colorbar(img_gray, isColor )
+    #img_gray = blackout_rectangle(img_gray, rect_colorbar )
+    #img_bw = blackout_rectangle(img_bw, rect_colorbar )
     
     # detect machine label in upper left corner and get bounding box
-    rect_machine, machine = get_text_box(img, reader, rect = (0,100,400,400) ,kw_list = ['logiq','log','giq','e9'] )
-    (x,y,w,h) = rect_machine
-    rect_machine = (0,0,x+w,y+h)
-    y_txt_bottom = y + h
-    img_bw = blackout_rectangle(img_bw, rect_machine)
+    # if it fails then it the machine doesn state what model it is
+    try:
+        rect_machine, machine = get_text_box(img, reader, rect = (0,100,400,400) ,kw_list = ['logiq','log','giq','e9'] )
+        (x,y,w,h) = rect_machine
+        rect_machine = (0,0,x+w,y+h)
+        y_txt_bottom = y + h
+        img_bw = blackout_rectangle(img_bw, rect_machine)
+    except:
+        y_txt_bottom = 35 # guessing
+
+    
     
     # extract description
     w_guess = us_w-35
@@ -825,22 +826,33 @@ def label_parser(x, label_dict={}):
         labels = label_dict[k]
         if contains_substring(x,labels):
             return k
+
     return 'unknown'
 
 def find_time_substring(text):
+    text = str(text)
+    if text is None:  # If the input is None, return 'unknown'
+        return 'unknown'
+    
     # Regular expression to match time substrings of the form HH:MM or HH.MM
-    # does not need to be have blank spaces
+    # does not need to have blank spaces
     pattern = r'\d{1,2}[:.]\d{2}'
     
     # Find all matches in the input text
     matches = re.findall(pattern, str(text))
     
-    if len(matches)==0:
-        return 'unknown'
-    else:
-        # Return only the first match
-        time = matches[0].replace('.',':')
+    if len(matches) > 0:
+        # Return the first match
+        time = matches[0].replace('.', ':')
         return time
+    
+    # Check for alternative substrings
+    alternative_substrings = ["UOQ", "UIQ", "LIQ", "LOQ"]
+    for substring in alternative_substrings:
+        if substring in text:
+            return substring
+    
+    return 'unknown'
     
 def find_cm_substring(input_str):
     """Find first substring of the form #cm or # cm or #-#cm or #-# cm, not case sensitive
@@ -990,7 +1002,7 @@ def choose_images_to_label(db):
             db.loc[idx,'label'] = False
             
     # set label = False for all non-breast images
-    db.loc[db['area']!='breast','label'] = False
+    db.loc[(db['area'] != 'breast') & (db['area'] != 'unknown'), 'label'] = False
     
     mixedIDs = find_mixed_lateralities( db )
     db.loc[np.isin(db['anonymized_accession_num'],mixedIDs),'label']=False
@@ -1019,6 +1031,7 @@ def add_labeling_categories(db):
 
 # Main method to prefrom operations
 def Perform_OCR():
+        
     image_folder_path = f"{env}/database/images/"
     proc_images_folder = f"{env}/database/test/"
 
@@ -1081,8 +1094,8 @@ def Perform_OCR():
                 db_out.loc[i,'crop_y'] = crop_y
                 db_out.loc[i,'crop_w'] = crop_w
                 db_out.loc[i,'crop_h'] = crop_h
-                db_out.loc[i,'description'] = description
                 db_out.loc[i,'size'] = img_dict['text_size']
+                db_out.loc[i,'description'] = description
                 db_out.loc[i,'sector_detected'] = img_dict['sector_detected']
                 db_out.loc[i,'processed'] = True
                 db_out.loc[i,'darkness'] = img_dict['darkness']
@@ -1133,5 +1146,5 @@ def Pre_Process():
     
     
     db_out = db_out.drop(columns=['latIsLeft'])
-
+    db_out = db_out.drop('size', axis=1)
     db_out.to_csv(input_file,index=False)

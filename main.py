@@ -49,6 +49,9 @@ only_update_val = False
 
 only_retreive_labelbox_data = False
 
+# Misc Settings 
+data_range = [6305, 6350] # Set to None to use everything
+
 #############################
 
 
@@ -60,6 +63,9 @@ only_retreive_labelbox_data = False
 # Start Opterations
 # Static vars
 if __name__ == '__main__':
+    if data_range is None:
+        data_range = [0, 999999999999]
+        
         
     env = os.path.dirname(os.path.abspath(__file__))
     image_input = f"{env}/downloads/images/"
@@ -80,7 +86,7 @@ if __name__ == '__main__':
         
         user_input = input("Continue with Tranform_JSON step? (y/n): ")
         if user_input.lower() == "y":
-            PerformEntry('downloads', data_labels, enable_overwritting)
+            PerformEntry('downloads', data_labels, enable_overwritting, data_range)
         
         
         
