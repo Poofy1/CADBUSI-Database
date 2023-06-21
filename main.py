@@ -79,35 +79,27 @@ if __name__ == '__main__':
         
         
         user_input = input("Continue with Tranform_JSON step? (y/n): ")
-        if user_input.lower() == "n":
-            print("Skipping PerformEntry step")
-        else:
+        if user_input.lower() == "y":
             PerformEntry('downloads', data_labels, enable_overwritting)
         
         
         
         user_input = input("Continue with OCR step? (y/n): ")
-        if user_input.lower() == "n":
-            print("Skipping OCR step")
-        else:
+        if user_input.lower() == "y":
             print("Generating Image OCR Data")
             Perform_OCR()
         
         
         
         user_input = input("Continue with Similar_Images step? (y/n): ")
-        if user_input.lower() == "n":
-            print("Skipping Similar_Images step")
-        else:
+        if user_input.lower() == "y":
             print("Finding Similar Images")
             Pre_Process()
         
         
         
         user_input = input("Continue with Labelbox_Tranform step? (y/n): ")
-        if user_input.lower() == "n":
-            print("Skipping Labelbox_Tranform step")
-        else:
+        if user_input.lower() == "y":
             print("Transforming Images for Labelbox")
             Crop_and_save_images(input_csv, image_input, output_csv, image_output, images_per_row)
         
