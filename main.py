@@ -5,7 +5,7 @@ from images_to_selection import Crop_and_save_images
 from pre_image_processing import Pre_Process, Perform_OCR
 import shutil
 from selection_to_images import Read_Labelbox_Data
-from inpaint import Inpaint_Dataset
+from ML_processing.inpaint import Inpaint_Dataset
 
 ########### Config ###########
 
@@ -50,7 +50,7 @@ only_update_val = False
 only_retreive_labelbox_data = False
 
 # Misc Settings 
-data_range = [6305, 6350] # Set to None to use everything
+data_range = [0, 100] # Set to None to use everything
 
 #############################
 
@@ -110,7 +110,7 @@ if __name__ == '__main__':
             Crop_and_save_images(input_csv, image_input, output_csv, image_output, images_per_row)
         
         # Move data
-        Store_Raw_Data()
+        #Store_Raw_Data()
         
         # Update val split amount
         PerformVal(val_split)

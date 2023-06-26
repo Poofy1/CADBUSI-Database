@@ -6,8 +6,6 @@ import largestinteriorrectangle as lir
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import easyocr
-from ML_processing.caliper_model import *
-from ML_processing.mask_model import *
 env = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -499,9 +497,6 @@ def get_text_box(img, reader, rect = (22,500,811,220), kw_list = None):
     return rect_txt, text
 
 
-
-
-"""
 def caliper_box_finder(img):
 
     # Get height and width of the image
@@ -553,7 +548,8 @@ def caliper_box_finder(img):
                     return True, (x, y, w, h)
     
     return False, None
-"""
+
+
 
 def img_processor(img, reader, rect_US = (0,101,818,554) , debug = False, kw_list = None):
     """Process Ultrasound Image from LOGIQ E9
@@ -1042,47 +1038,28 @@ def add_labeling_categories(db):
 def Perform_OCR():
         
     image_folder_path = f"{env}/database/images/"
+    proc_images_folder = f"{env}/database/test/"
+
     input_file = f'{env}/database/unlabeled_data.csv'
+
+    # processing configuration
+    write_images = False
+
+
+    # open database and get filenames to be processed
     db_out = pd.read_csv(input_file)
 
     files = db_out['image_filename']
     image_numbers = np.arange(len(files))
 
-    # Check if any new features are missing in db_out and add them
     new_features = ['processed', 'crop_x', 'crop_y', 'crop_w', 'crop_h', 'description', 'has_calipers', 'sector_detected', 'darkness', 'area', 'laterality', 'orientation', 'clock_pos', 'nipple_dist']
+    
+    # Check if any new features are missing in db_out and add them
     missing_features = set(new_features) - set(db_out.columns)
     for nf in missing_features:
         db_out[nf] = None
     
     db_out['processed'] = False
-    
-    
-    print("Finding Calipers")
-    has_calipers = find_calipers(image_folder_path, 'caliper_model')
-    
-    
-    print("Finding Image Mask")
-    image_masks, description_masks = find_masks(image_folder_path, 'mask_model', 1292, 970)
-    
-    
-    print(has_calipers)
-    print(image_masks)
-    print(description_masks)
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
                     
 
     for i in tqdm(image_numbers):
@@ -1101,12 +1078,14 @@ def Perform_OCR():
 
                 
                 full_filename = os.path.join(image_folder_path, file_name)
+                image_out_path = os.path.join(proc_images_folder, file_name)
 
                 # Open the image file and store it in an image object
                 img = Image.open(full_filename)
 
                 # recast image as numpy array
                 img = np.array(img)
+                img_orig = img.copy()
 
                 img_dict = img_processor(img, reader, 
                                             rect_US = rect_us,
@@ -1133,6 +1112,12 @@ def Perform_OCR():
                         display_str = display_str + feature_dict[feature] + ' '
                 else:
                     display_str = ''
+
+                if write_images: # add description and crop region to image
+                    img_orig = add_rect(img_orig, img_dict['rect_crop'])
+                    img_orig = add_text(img_orig, display_str)
+                    cv2.imwrite(image_out_path,img_orig)
+
 
 
     db_out = extract_descript_features_df( db_out, description_labels_dict )

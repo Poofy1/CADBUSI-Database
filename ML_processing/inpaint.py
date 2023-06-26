@@ -1,5 +1,5 @@
-from SegmentationModel import predictAnnotation
-from UNetModel import genUNetMask
+from ML_processing.SegmentationModel import predictAnnotation
+from ML_processing.UNetModel import genUNetMask
 import cv2
 import os
 import pandas as pd
