@@ -1,40 +1,41 @@
 import os, torch
 from PIL import Image
-import matplotlib.pyplot as plt
 from torchvision import transforms
 from tqdm import tqdm
 import torchvision
 from torchvision.models.detection import FasterRCNN
 from torchvision.models.detection.rpn import AnchorGenerator
-
+from torch.utils.data import Dataset, DataLoader
 env = os.path.dirname(os.path.abspath(__file__))
 device = torch.device("cuda")
 
+class MyDataset(Dataset):
+    def __init__(self, root_dir, max_width, max_height, transform=None):
+        self.root_dir = root_dir
+        self.transform = transform
+        self.images = os.listdir(root_dir)
+        self.max_width = max_width
+        self.max_height = max_height
 
+    def __len__(self):
+        return len(self.images)
 
-
-
-def load_image(image_path, max_width, max_height):
-    image = Image.open(image_path)
-    preprocess = transforms.Compose([
-        transforms.Grayscale(num_output_channels=1), 
-        transforms.ToTensor(),
-        transforms.Normalize([0.5], [0.5]),
-    ])
+    def __getitem__(self, idx):
+        img_name = os.path.join(self.root_dir, self.images[idx])
+        image = Image.open(img_name)
+        preprocess = transforms.Compose([
+            transforms.Grayscale(num_output_channels=1),
+            transforms.ToTensor(),
+            transforms.Normalize([0.5], [0.5]),
+        ])
+        img_before_pad = preprocess(image)
+        padding = transforms.Pad((0, 0, self.max_width - img_before_pad.shape[-1], self.max_height - img_before_pad.shape[-2]))
+        img_after_pad = padding(img_before_pad)
+        return img_after_pad
     
     
     
-    img_before_pad = preprocess(image)
-
-    # Now let's do the padding
-    padding = transforms.Pad((0, 0, max_width - img_before_pad.shape[-1], max_height - img_before_pad.shape[-2]))
-    
-    img_after_pad = padding(img_before_pad)
-    return img_after_pad
-    
-    
-    
-def find_masks(images_dir, model_name, max_width, max_height):
+def find_masks(images_dir, model_name, max_width, max_height, batch_size=4):
     # Load a pre-trained model for classification
     backbone = torchvision.models.squeezenet1_1(pretrained=True).features
     backbone.out_channels = 512
@@ -46,41 +47,41 @@ def find_masks(images_dir, model_name, max_width, max_height):
     model = model.to(device)
     model.eval()
 
-    image_files = [f for f in os.listdir(images_dir) if os.path.isfile(os.path.join(images_dir, f))]
+    # Data loader
+    dataset = MyDataset(images_dir, max_width, max_height)
+    dataloader = DataLoader(dataset, batch_size=batch_size, num_workers=1)
 
     class1_results = []
     class2_results = []
 
     with torch.no_grad():
-        for image_file in tqdm(image_files):
-            image = load_image(os.path.join(images_dir, image_file), max_width, max_height)
+        for images in tqdm(dataloader):
+            images = images.to(device)
+            output = model(images)
 
-            image = image.to(device).unsqueeze(0)
-            output = model(image)
+            for i in range(len(output)):
+                pred_boxes = output[i]['boxes']
+                pred_scores = output[i]['scores']
+                pred_labels = output[i]['labels']
 
-            pred_boxes = output[0]['boxes']
-            pred_scores = output[0]['scores']
-            pred_labels = output[0]['labels']
+                threshold = 0.5
+                try:
+                    mask = pred_scores > threshold
+                    pred_boxes = pred_boxes[mask]
+                    pred_scores = pred_scores[mask]
+                    pred_labels = pred_labels[mask]
 
-            threshold = 0.5
-            try:
-                mask = pred_scores > threshold
-                pred_boxes = pred_boxes[mask]
-                pred_scores = pred_scores[mask]
-                pred_labels = pred_labels[mask]
+                    class1_boxes = pred_boxes[pred_labels == 1].cpu().numpy().astype(int)
+                    class2_boxes = pred_boxes[pred_labels == 2].cpu().numpy().astype(int)
+                except:
+                    print("image failed to find correct data")
+                    class1_boxes = None
+                    class2_boxes = None
 
-                class1_boxes = pred_boxes[pred_labels == 1].cpu().numpy().astype(int)
-                class2_boxes = pred_boxes[pred_labels == 2].cpu().numpy().astype(int)
-            except:
-                print("image failed to find correct data")
-                class1_boxes = None
-                class2_boxes = None
-
-            class1_results.append(class1_boxes)
-            class2_results.append(class2_boxes)
+                class1_results.append(class1_boxes)
+                class2_results.append(class2_boxes)
 
     class1_results = [arr.tolist() if arr is not None else [] for arr in class1_results]
     class2_results = [arr.tolist() if arr is not None else [] for arr in class2_results]
 
     return class1_results, class2_results
-

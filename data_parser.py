@@ -1,5 +1,6 @@
 import pandas as pd
 import json, shutil, os, io
+from tqdm import tqdm
 import warnings
 
 # Initialization
@@ -187,7 +188,7 @@ def PerformEntry(folder, data_labels, enable_overwritting, data_range=None):
         os.makedirs(f"{env}/raw_data/", exist_ok=True)
     
     
-    print("Transforming JSON/CSV...")
+    print("Transforming JSON/CSV")
     df = TransformJSON(data_labels, folder)
     
     # Read the existing data.csv file into a DataFrame, if it exists
@@ -221,9 +222,9 @@ def PerformEntry(folder, data_labels, enable_overwritting, data_range=None):
         df = pd.merge(image_df, df, on='id', how='inner')
 
     
-        print("Moving Images...")
+        print("Copying Images")
         #Copy all images into database
-        for filename in os.listdir(new_images)[data_range[0]:data_range[1]]:
+        for filename in tqdm(os.listdir(new_images)[data_range[0]:data_range[1]]):
             source_file = os.path.join(new_images, filename)
             
                 

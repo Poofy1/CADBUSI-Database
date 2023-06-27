@@ -50,7 +50,7 @@ only_update_val = False
 only_retreive_labelbox_data = False
 
 # Misc Settings 
-data_range = [0, 100] # Set to None to use everything
+data_range = None #[0, 100] # Set to None to use everything
 
 #############################
 
@@ -96,9 +96,8 @@ if __name__ == '__main__':
         
         
         
-        user_input = input("Continue with Similar_Images step? (y/n): ")
+        user_input = input("Continue with Data_Selection step? (y/n): ")
         if user_input.lower() == "y":
-            print("Finding Similar Images")
             Pre_Process()
         
         

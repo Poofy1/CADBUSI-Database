@@ -222,18 +222,42 @@ def find_nearest_images(db, patient_id, image_folder_path):
         }
     return result
 
+class DescriptionDataset(Dataset):
+    def __init__(self, root_dir, description_masks, transform=None):
+        self.root_dir = root_dir
+        self.description_masks = description_masks
+        self.transform = transform
+        self.images = os.listdir(root_dir)
 
+    def __len__(self):
+        return len(self.images)
+
+    def __getitem__(self, idx):
+        img_name = os.path.join(self.root_dir, self.images[idx])
+        image = Image.open(img_name).convert('L')
+        mask = self.description_masks[idx]
+        x0, y0, x1, y1 = mask
+        cropped_image = image.crop((x0, y0, x1, y1))
+        cropped_image_np = np.array(cropped_image)
+        img_focused = cv2.GaussianBlur(cropped_image_np, (3, 3), 0)
+        if self.transform:
+            img_focused = self.transform(img_focused)
+        return img_focused
 
 def get_description(image_folder_path, description_masks, reader, kw_list):
     
     image_files = [f for f in os.listdir(image_folder_path) if os.path.isfile(os.path.join(image_folder_path, f))]
 
     descriptions = []
-    
     for image_file, description_mask in tqdm(zip(image_files, description_masks), total=min(len(image_files), len(description_masks))):
 
         image = Image.open(os.path.join(image_folder_path, image_file)).convert('L')
 
+        
+        if not description_mask:
+            descriptions.append('')
+            continue
+        
         for mask in description_mask:
             x0, y0, x1, y1 = mask
             cropped_image = image.crop((x0, y0, x1, y1))
@@ -244,45 +268,35 @@ def get_description(image_folder_path, description_masks, reader, kw_list):
             # Apply blur to help OCR
             img_focused = cv2.GaussianBlur(cropped_image_np, (3, 3), 0)
 
-        
-        
-        result = reader.readtext(img_focused,paragraph=True)
-        if False: #Debug
-            plt.figure()
-            plt.imshow(img_focused)
-            plt.title(result)
-            plt.show()
-        
-        #Fix OCR miss read
-        result = [[r[0], 'logiq' if r[1].lower() == 'loc' or r[1].lower() == 'lo' else r[1].lower()] for r in result]
-        
-        result = [ [r[0], r[1].lower()] for r in result if contains_substring(r[1].lower(), kw_list) ]
-        
-        #print('Easyocr results v2: ',result)
-        lengths = [ len(r[1]) for r in result ]
-        
-        if len(lengths)==0: # no valid text detected in region
-            descriptions.append('') # return empty and try again
-        
-        # now loop over the remaining strings and get the total string and the bounding box
-        x0 = 10000
-        y0 = 10000
-        x1 = 0
-        y1 = 0
-        text = ''
-        for r in result:
-            for c in r[0]:
-                x0 = min(x0,c[0])
-                y0 = min(y0,c[1])
-                x1 = max(x1,c[0])
-                y1 = max(y1,c[1])
-            text = text + r[1] + ' '
-        
-        if len(text)==0:
+            
+            
+            result = reader.readtext(img_focused,paragraph=True)
+            if False: #Debug
+                plt.figure()
+                plt.imshow(img_focused)
+                plt.title(result)
+                plt.show()
+            
+            #Fix OCR miss read
+            result = [[r[0], 'logiq' if r[1].lower() == 'loc' or r[1].lower() == 'lo' else r[1].lower()] for r in result]
+            result = [ [r[0], r[1].lower()] for r in result if contains_substring(r[1].lower(), kw_list) ]
+            
+            
+            # now loop over the remaining strings and get the total string and the bounding box
+            x0 = 10000
+            y0 = 10000
+            x1 = 0
+            y1 = 0
             text = ''
-        
-        descriptions.append(text)
-        #print(text)
+            for r in result:
+                for c in r[0]:
+                    x0 = min(x0,c[0])
+                    y0 = min(y0,c[1])
+                    x1 = max(x1,c[0])
+                    y1 = max(y1,c[1])
+                text = text + r[1] + ' '
+            
+            descriptions.append(text)
 
     return descriptions
 
@@ -356,8 +370,12 @@ def get_darkness(image_folder_path, image_masks):
         
         image = Image.open(os.path.join(image_folder_path, image)).convert('L')
         image_np = np.array(image)  # Convert image to numpy array
-            
-        x, y, w, h = image_masks[i][0]
+        
+        try: 
+            x, y, w, h = image_masks[i][0]
+        except:
+            darknesses.append(None)
+            continue
         
         img_us = image_np[y:y+h, x:x+w]
         img_us_gray, isColor = make_grayscale(img_us)
@@ -447,6 +465,9 @@ def Pre_Process():
     image_folder_path = f"{env}/database/images/"
     db_out = pd.read_csv(input_file)
     
+    
+    
+    print("Finding Similar Images")
     # Finding closest images
     patient_ids = db_out['anonymized_accession_num'].unique()
             
