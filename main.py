@@ -92,7 +92,6 @@ if __name__ == '__main__':
         
         user_input = input("Continue with OCR step? (y/n): ")
         if user_input.lower() == "y":
-            print("Generating Image OCR Data")
             Perform_OCR()
         
         
