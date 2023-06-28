@@ -185,43 +185,6 @@ def fetch_index_for_patient_id( id, db, only_gray = False, only_calipers = False
     return indices
 
 
-
-def find_nearest_images(db, patient_id, image_folder_path):
-    idx = np.array(fetch_index_for_patient_id(patient_id, db))
-    num_images = len(idx)
-    result = {}
-
-    for j,c in enumerate(idx):
-        x = int(db.loc[c]['crop_x'])
-        y = int(db.loc[c]['crop_y'])
-        w = int(db.loc[c]['crop_w'])
-        h = int(db.loc[c]['crop_h'])
-        img_stack = np.zeros((num_images,w*h)).astype(np.uint8)
-        for i,image_id in enumerate(idx):
-            file_name = db.loc[image_id]['image_filename']
-            full_filename = os.path.join(image_folder_path, file_name)
-            img = Image.open(full_filename)
-            img = np.array(img).astype(np.uint8)
-            (rows, cols) = img.shape[0:2]
-            if rows >= y + h and cols >= x + w:
-                img,_ = make_grayscale(img)
-                img = img[y:y+h,x:x+w] # this can break if the root image is too big
-            else: # fill in all ones for an image that will be distant
-                img = np.full((h,w),255,dtype=np.uint8)
-            img = img.flatten()
-            img_stack[i,:] = img
-        img_stack = np.abs(img_stack - img_stack[j, :])
-        img_stack = np.mean(img_stack, axis=1)
-        img_stack[j] = 1000
-        sister_image = np.argmin(img_stack)
-        distance = img_stack[sister_image]
-        result[c] = {
-            'image_filename': db.loc[c]['image_filename'],
-            'sister_filename': db.loc[idx[sister_image]]['image_filename'],
-            'distance': distance
-        }
-    return result
-
 class DescriptionDataset(Dataset):
     def __init__(self, root_dir, description_masks, transform=None):
         self.root_dir = root_dir
@@ -329,13 +292,13 @@ def choose_images_to_label(db):
     for idx in caliper_indices:
         distance = db.loc[idx,'distance']
         if distance <= 5:
-            twin_filename = db.loc[idx,'closest_fn']
-            twin_idx = np.where( db['image_filename'] == twin_filename )[0][0]
-            db.loc[twin_idx,'label'] = True # redundant
+            #twin_filename = db.loc[idx,'closest_fn']
+            #twin_idx = np.where( db['image_filename'] == twin_filename )[0][0]
+            #db.loc[twin_idx,'label'] = True # redundant
             db.loc[idx,'label'] = False
             
     # set label = False for all non-breast images
-    db.loc[(db['area'] != 'breast') & (db['area'] != 'unknown'), 'label'] = False
+    db.loc[(db['area'] != 'breast') & (db['area'] != 'unknown') & (~db['area'].isna()), 'label'] = False
     
     mixedIDs = find_mixed_lateralities( db )
     db.loc[np.isin(db['anonymized_accession_num'],mixedIDs),'label']=False
@@ -459,12 +422,56 @@ def Perform_OCR():
 
 
 
+
+
+
+
+
+
+
+
+
+def find_nearest_images(db, patient_id, image_folder_path):
+    idx = np.array(fetch_index_for_patient_id(patient_id, db))
+    num_images = len(idx)
+    result = {}
+
+    for j,c in enumerate(idx):
+        x = int(db.loc[c]['crop_x'])
+        y = int(db.loc[c]['crop_y'])
+        w = int(db.loc[c]['crop_w'])
+        h = int(db.loc[c]['crop_h'])
+        img_stack = np.zeros((num_images,w*h)).astype(np.uint8)
+        for i,image_id in enumerate(idx):
+            file_name = db.loc[image_id]['image_filename']
+            full_filename = os.path.join(image_folder_path, file_name)
+            img = Image.open(full_filename)
+            img = np.array(img).astype(np.uint8)
+            (rows, cols) = img.shape[0:2]
+            if rows >= y + h and cols >= x + w:
+                img,_ = make_grayscale(img)
+                img = img[y:y+h,x:x+w] # this can break if the root image is too big
+            else: # fill in all ones for an image that will be distant
+                img = np.full((h,w),255,dtype=np.uint8)
+            img = img.flatten()
+            img_stack[i,:] = img
+        img_stack = np.abs(img_stack - img_stack[j, :])
+        img_stack = np.mean(img_stack, axis=1)
+        img_stack[j] = 1000
+        sister_image = np.argmin(img_stack)
+        distance = img_stack[sister_image]
+        result[c] = {
+            'image_filename': db.loc[c]['image_filename'],
+            'sister_filename': db.loc[idx[sister_image]]['image_filename'],
+            'distance': distance
+        }
+    return result
+
 def Pre_Process():
     
     input_file = f'{env}/database/unlabeled_data.csv'
     image_folder_path = f"{env}/database/images/"
     db_out = pd.read_csv(input_file)
-    
     
     
     print("Finding Similar Images")
