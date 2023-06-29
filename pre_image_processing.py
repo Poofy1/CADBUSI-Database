@@ -3,6 +3,7 @@ from PIL import Image
 import cv2, os, re
 import numpy as np
 from tqdm import tqdm
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import matplotlib.pyplot as plt
 import easyocr
 from ML_processing.caliper_model import *
@@ -207,63 +208,6 @@ class DescriptionDataset(Dataset):
             img_focused = self.transform(img_focused)
         return img_focused
 
-def get_description(image_folder_path, description_masks, reader, kw_list):
-    
-    image_files = [f for f in os.listdir(image_folder_path) if os.path.isfile(os.path.join(image_folder_path, f))]
-
-    descriptions = []
-    for image_file, description_mask in tqdm(zip(image_files, description_masks), total=min(len(image_files), len(description_masks))):
-
-        image = Image.open(os.path.join(image_folder_path, image_file)).convert('L')
-
-        
-        if not description_mask:
-            descriptions.append('')
-            continue
-        
-        for mask in description_mask:
-            x0, y0, x1, y1 = mask
-            cropped_image = image.crop((x0, y0, x1, y1))
-        
-            # Convert the PIL Image to a numpy array
-            cropped_image_np = np.array(cropped_image)
-        
-            # Apply blur to help OCR
-            img_focused = cv2.GaussianBlur(cropped_image_np, (3, 3), 0)
-
-            
-            
-            result = reader.readtext(img_focused,paragraph=True)
-            if False: #Debug
-                plt.figure()
-                plt.imshow(img_focused)
-                plt.title(result)
-                plt.show()
-            
-            #Fix OCR miss read
-            result = [[r[0], 'logiq' if r[1].lower() == 'loc' or r[1].lower() == 'lo' else r[1].lower()] for r in result]
-            result = [ [r[0], r[1].lower()] for r in result if contains_substring(r[1].lower(), kw_list) ]
-            
-            
-            # now loop over the remaining strings and get the total string and the bounding box
-            x0 = 10000
-            y0 = 10000
-            x1 = 0
-            y1 = 0
-            text = ''
-            for r in result:
-                for c in r[0]:
-                    x0 = min(x0,c[0])
-                    y0 = min(y0,c[1])
-                    x1 = max(x1,c[0])
-                    y1 = max(y1,c[1])
-                text = text + r[1] + ' '
-            
-            descriptions.append(text)
-
-    return descriptions
-
-
 
 def find_mixed_lateralities( db ):
     ''' returns a list of all patient ids for which the study contains both left and right lateralities (to be deleted for now)
@@ -282,14 +226,13 @@ def find_mixed_lateralities( db ):
     return mixedPatientIDs
 
 def choose_images_to_label(db):
-    
     db['label']=True
 
     # find all of the rows with calipers
     caliper_indices = np.where( db['has_calipers'])[0]
 
     # loop over caliper rows and tag twin images (not efficient)
-    for idx in caliper_indices:
+    for idx in tqdm(caliper_indices):
         distance = db.loc[idx,'distance']
         if distance <= 5:
             #twin_filename = db.loc[idx,'closest_fn']
@@ -298,7 +241,9 @@ def choose_images_to_label(db):
             db.loc[idx,'label'] = False
             
     # set label = False for all non-breast images
-    db.loc[(db['area'] != 'breast') & (db['area'] != 'unknown') & (~db['area'].isna()), 'label'] = False
+    db.loc[(db['area'] == 'unknown') | (db['area'].isna()), 'area'] = 'breast'
+    db.loc[(db['area'] != 'breast'), 'label'] = False
+    
     
     mixedIDs = find_mixed_lateralities( db )
     db.loc[np.isin(db['anonymized_accession_num'],mixedIDs),'label']=False
@@ -349,6 +294,58 @@ def get_darkness(image_folder_path, image_masks):
     return darknesses
 
 
+
+
+
+
+
+def process_image(image_file, description_mask, image_folder_path, reader, kw_list):
+    image = Image.open(os.path.join(image_folder_path, image_file)).convert('L')
+    description = ''
+
+    if description_mask:
+        for mask in description_mask:
+            x0, y0, x1, y1 = mask
+            cropped_image = image.crop((x0, y0, x1, y1))
+
+            # Convert the PIL Image to a numpy array
+            cropped_image_np = np.array(cropped_image)
+
+            # Apply blur to help OCR
+            img_focused = cv2.GaussianBlur(cropped_image_np, (3, 3), 0)
+
+            result = reader.readtext(img_focused,paragraph=True)
+
+            #Fix OCR miss read
+            result = [[r[0], 'logiq' if r[1].lower() == 'loc' or r[1].lower() == 'lo' else r[1].lower()] for r in result]
+            result = [ [r[0], r[1].lower()] for r in result if contains_substring(r[1].lower(), kw_list) ]
+
+            # now loop over the remaining strings and get the total string and the bounding box
+            x0 = 10000
+            y0 = 10000
+            x1 = 0
+            y1 = 0
+            text = ''
+            for r in result:
+                for c in r[0]:
+                    x0 = min(x0,c[0])
+                    y0 = min(y0,c[1])
+                    x1 = max(x1,c[0])
+                    y1 = max(y1,c[1])
+                text = text + r[1] + ' '
+
+            description += text
+
+    return description
+
+
+
+
+
+
+
+
+
 # Main method to prefrom operations
 def Perform_OCR():
         
@@ -374,7 +371,19 @@ def Perform_OCR():
     image_masks, description_masks = find_masks(image_folder_path, 'mask_model', 1292, 970)
     
     print("Performing OCR")
-    descriptions = get_description(image_folder_path, description_masks, reader, kw_list = description_kw)
+    image_files = [f for f in os.listdir(image_folder_path) if os.path.isfile(os.path.join(image_folder_path, f))]
+    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+        futures = {executor.submit(process_image, image_file, description_mask, image_folder_path, reader, description_kw): image_file for image_file, description_mask in zip(image_files, description_masks)}
+        progress = tqdm(total=len(futures), desc='')
+
+        descriptions = []
+        for future in as_completed(futures):
+            descriptions.append(future.result())
+            progress.update()
+
+        progress.close()
+        
+        
     
     
     # Convert mask data
@@ -435,8 +444,12 @@ def find_nearest_images(db, patient_id, image_folder_path):
     idx = np.array(fetch_index_for_patient_id(patient_id, db))
     num_images = len(idx)
     result = {}
+    image_pairs_checked = set()
 
     for j,c in enumerate(idx):
+        if c in image_pairs_checked:
+            continue
+
         x = int(db.loc[c]['crop_x'])
         y = int(db.loc[c]['crop_y'])
         w = int(db.loc[c]['crop_w'])
@@ -460,38 +473,61 @@ def find_nearest_images(db, patient_id, image_folder_path):
         img_stack[j] = 1000
         sister_image = np.argmin(img_stack)
         distance = img_stack[sister_image]
+
+        # Save result for the current image
         result[c] = {
             'image_filename': db.loc[c]['image_filename'],
             'sister_filename': db.loc[idx[sister_image]]['image_filename'],
             'distance': distance
         }
+
+        # Save result for the sister image, if not already done
+        if idx[sister_image] not in result:
+            result[idx[sister_image]] = {
+                'image_filename': db.loc[idx[sister_image]]['image_filename'],
+                'sister_filename': db.loc[c]['image_filename'],
+                'distance': distance
+            }
+
+        # Add the images to the set of checked pairs
+        image_pairs_checked.add(c)
+        image_pairs_checked.add(idx[sister_image])
+
     return result
 
+
+def process_patient_id(pid, db_out, image_folder_path):
+    subset = db_out[db_out['anonymized_accession_num'] == pid]
+    result = find_nearest_images(subset, pid, image_folder_path)
+    idxs = result.keys()
+    for i in idxs:
+        subset.loc[i,'closest_fn'] = result[i]['sister_filename']
+        subset.loc[i,'distance'] = result[i]['distance']
+    return subset
+
 def Pre_Process():
-    
     input_file = f'{env}/database/unlabeled_data.csv'
     image_folder_path = f"{env}/database/images/"
     db_out = pd.read_csv(input_file)
-    
-    
+
     print("Finding Similar Images")
-    # Finding closest images
     patient_ids = db_out['anonymized_accession_num'].unique()
-            
+
     db_out['closest_fn']=''
     db_out['distance'] = -1
 
-    for pid in tqdm(patient_ids):
-        result = find_nearest_images(db_out, pid, image_folder_path)
-        idxs = result.keys()
-        for i in idxs:
-            db_out.loc[i,'closest_fn'] = result[i]['sister_filename']
-            db_out.loc[i,'distance'] = result[i]['distance']
+    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+        futures = {executor.submit(process_patient_id, pid, db_out, image_folder_path): pid for pid in patient_ids}
+        progress = tqdm(total=len(futures), desc='')
 
-    
+        for future in as_completed(futures):
+            db_out.update(future.result())
+            progress.update()
+
+        progress.close()
+
     db_out = choose_images_to_label(db_out)
     db_out = add_labeling_categories(db_out)
-    
-    
+
     db_out = db_out.drop(columns=['latIsLeft'])
     db_out.to_csv(input_file,index=False)
