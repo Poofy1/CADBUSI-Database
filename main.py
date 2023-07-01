@@ -12,24 +12,24 @@ from ML_processing.inpaint import Inpaint_Dataset
 #List of all labels to use:
 data_labels = {
     "database.json": [
-                    "id",
-                    "filename", 
-                    "dicom_hash", 
-                    "image_hash", 
-                    "anonymized_accession_num", 
-                    "biopsy", 
-                    "birads",
+                    "id", ## NEED TO GENERATE THESE YET
+                    "filename", ##
+                    "dicom_hash", ##
+                    "image_hash", ##
+                    "anonymized_accession_num", ##
+                    "biopsy", ##
+                    "birads", ##
                     "RegionLocationMinX0", 
                     "RegionLocationMinY0", 
                     "RegionLocationMaxX1", 
                     "RegionLocationMaxY1", 
                     "StudyDate", 
-                    "StudyDescription",
+                    "StudyDescription", 
                     "PhysicalDeltaX", 
                     "PhysicalDeltaY", 
-                    "PatientAge", 
-                    "ImageType",
-                    "PhotometricInterpretation",
+                    "PatientAge", ##
+                    "ImageType", 
+                    "PhotometricInterpretation", 
                     ],
 }
 
