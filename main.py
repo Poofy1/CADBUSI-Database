@@ -13,10 +13,9 @@ from ML_processing.inpaint import Inpaint_Dataset
 data_labels = {
     "database.json": [
                     "id", ## NEED TO GENERATE THESE YET
-                    "filename", ##
-                    "dicom_hash", ##
-                    "image_hash", ##
-                    "anonymized_accession_num", ##
+                    "filename",
+                    "dicom_hash", 
+                    "anonymized_accession_num", 
                     "biopsy", ##
                     "birads", ##
                     "RegionLocationMinX0", 
