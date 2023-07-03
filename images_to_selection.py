@@ -3,27 +3,28 @@ from PIL import Image, ImageDraw, ImageFont
 import os
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
+env = os.path.dirname(os.path.abspath(__file__))
 
 
-
-def process_group(patient_id, patient_group, images_per_row, existing_data, output_folder, image_input_folder):
+def process_group(Patient_ID, patient_group, images_per_row, existing_data, output_folder, image_input_folder):
     images = []
     image_records = []
     total_height = 0
     total_width = 0
-
+    
     for group_val in ['long', 'trans', 'doppler', 'other']:
         group = patient_group[patient_group['group'] == group_val]
         group_images = []
 
         for index, row in group.iterrows():
-            image_path = os.path.join(image_input_folder, row['image_filename'])
+            image_path = os.path.join(image_input_folder, row['ImageName'])
             if os.path.isfile(image_path):
                 img = Image.open(image_path)
                 # Crop the image
                 cropped_img = img.crop((row['RegionLocationMinX0'], row['RegionLocationMinY0'], row['RegionLocationMaxX1'], row['RegionLocationMaxY1']))
                 group_images.append(cropped_img)
         
+
         if group_images:
             # Create a title bar
             if group_val == 'long':
@@ -46,7 +47,7 @@ def process_group(patient_id, patient_group, images_per_row, existing_data, outp
 
             for index, row in group.iterrows():
                 image_records.append({'group': group_val, 
-                                    'image_filename': row['image_filename'], 
+                                    'ImageName': row['ImageName'], 
                                     'us_x0': row['RegionLocationMinX0'], 
                                     'us_y0': row['RegionLocationMinY0'], 
                                     'us_x1': row['RegionLocationMaxX1'], 
@@ -61,12 +62,13 @@ def process_group(patient_id, patient_group, images_per_row, existing_data, outp
                         images.append(group_images[i+j])
                     except IndexError:  # If there is an odd number of images
                         img2 = Image.new('RGB', img1.size, (0, 0, 0))  # Create an empty image
-                        image_records.append({'group': "empty_space", 'image_filename': ''})
+                        image_records.append({'group': "empty_space", 'ImageName': ''})
                         images.append(img2)
                 
                 total_width = max(total_width, row_width)
                 row_width = 0
                 total_height += img1.height
+
 
     if images:
         # Join all images into one
@@ -84,16 +86,16 @@ def process_group(patient_id, patient_group, images_per_row, existing_data, outp
                 y_offset += img.height
             else:
                 if record['group'] != "empty_space": # Skip Empty Spaces
-                    if record['image_filename'] in existing_data['image_filename'].values: # If the image filename exists
-                        existing_data.loc[existing_data['image_filename'] == record['image_filename'], 
-                                        ['patient_id', 'group', 'x', 'y', 'width', 'height', 'us_x0', 'us_y0', 'us_x1', 'us_y1']] = [
-                                            patient_id, record['group'], x_offset, y_offset, img.width, img.height, record['us_x0'], 
+                    if record['ImageName'] in existing_data['ImageName'].values: # If the image filename exists
+                        existing_data.loc[existing_data['ImageName'] == record['ImageName'], 
+                                        ['Patient_ID', 'group', 'x', 'y', 'width', 'height', 'us_x0', 'us_y0', 'us_x1', 'us_y1']] = [
+                                            Patient_ID, record['group'], x_offset, y_offset, img.width, img.height, record['us_x0'], 
                                             record['us_y0'], record['us_x1'], record['us_y1']]
                     else: # If the image filename doesn't exist
                         new_row = pd.DataFrame([{
-                            'patient_id': patient_id,
+                            'Patient_ID': Patient_ID,
                             'group': record['group'],
-                            'image_filename': record['image_filename'],
+                            'ImageName': record['ImageName'],
                             'x': x_offset,
                             'y': y_offset,
                             'width': img.width,
@@ -115,7 +117,7 @@ def process_group(patient_id, patient_group, images_per_row, existing_data, outp
                     x_offset += img.width
                     
             # Save the new image
-            new_img.save(os.path.join(output_folder, f'{patient_id}.png'))
+            new_img.save(os.path.join(output_folder, f'{Patient_ID}.png'))
 
     df_records = pd.DataFrame([r for r in image_records if r is not None])  # remove None records and convert list to DataFrame
     return df_records
@@ -124,13 +126,17 @@ def process_group(patient_id, patient_group, images_per_row, existing_data, outp
 
 
 
-def Crop_and_save_images(csv_file_path, image_input_folder, output_csv, output_folder, images_per_row):
+def Crop_and_save_images(images_per_row):
 
+    image_input_folder = f"{env}/database/images/"
+    output_csv = f"{env}/database/CropData.csv"
+    output_folder = f"{env}/database/labelbox_images/"
+    
     # Create the output folder if it doesn't exist
     os.makedirs(output_folder, exist_ok=True)
     
     # Load the CSV file
-    data = pd.read_csv(csv_file_path)
+    data = pd.read_csv(f"{env}/database/ImageData.csv")
     
     data = data[data['label'] == True]
 
@@ -141,9 +147,8 @@ def Crop_and_save_images(csv_file_path, image_input_folder, output_csv, output_f
     
     data['group'] = data['label_cat']
 
-    # Group the data by 'patient_id'
-    grouped_patient = data.groupby('anonymized_accession_num')
-
+    # Group the data by 'Patient_ID'
+    grouped_patient = data.groupby('Accession_Number')
     # Check if the output CSV file exists
     csv_exists = os.path.isfile(output_csv)
 
@@ -151,14 +156,14 @@ def Crop_and_save_images(csv_file_path, image_input_folder, output_csv, output_f
     if csv_exists:
         existing_data = pd.read_csv(output_csv)
     else:
-        existing_data = pd.DataFrame(columns=['patient_id', 'group', 'image_filename', 'x', 'y', 'width', 'height', 'us_x0', 'us_y0', 'us_x1', 'us_y1'])
+        existing_data = pd.DataFrame(columns=['Patient_ID', 'group', 'ImageName', 'x', 'y', 'width', 'height', 'us_x0', 'us_y0', 'us_x1', 'us_y1'])
     
     
     # Create a ThreadPoolExecutor
     results = []
     with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-        futures = {executor.submit(process_group, patient_id, patient_group, images_per_row, existing_data, output_folder, image_input_folder) 
-                for patient_id, patient_group in grouped_patient}
+        futures = {executor.submit(process_group, Patient_ID, patient_group, images_per_row, existing_data, output_folder, image_input_folder) 
+                for Patient_ID, patient_group in grouped_patient}
         pbar = tqdm(total=len(futures), desc="Processing images", unit="patient")
         for future in as_completed(futures):
             df_records = future.result()
@@ -166,6 +171,8 @@ def Crop_and_save_images(csv_file_path, image_input_folder, output_csv, output_f
             pbar.update()
         pbar.close()
 
+    
+    
     # Concatenate all dataframes into one
     existing_data = pd.concat(results, ignore_index=True)
     existing_data = existing_data[existing_data['group'] != "empty_space"]

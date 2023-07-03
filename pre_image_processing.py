@@ -179,8 +179,8 @@ def fetch_index_for_patient_id( id, db, only_gray = False, only_calipers = False
     # only_calipers = True → return only files that include calipers
     # returns list of indices
     
-    if id in db['anonymized_accession_num'].tolist():
-         indices= db.index[db['anonymized_accession_num']==id].tolist()
+    if id in db['Accession_Number'].tolist():
+         indices= db.index[db['Accession_Number']==id].tolist()
     else:
         indices = []
     return indices
@@ -219,8 +219,8 @@ def find_mixed_lateralities( db ):
         list of patient ids from db for which the lateralities are mixed
     '''
     db['latIsLeft']=(db['laterality']=='left')
-    df = db.groupby(['anonymized_accession_num']).agg({'anonymized_accession_num':'count', 'latIsLeft':'sum'})
-    df['notPure'] = ~( (df['latIsLeft']==0) |  (df['latIsLeft']==df['anonymized_accession_num']) )
+    df = db.groupby(['Accession_Number']).agg({'Accession_Number':'count', 'latIsLeft':'sum'})
+    df['notPure'] = ~( (df['latIsLeft']==0) |  (df['latIsLeft']==df['Accession_Number']) )
     
     mixedPatientIDs = df[df['notPure']].index.tolist()
     return mixedPatientIDs
@@ -246,7 +246,7 @@ def choose_images_to_label(db):
     
     
     mixedIDs = find_mixed_lateralities( db )
-    db.loc[np.isin(db['anonymized_accession_num'],mixedIDs),'label']=False
+    db.loc[np.isin(db['Accession_Number'],mixedIDs),'label']=False
     
     return db
 
@@ -350,10 +350,10 @@ def process_image(image_file, description_mask, image_folder_path, reader, kw_li
 def Perform_OCR():
         
     image_folder_path = f"{env}/database/images/"
-    input_file = f'{env}/database/unlabeled_data.csv'
+    input_file = f'{env}/database/ImageData.csv'
     db_out = pd.read_csv(input_file)
 
-    files = db_out['image_filename']
+    files = db_out['ImageName']
     image_numbers = np.arange(len(files))
 
     # Check if any new features are missing in db_out and add them
@@ -382,8 +382,6 @@ def Perform_OCR():
             progress.update()
 
         progress.close()
-        
-        
     
     
     # Convert mask data
@@ -397,12 +395,10 @@ def Perform_OCR():
             h = y1 - y0
             converted_masks.append([x, y, w, h])
     
-    
-    
 
     print("Finding Darkness")
     darknesses = get_darkness(image_folder_path, image_masks)
-    
+
     
     for i in image_numbers:
         # insert into total database
@@ -456,7 +452,7 @@ def find_nearest_images(db, patient_id, image_folder_path):
         h = int(db.loc[c]['crop_h'])
         img_stack = np.zeros((num_images,w*h)).astype(np.uint8)
         for i,image_id in enumerate(idx):
-            file_name = db.loc[image_id]['image_filename']
+            file_name = db.loc[image_id]['ImageName']
             full_filename = os.path.join(image_folder_path, file_name)
             img = Image.open(full_filename)
             img = np.array(img).astype(np.uint8)
@@ -476,16 +472,16 @@ def find_nearest_images(db, patient_id, image_folder_path):
 
         # Save result for the current image
         result[c] = {
-            'image_filename': db.loc[c]['image_filename'],
-            'sister_filename': db.loc[idx[sister_image]]['image_filename'],
+            'image_filename': db.loc[c]['ImageName'],
+            'sister_filename': db.loc[idx[sister_image]]['ImageName'],
             'distance': distance
         }
 
         # Save result for the sister image, if not already done
         if idx[sister_image] not in result:
             result[idx[sister_image]] = {
-                'image_filename': db.loc[idx[sister_image]]['image_filename'],
-                'sister_filename': db.loc[c]['image_filename'],
+                'image_filename': db.loc[idx[sister_image]]['ImageName'],
+                'sister_filename': db.loc[c]['ImageName'],
                 'distance': distance
             }
 
@@ -497,7 +493,7 @@ def find_nearest_images(db, patient_id, image_folder_path):
 
 
 def process_patient_id(pid, db_out, image_folder_path):
-    subset = db_out[db_out['anonymized_accession_num'] == pid]
+    subset = db_out[db_out['Accession_Number'] == pid]
     result = find_nearest_images(subset, pid, image_folder_path)
     idxs = result.keys()
     for i in idxs:
@@ -506,12 +502,12 @@ def process_patient_id(pid, db_out, image_folder_path):
     return subset
 
 def Pre_Process():
-    input_file = f'{env}/database/unlabeled_data.csv'
+    input_file = f'{env}/database/ImageData.csv'
     image_folder_path = f"{env}/database/images/"
     db_out = pd.read_csv(input_file)
 
     print("Finding Similar Images")
-    patient_ids = db_out['anonymized_accession_num'].unique()
+    patient_ids = db_out['Accession_Number'].unique()
 
     db_out['closest_fn']=''
     db_out['distance'] = -1

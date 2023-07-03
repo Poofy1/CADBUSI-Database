@@ -1,37 +1,15 @@
 import os
-from data_parser import PerformEntry, Store_Raw_Data
 from val_split import PerformVal
 from images_to_selection import Crop_and_save_images
 from pre_image_processing import Pre_Process, Perform_OCR
 import shutil
 from selection_to_images import Read_Labelbox_Data
 from ML_processing.inpaint import Inpaint_Dataset
+from dcm_parser import Parse_Zip_Files, Transfer_Laterality
+env = os.path.dirname(os.path.abspath(__file__))
+
 
 ########### Config ###########
-
-#List of all labels to use:
-data_labels = {
-    "database.json": [
-                    "id", ## NEED TO GENERATE THESE YET
-                    "filename",
-                    "dicom_hash", 
-                    "anonymized_accession_num", 
-                    "biopsy", ##
-                    "birads", ##
-                    "RegionLocationMinX0", 
-                    "RegionLocationMinY0", 
-                    "RegionLocationMaxX1", 
-                    "RegionLocationMaxY1", 
-                    "StudyDate", 
-                    "StudyDescription", 
-                    "PhysicalDeltaX", 
-                    "PhysicalDeltaY", 
-                    "PatientAge", ##
-                    "ImageType", 
-                    "PhotometricInterpretation", 
-                    ],
-}
-
 
 # General Settings
 enable_overwritting = True 
@@ -45,15 +23,18 @@ PROJECT_ID = 'clgr3eeyn00tr071n6tjgatsu'
 only_append_to_database = True
 only_reparse_raw_data = False
 only_update_val = False
-
 only_retreive_labelbox_data = False
 
-# Misc Settings 
+
+# Paths
+zip_input = f'{env}/zip_files/'
+raw_storage_database = f'D:/DATA/CASBUSI/dicoms/'
+
+
+# Debug Settings 
 data_range = None #[0, 100] # Set to None to use everything
 
 #############################
-
-
 
 
 
@@ -64,16 +45,14 @@ data_range = None #[0, 100] # Set to None to use everything
 if __name__ == '__main__':
     if data_range is None:
         data_range = [0, 999999999999]
-        
-        
-    env = os.path.dirname(os.path.abspath(__file__))
-    image_input = f"{env}/downloads/images/"
-    image_output = f"{env}/database/labelbox_images/"
-    input_csv = f"{env}/database/unlabeled_data.csv"
-    output_csv = f"{env}/database/crop_data.csv"
 
+    
+    # WIP Inpaint feature
     #Inpaint_Dataset(f'{env}/database/unlabeled_data.csv', f'{env}/database/images/', f'{env}/database/inpainted/')
 
+
+
+    # Main Data Appender
     if only_append_to_database:
         #Finding index
         entry_index = 0
@@ -83,9 +62,11 @@ if __name__ == '__main__':
         
         
         
-        user_input = input("Continue with Tranform_JSON step? (y/n): ")
+        
+        user_input = input("Continue with DCM Parsing step? (y/n): ")
         if user_input.lower() == "y":
-            PerformEntry('downloads', data_labels, enable_overwritting, data_range)
+            Parse_Zip_Files(zip_input, raw_storage_database)
+            
         
         
         
@@ -104,15 +85,19 @@ if __name__ == '__main__':
         user_input = input("Continue with Labelbox_Tranform step? (y/n): ")
         if user_input.lower() == "y":
             print("Transforming Images for Labelbox")
-            Crop_and_save_images(input_csv, image_input, output_csv, image_output, images_per_row)
+            Crop_and_save_images(images_per_row)
         
-        # Move data
-        #Store_Raw_Data()
+        # Transfer Laterality to CaseStudyData
+        Transfer_Laterality()
         
         # Update val split amount
         PerformVal(val_split)
         
         
+        
+        
+        
+    # Reparse Data?    
     if only_reparse_raw_data:
         if os.path.exists(f"{env}/database/"):
             shutil.rmtree(f"{env}/database/")

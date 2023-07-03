@@ -1,15 +1,11 @@
 import pandas as pd
 import os
 import numpy as np
-
-# Initialization
 env = os.path.dirname(os.path.abspath(__file__))
 
-# Config
-database_CSV = f"{env}/database/unlabeled_data.csv"
-output_CSV = f"{env}/database/unlabeled_data.csv"
-
 def PerformVal(val_split):
+    database_CSV = f"{env}/database/CaseStudyData.csv"
+    
     # Read the CSV file into a DataFrame
     df = pd.read_csv(database_CSV)
 
@@ -18,7 +14,7 @@ def PerformVal(val_split):
         df['valid'] = None  # You can replace None with any default value
 
     # Get unique anonymized_accession_num values
-    unique_accession_nums = df['anonymized_accession_num'].unique()
+    unique_accession_nums = df['Accession_Number'].unique()
 
     # Shuffle the unique accession numbers
     np.random.shuffle(unique_accession_nums)
@@ -30,9 +26,9 @@ def PerformVal(val_split):
     valid_accession_nums = set(unique_accession_nums[:twenty_percent_index])
 
     # Assign the 'valid' column values based on the anonymized_accession_num
-    df['valid'] = df['anonymized_accession_num'].apply(lambda x: 1 if x in valid_accession_nums else 0)
+    df['valid'] = df['Accession_Number'].apply(lambda x: 1 if x in valid_accession_nums else 0)
 
     # Save the modified DataFrame to a new CSV file
-    df.to_csv(output_CSV, index=False)
+    df.to_csv(database_CSV, index=False)
     
     print("Updated val split")
