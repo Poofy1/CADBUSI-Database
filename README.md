@@ -4,10 +4,10 @@ This program is designed to process Breast Ultrasound data from multiple sources
 
 ## Features
 
-- Import breast ultrasound images with OCR capabilites
+- Import breast ultrasound images with OCR capabilities
 - Find images with similar features
-- Prepare iamges for labelbox labeling
-- Extract data from labelbox
+- Prepare images for Labelbox labeling
+- Extract data from Labelbox
 - Extract and store requested data labels from different sources
 - Perform validation splitting for machine learning training
 - Supports re-parsing of existing data
@@ -64,7 +64,7 @@ All input data will be controlled from the `main` script, you will need to confi
 ```
 python main.py
 ```
-2. If you are adding to the database, the program will ask you if you want to continue at each step of the process. This allows you to skip steps if the process was previously interupted. The data steps are as follows:
+2. If you are adding to the database, the program will ask you if you want to continue at each step of the process. This allows you to skip steps if the process was previously interrupted. The data steps are as follows:
 
     - `DCM Parsing`: Process the input data files, convert them to csv, and add them to the database accordingly.
     - `OCR`: Read image text with OCR and organize the data.
