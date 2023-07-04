@@ -357,11 +357,12 @@ def Perform_OCR():
     image_numbers = np.arange(len(files))
 
     # Check if any new features are missing in db_out and add them
-    new_features = ['processed', 'crop_x', 'crop_y', 'crop_w', 'crop_h', 'description', 'has_calipers', 'sector_detected', 'darkness', 'area', 'laterality', 'orientation', 'clock_pos', 'nipple_dist']
+    new_features = ['labeled', 'crop_x', 'crop_y', 'crop_w', 'crop_h', 'description', 'has_calipers', 'sector_detected', 'darkness', 'area', 'laterality', 'orientation', 'clock_pos', 'nipple_dist']
     missing_features = set(new_features) - set(db_out.columns)
     for nf in missing_features:
         db_out[nf] = None
     
+    db_out['labeled'] = False
     
     print("Finding Calipers")
     has_calipers = find_calipers(image_folder_path, 'caliper_model')

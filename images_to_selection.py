@@ -164,7 +164,7 @@ def Crop_and_save_images(images_per_row):
     with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
         futures = {executor.submit(process_group, Patient_ID, patient_group, images_per_row, existing_data, output_folder, image_input_folder) 
                 for Patient_ID, patient_group in grouped_patient}
-        pbar = tqdm(total=len(futures), desc="Processing images", unit="patient")
+        pbar = tqdm(total=len(futures), desc="", unit="patient")
         for future in as_completed(futures):
             df_records = future.result()
             results.append(df_records)

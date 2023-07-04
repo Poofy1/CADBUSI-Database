@@ -1,12 +1,9 @@
 import os, pydicom, zipfile, hashlib
-import numpy as np
 from PIL import Image
-import matplotlib.pyplot as plt
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import pandas as pd
 from tqdm import tqdm
-
 import warnings
-
 warnings.filterwarnings('ignore', category=UserWarning, message='.*Invalid value for VR UI.*')
 env = os.path.dirname(os.path.abspath(__file__))
 
@@ -46,57 +43,78 @@ def get_files_by_extension(directory, extension):
             if file.endswith(extension):
                 file_paths.append(os.path.join(root, file))
 
-    return file_paths 
+    return file_paths
 
+
+def parse_single_dcm(dcm, current_index, parsed_database):
+    # Skip any data that is not an image
+    media_type = os.path.basename(dcm)[:5]
+    if media_type != 'image':
+        return None
+            
+    data_dict = {}
+    dataset = pydicom.dcmread(dcm)
+
+    # Traverse the DICOM dataset
+    for elem in dataset:
+        if elem.VR == "SQ":  # if sequence
+            for sub_elem in elem.value[0]:  # only take the first item in the sequence
+                tag_name = pydicom.datadict.keyword_for_tag(sub_elem.tag)
+                if tag_name == "PixelData":
+                    continue
+                data_dict[tag_name] = str(sub_elem.value)
+        else:
+            tag_name = pydicom.datadict.keyword_for_tag(elem.tag)
+            if tag_name == "PixelData":
+                continue
+            data_dict[tag_name] = str(elem.value)
+
+    # Save image
+    im = Image.fromarray(dataset.pixel_array)
+    if data_dict.get('PhotometricInterpretation', '') == 'RGB':
+        im = im.convert("RGB")
+    else:
+        im = im.convert("L")  # Convert to grayscale
+    image_name = f"{data_dict.get('PatientID', '')}_{data_dict.get('AccessionNumber', '')}_{current_index}.png"
+    im.save(f"{parsed_database}/images/{image_name}")
+
+    # Add custom data
+    data_dict['FileName'] = os.path.basename(dcm)
+    data_dict['ImageName'] = image_name
+    data_dict['DicomHash'] = generate_hash(dcm)
+    
+    return data_dict
 
 def parse_dcm_files(dcm_files_list, parsed_database):
     print("Parsing DCM Data")
+    
+    # Load the current index from a file
+    index_file = os.path.join(parsed_database, "IndexCounter.txt")
+    if os.path.isfile(index_file):
+        with open(index_file, "r") as file:
+            current_index = int(file.read())
+    else:
+        current_index = 0
+    
     data_list = []
-    for i, dcm in tqdm(enumerate(dcm_files_list[:50]), total=len(dcm_files_list)):
-        
-        # Skip any data that is not an image
-        media_type = os.path.basename(dcm)[:5]
-        if media_type != 'image':
-            continue
-            
-        data_dict = {}
-        dataset = pydicom.dcmread(dcm)
 
-        # Traverse the DICOM dataset
-        for elem in dataset:
-            if elem.VR == "SQ":  # if sequence
-                for sub_elem in elem.value[0]:  # only take the first item in the sequence
-                    tag_name = pydicom.datadict.keyword_for_tag(sub_elem.tag)
-                    if tag_name == "PixelData":
-                        continue
-                    data_dict[tag_name] = str(sub_elem.value)
+    with ThreadPoolExecutor() as executor:
+        futures = {executor.submit(parse_single_dcm, dcm, i+current_index, parsed_database): dcm for i, dcm in enumerate(dcm_files_list)}
+        for future in tqdm(as_completed(futures), total=len(futures)):
+            try:
+                data = future.result()
+            except Exception as exc:
+                print(f'An exception occurred: {exc}')
             else:
-                tag_name = pydicom.datadict.keyword_for_tag(elem.tag)
-                if tag_name == "PixelData":
-                    continue
-                data_dict[tag_name] = str(elem.value)
+                if data is not None:
+                    data_list.append(data)
 
-        # Save image
-        im = Image.fromarray(dataset.pixel_array)
-        if data_dict.get('PhotometricInterpretation', '') == 'RGB':
-            im = im.convert("RGB")
-        else:
-            im = im.convert("L")  # Convert to grayscale
-        image_name = f"{data_dict.get('PatientID', '')}_{data_dict.get('AccessionNumber', '')}_{i}.png"
-        im.save(f"{parsed_database}images/{image_name}")
+    # Save index
+    with open(index_file, "w") as file:
+        file.write(str(current_index + len(data_list)))
 
-
-        # Add custom data
-        data_dict['FileName'] = os.path.basename(dcm)
-        data_dict['ImageName'] = image_name
-        data_dict['DicomHash'] = generate_hash(dcm)
-
-        # Append the dictionary to the list
-        data_list.append(data_dict)
-        
     # Create a DataFrame from the list of dictionaries
     return pd.DataFrame(data_list)
-
 
 
 
@@ -109,13 +127,26 @@ def Parse_Zip_Files(input, raw_storage_database):
     #Create database dir
     os.makedirs(parsed_database, exist_ok = True)
     os.makedirs(f'{parsed_database}/images/', exist_ok = True)
-        
-        
+    
+    # Load the list of already parsed files
+    parsed_files_list = []
+    parsed_files_list_file = f"{parsed_database}/ParsedFiles.txt"
+    if os.path.exists(parsed_files_list_file):
+        with open(parsed_files_list_file, 'r') as file:
+            parsed_files_list = file.read().splitlines()
+
     # Unzip input data and get every Dicom File
     extract_zip_files(input, raw_storage_database)
     dcm_files_list = get_files_by_extension(raw_storage_database, '.dcm')
-    print(f'Dicom Files: {len(dcm_files_list)}')
+    print(f'Total Dicom Archive: {len(dcm_files_list)}')
 
+    # Filter out the already parsed files
+    dcm_files_list = [file for file in dcm_files_list if file not in parsed_files_list]
+    print(f'New Dicom Files: {len(dcm_files_list)}')
+
+    if len(dcm_files_list) <= 0:
+        return
+    
     # Get DCM Data
     image_df = parse_dcm_files(dcm_files_list, parsed_database)
     image_df = image_df.rename(columns={'PatientID': 'Patient_ID'})
@@ -139,6 +170,12 @@ def Parse_Zip_Files(input, raw_storage_database):
              'FileName',
              'DicomHash']]
 
+    # Update the list of parsed files and save it
+    parsed_files_list.extend(dcm_files_list)
+    with open(parsed_files_list_file, 'w') as file:
+        for item in parsed_files_list:
+            file.write('%s\n' % item)
+
     # Find all csv files and combine into df
     csv_files_list = get_files_by_extension(raw_storage_database, '.csv')
     dataframes = [pd.read_csv(csv_file) for csv_file in csv_files_list]
@@ -157,7 +194,7 @@ def Parse_Zip_Files(input, raw_storage_database):
     # Convert 'Patient_ID' to str in both dataframes before merging
     temp_df['Patient_ID'] = temp_df['Patient_ID'].astype(str)
     csv_df['Patient_ID'] = csv_df['Patient_ID'].astype(str)
-    csv_df = pd.merge(csv_df, temp_df[['Patient_ID', 'StudyDate', 'PatientSex', 'PatientSize', 'PatientWeight']], on='Patient_ID', how='left')
+    csv_df = pd.merge(csv_df, temp_df[['Patient_ID', 'StudyDate', 'PatientSex', 'PatientSize', 'PatientWeight']], on='Patient_ID', how='inner')
 
     # Get count of duplicate rows for each Patient_ID in df
     duplicate_count = image_df.groupby('Patient_ID').size()
@@ -166,9 +203,20 @@ def Parse_Zip_Files(input, raw_storage_database):
     # Merge duplicate_count with csv_df
     csv_df = pd.merge(csv_df, duplicate_count, on='Patient_ID', how='left')
 
-    # Export the DataFrame to a CSV file
-    image_df.to_csv(f'{parsed_database}ImageData.csv', index=False)
-    csv_df.to_csv(f'{parsed_database}CaseStudyData.csv', index=False)
+    # Check if CSV files already exist
+    image_csv_file = f'{parsed_database}ImageData.csv'
+    case_study_csv_file = f'{parsed_database}CaseStudyData.csv'
+    if os.path.isfile(image_csv_file):
+        existing_image_df = pd.read_csv(image_csv_file)
+        image_df = pd.concat([existing_image_df, image_df], ignore_index=True)
+
+    if os.path.isfile(case_study_csv_file):
+        existing_case_study_df = pd.read_csv(case_study_csv_file)
+        csv_df = pd.concat([existing_case_study_df, csv_df], ignore_index=True)
+
+    # Export the DataFrames to CSV files
+    image_df.to_csv(image_csv_file, index=False)
+    csv_df.to_csv(case_study_csv_file, index=False)
     
     
 

@@ -14,22 +14,20 @@ env = os.path.dirname(os.path.abspath(__file__))
 # General Settings
 enable_overwritting = True 
 val_split = .2
-images_per_row = 4  # LabelBox images row width
+
+# Labelbox Settings
+images_per_row = 4
 LB_API_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJjbGc5emFjOTIyMDZzMDcyM2E2MW0xbnpuIiwib3JnYW5pemF0aW9uSWQiOiJja290NnVvMWgxcXR0MHlhczNuNmlmZnRjIiwiYXBpS2V5SWQiOiJjbGh1dm5rMTAwYnV2MDcybjlpZ3g4NGdzIiwic2VjcmV0IjoiZmRhZjcxYzBhNDM3MmNkYWNkNWIxODU5MzUyNjc1ODMiLCJpYXQiOjE2ODQ1MTk4OTgsImV4cCI6MjMxNTY3MTg5OH0.DMecSgJDDZrX1qw2T4HLs5Sv62lLLT-ePcMjyxpn0aE'
 PROJECT_ID = 'clgr3eeyn00tr071n6tjgatsu'
 
-
 # Select Mode (Only one true at a time!)
 only_append_to_database = True
-only_reparse_raw_data = False
 only_update_val = False
 only_retreive_labelbox_data = False
-
 
 # Paths
 zip_input = f'{env}/zip_files/'
 raw_storage_database = f'D:/DATA/CASBUSI/dicoms/'
-
 
 # Debug Settings 
 data_range = None #[0, 100] # Set to None to use everything
@@ -95,27 +93,6 @@ if __name__ == '__main__':
         
         
         
-        
-        
-    # Reparse Data?    
-    if only_reparse_raw_data:
-        if os.path.exists(f"{env}/database/"):
-            shutil.rmtree(f"{env}/database/")
-        for index, entry in enumerate(os.listdir(f"{env}/raw_data/"), start=0):
-            print(f"\nAdding Entry {index}")
-            entry_path = f'raw_data/{entry}'
-            PerformEntry(entry_path, data_labels, enable_overwritting)
-            
-            print("Transforming CSV for Image Processing")
-            Pre_Process()
-        
-            #Label box prep
-            print(f"Transforming Images For Labeling")
-            entry_path = f'{env}/{entry_path}/images/'
-            Crop_and_save_images(input_csv, entry_path, output_csv, image_output, images_per_row)
-        
-        # Update val split amount
-        PerformVal(val_split)
 
 
     # Update val split amount
