@@ -5,7 +5,6 @@ This program is designed to process Breast Ultrasound data from multiple sources
 ## Features
 
 - Import breast ultrasound images with OCR capabilites
-- Add or replace data based on the `id` or `anonymized_accession_num` fields
 - Find images with similar features
 - Prepare iamges for labelbox labeling
 - Extract data from labelbox
