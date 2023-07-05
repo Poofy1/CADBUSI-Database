@@ -1,10 +1,7 @@
-import labelbox, requests, os, re, shutil
+import labelbox, requests, os, re, shutil, time, PIL
 import pandas as pd
-import PIL
 from PIL import Image
 from io import BytesIO
-from PIL import ImageChops
-import time
 import numpy as np
 env = os.path.dirname(os.path.abspath(__file__))
 
@@ -18,7 +15,7 @@ def get_with_retry(url, max_retries=5):
             if response.status_code == 200:
                 return response
             else:
-                print(f"Failed to download mask image, status code: {response.status_code}")
+                print(f"Failed to download mask image, retrying")
         except requests.exceptions.RequestException as e:
             print(f"Request failed: {e}")
         
@@ -27,6 +24,7 @@ def get_with_retry(url, max_retries=5):
         retries += 1
     
     # If we've exhausted all retries, return None
+    print(f"Failed to download mask image, status code: {response.status_code}")
     return None
 
 
@@ -35,7 +33,7 @@ def get_with_retry(url, max_retries=5):
 def Get_Labels(response):
 
     # Create Mask Folder
-    os.makedirs(f"{env}/temp/", exist_ok=True)
+    os.makedirs(f"{env}/database/temp_labelbox_data/", exist_ok=True)
     
     # Ensure we received a valid response
     if response.status_code == 200:
@@ -82,7 +80,7 @@ def Get_Labels(response):
                                 
                         mask_img = Image.open(BytesIO(mask_response.content))
                         mask_path = f"{external_id_digits}_{data_type}.png"
-                        mask_img.save(f"{env}/temp/{mask_path}")
+                        mask_img.save(f"{env}/database/temp_labelbox_data/{mask_path}")
                         mask_paths.append(mask_path)
             
             # Get Label Data
@@ -114,13 +112,13 @@ def Get_Labels(response):
             data_dict['mask_names'] = str(', '.join(mask_paths))
             data_dict['bad_images'] = bad_images
             data_dict['doppler_image'] = doppler_image
-            data_dict['patient_id'] = external_id_digits
+            data_dict['Patient_ID'] = external_id_digits
 
             # Add data to dataframe
             joined_labels_df = pd.concat([joined_labels_df, pd.DataFrame([data_dict])], ignore_index=True)
 
-        # Move patient_id to the left
-        cols = ['patient_id', 'mask_names', 'bad_images', 'doppler_image'] + [col for col in joined_labels_df.columns if col not in ['patient_id', 'mask_names', 'bad_images', 'doppler_image']]
+        # Move Patient_ID to the left
+        cols = ['Patient_ID', 'mask_names', 'bad_images', 'doppler_image'] + [col for col in joined_labels_df.columns if col not in ['Patient_ID', 'mask_names', 'bad_images', 'doppler_image']]
         joined_labels_df = joined_labels_df.reindex(columns=cols)
         
         return joined_labels_df
@@ -129,8 +127,8 @@ def Get_Labels(response):
 
 
 def Find_Images(df, crop_data, df_cords_col, df_image_names_col):
-    df['patient_id'] = df['patient_id'].astype(int)
-    crop_data['patient_id'] = crop_data['patient_id'].astype(int)
+    df['Patient_ID'] = df['Patient_ID'].astype(int)
+    crop_data['Patient_ID'] = crop_data['Patient_ID'].astype(int)
             
     cords = df[df_cords_col].apply(lambda x: np.array(x) if isinstance(x, str) else x)
     
@@ -138,7 +136,7 @@ def Find_Images(df, crop_data, df_cords_col, df_image_names_col):
 
     # Iterate over each row in df
     for i, row in df.iterrows():
-        patient_id = row['patient_id']
+        Patient_ID = row['Patient_ID']
         images = []
         
         for sublist in cords[i]:
@@ -148,13 +146,13 @@ def Find_Images(df, crop_data, df_cords_col, df_image_names_col):
             x_point, y_point = sublist
 
             # Find the corresponding row in crop_data
-            for j, crop_row in crop_data[crop_data['patient_id'] == patient_id].iterrows():
+            for j, crop_row in crop_data[crop_data['Patient_ID'] == Patient_ID].iterrows():
                 
                 # Check if the coordinates fall within the bounds of the image
                 if (crop_row['x'] <= x_point < crop_row['x'] + crop_row['width']) and \
                     (crop_row['y'] <= y_point < crop_row['y'] + crop_row['height']):
                     # If so, add the image filename to the images list
-                    images.append(crop_row['image_filename'])
+                    images.append(crop_row['ImageName'])
                     
         # Convert the list of filenames to a comma-separated string
         df.at[i, df_image_names_col] = ', '.join(images)
@@ -166,78 +164,82 @@ def Find_Masks(df, crop_data, df_mask_names_col, df_image_names_col, original_im
     os.makedirs(f"{env}/database/masks/", exist_ok=True)
     
     
-    df['patient_id'] = df['patient_id'].astype(int)
-    crop_data['patient_id'] = crop_data['patient_id'].astype(int)
+    df['Patient_ID'] = df['Patient_ID'].astype(int)
+    crop_data['Patient_ID'] = crop_data['Patient_ID'].astype(int)
 
     df[df_image_names_col] = ''
 
     # Iterate over each row in df
     for i, row in df.iterrows():
-        patient_id = row['patient_id']
+        Patient_ID = row['Patient_ID']
         mask_names = row[df_mask_names_col].split(', ')
 
         # list to store all related image file names for each mask_name
         all_images_for_mask = []
         mask_paths = []
-
+        
         for mask_name in mask_names:
-            mask_img = Image.open(f"{env}/temp/{mask_name}")
-            mask_np = np.array(mask_img)
+            if mask_name:
+                mask_img = Image.open(f"{env}/database/temp_labelbox_data/{mask_name}")
+                mask_np = np.array(mask_img)
 
-            # Find all non-zero points in the mask
-            mask_point = np.transpose(np.nonzero(mask_np))[:, :2][0]
-            images = []
-            
+                # Find all non-zero points in the mask
+                mask_point = np.transpose(np.nonzero(mask_np))[:, :2][0]
+                images = []
+                
 
-            # Find the corresponding row in crop_data
-            for _, crop_row in crop_data[crop_data['patient_id'] == patient_id].iterrows():
+                # Find the corresponding row in crop_data
+                for _, crop_row in crop_data[crop_data['Patient_ID'] == Patient_ID].iterrows():
 
-                # Check if any of the mask points fall within the bounds of the image
-                y_point, x_point = mask_point
+                    # Check if any of the mask points fall within the bounds of the image
+                    y_point, x_point = mask_point
 
-                if (crop_row['x'] <= x_point < crop_row['x'] + crop_row['width']) and \
-                    (crop_row['y'] <= y_point < crop_row['y'] + crop_row['height']):
-                    # If so, add the image filename to the images list
-                    images.append(crop_row['image_filename'])
-                    
-                    # Create and save a cropped version of the mask
-                    left = crop_row['x']
-                    upper = crop_row['y']
-                    right = crop_row['x'] + crop_row['width']
-                    lower = crop_row['y'] + crop_row['height']
-                    cropped_mask = mask_img.crop((left, upper, right, lower))
-                    
-                    # Open original image to grab the size
-                    original_img = Image.open(f"{original_images}{crop_row['image_filename']}")
-                    original_img = Image.new(original_img.mode, original_img.size) # Make original image blank
-                    
-                    # Box dimensions need to match those of the cropped image
-                    box = (crop_row['us_x0'], crop_row['us_y0'], crop_row['us_x1'], crop_row['us_y1'])
-                    mask_path = f"mask_{crop_row['image_filename']}"
-                    mask_paths.append(mask_path)
-                    
-                    original_img.paste(cropped_mask, box)
-                    original_img.save(f"{env}/database/masks/{mask_path}")
-                    
-                    
-                    break  # We found an image that the mask belongs to, no need to check other points
-            
-            # Add list of image filenames to all_images_for_mask
-            all_images_for_mask.extend(images)
+                    if (crop_row['x'] <= x_point < crop_row['x'] + crop_row['width']) and \
+                        (crop_row['y'] <= y_point < crop_row['y'] + crop_row['height']):
+                        # If so, add the image filename to the images list
+                        images.append(crop_row['ImageName'])
+                        
+                        # Create and save a cropped version of the mask
+                        left = crop_row['x']
+                        upper = crop_row['y']
+                        right = crop_row['x'] + crop_row['width']
+                        lower = crop_row['y'] + crop_row['height']
+                        cropped_mask = mask_img.crop((left, upper, right, lower))
+                        
+                        # Open original image to grab the size
+                        original_img = Image.open(f"{original_images}{crop_row['ImageName']}")
+                        original_img = Image.new(original_img.mode, original_img.size) # Make original image blank
+                        
+                        # Box dimensions need to match those of the cropped image
+                        box = (crop_row['us_x0'], crop_row['us_y0'], crop_row['us_x1'], crop_row['us_y1'])
+                        mask_path = f"mask_{crop_row['ImageName']}"
+                        mask_paths.append(mask_path)
+                        
+                        original_img.paste(cropped_mask, box)
+                        original_img.save(f"{env}/database/masks/{mask_path}")
+                        
+                        
+                        break  # We found an image that the mask belongs to, no need to check other points
+                
+                # Add list of image filenames to all_images_for_mask
+                all_images_for_mask.extend(images)
 
         # Convert the list of filenames to a comma-separated string and store it in the df
         df.at[i, df_mask_names_col] = str(', '.join(mask_paths))
         df.at[i, df_image_names_col] = ', '.join(all_images_for_mask)
 
     #Delete old masks
-    shutil.rmtree(f"{env}/temp/")
+    shutil.rmtree(f"{env}/database/temp_labelbox_data/")
     
     return df 
 
 
+
 def Read_Labelbox_Data(LB_API_KEY, PROJECT_ID, original_images):
-    client = labelbox.Client(api_key = LB_API_KEY)
+    client = labelbox.Client(api_key=LB_API_KEY)
     project = client.get_project(PROJECT_ID)
+
+    print("Getting labelbox links (Possible timeout issues)")
     export_url = project.export_labels()
 
     # Download the export file from the provided URL
@@ -248,16 +250,17 @@ def Read_Labelbox_Data(LB_API_KEY, PROJECT_ID, original_images):
     df = Get_Labels(response)
 
     print("Locating Images")
-    crop_data = pd.read_csv(f'{env}/labelbox_data/crop_data.csv')
+    crop_data = pd.read_csv(f'{env}/database/CropData.csv')
     df = Find_Images(df, crop_data, 'doppler_image', 'doppler_image_names')
     df = Find_Images(df, crop_data, 'bad_images', 'bad_image_names')
     df = Find_Masks(df, crop_data, 'mask_names', 'masked_original_names', original_images)
 
     # Reorder Columns
-    ordering = ['patient_id', 'mask_names', 'masked_original_names', 'bad_images', 'bad_image_names', 'doppler_image', 'doppler_image_names']
+    ordering = ['Patient_ID', 'mask_names', 'masked_original_names', 'bad_images', 'bad_image_names', 'doppler_image', 'doppler_image_names']
     cols = ordering + [col for col in df.columns if col not in ordering]
     df = df.reindex(columns=cols)
 
+    df = df.drop(['bad_images', 'doppler_image', '==== SECTION 1 ====', '==== SECTION 2 ====', '==== SECTION 5 ====', ], axis = 1)
 
     # Write final csv to disk
-    df.to_csv(f'{env}/database/labeled_data.csv', index=False)
+    df.to_csv(f'{env}/database/LabeledData.csv', index=False)

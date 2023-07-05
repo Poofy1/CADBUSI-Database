@@ -89,21 +89,21 @@ def process_group(Patient_ID, patient_group, images_per_row, existing_data, outp
                     if record['ImageName'] in existing_data['ImageName'].values: # If the image filename exists
                         existing_data.loc[existing_data['ImageName'] == record['ImageName'], 
                                         ['Patient_ID', 'group', 'x', 'y', 'width', 'height', 'us_x0', 'us_y0', 'us_x1', 'us_y1']] = [
-                                            Patient_ID, record['group'], x_offset, y_offset, img.width, img.height, record['us_x0'], 
-                                            record['us_y0'], record['us_x1'], record['us_y1']]
+                                            int(Patient_ID), record['group'], x_offset, y_offset, img.width, img.height, int(record['us_x0']), 
+                                            int(record['us_y0']), int(record['us_x1']), int(record['us_y1'])]
                     else: # If the image filename doesn't exist
                         new_row = pd.DataFrame([{
-                            'Patient_ID': Patient_ID,
+                            'Patient_ID': int(Patient_ID),
                             'group': record['group'],
                             'ImageName': record['ImageName'],
                             'x': x_offset,
                             'y': y_offset,
                             'width': img.width,
                             'height': img.height,
-                            'us_x0': record['us_x0'],
-                            'us_y0': record['us_y0'],
-                            'us_x1': record['us_x1'],
-                            'us_y1': record['us_y1']}])
+                            'us_x0': int(record['us_x0']),
+                            'us_y0': int(record['us_y0']),
+                            'us_x1': int(record['us_x1']),
+                            'us_y1': int(record['us_y1'])}])
                         existing_data = existing_data.append(new_row, ignore_index=True)
                     
                 new_img.paste(img, (x_offset, y_offset))
@@ -117,10 +117,9 @@ def process_group(Patient_ID, patient_group, images_per_row, existing_data, outp
                     x_offset += img.width
                     
             # Save the new image
-            new_img.save(os.path.join(output_folder, f'{Patient_ID}.png'))
-
-    df_records = pd.DataFrame([r for r in image_records if r is not None])  # remove None records and convert list to DataFrame
-    return df_records
+            new_img.save(os.path.join(output_folder, f'{int(Patient_ID)}.png'))
+            
+    return existing_data
 
 
 
@@ -171,7 +170,6 @@ def Crop_and_save_images(images_per_row):
             pbar.update()
         pbar.close()
 
-    
     
     # Concatenate all dataframes into one
     existing_data = pd.concat(results, ignore_index=True)

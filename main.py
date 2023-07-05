@@ -2,7 +2,6 @@ import os
 from val_split import PerformVal
 from images_to_selection import Crop_and_save_images
 from pre_image_processing import Pre_Process, Perform_OCR
-import shutil
 from selection_to_images import Read_Labelbox_Data
 from ML_processing.inpaint import Inpaint_Dataset
 from dcm_parser import Parse_Zip_Files, Transfer_Laterality
@@ -22,15 +21,15 @@ PROJECT_ID = 'clgr3eeyn00tr071n6tjgatsu'
 
 # Select Mode (Only one true at a time!)
 only_append_to_database = True
-only_update_val = False
 only_retreive_labelbox_data = False
+only_update_val = False
 
 # Paths
 zip_input = f'{env}/zip_files/'
 raw_storage_database = f'D:/DATA/CASBUSI/dicoms/'
 
 # Debug Settings 
-data_range = None #[0, 100] # Set to None to use everything
+data_range = [0, 100] # Set to None to use everything
 
 #############################
 
@@ -52,18 +51,10 @@ if __name__ == '__main__':
 
     # Main Data Appender
     if only_append_to_database:
-        #Finding index
-        entry_index = 0
-        while os.path.exists(f"{env}/raw_data/entry_{entry_index}"):
-            entry_index += 1
-        print(f"Adding Entry {entry_index} to Database")
-        
-        
-        
         
         user_input = input("Continue with DCM Parsing step? (y/n): ")
         if user_input.lower() == "y":
-            Parse_Zip_Files(zip_input, raw_storage_database)
+            Parse_Zip_Files(zip_input, raw_storage_database, data_range)
             
         
         
@@ -71,6 +62,8 @@ if __name__ == '__main__':
         user_input = input("Continue with OCR step? (y/n): ")
         if user_input.lower() == "y":
             Perform_OCR()
+            # Transfer Laterality to CaseStudyData
+            #Transfer_Laterality()
         
         
         
@@ -85,8 +78,7 @@ if __name__ == '__main__':
             print("Transforming Images for Labelbox")
             Crop_and_save_images(images_per_row)
         
-        # Transfer Laterality to CaseStudyData
-        Transfer_Laterality()
+        
         
         # Update val split amount
         PerformVal(val_split)

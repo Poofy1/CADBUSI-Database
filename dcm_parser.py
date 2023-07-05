@@ -121,7 +121,7 @@ def parse_dcm_files(dcm_files_list, parsed_database):
 
 
 # Main Method
-def Parse_Zip_Files(input, raw_storage_database):
+def Parse_Zip_Files(input, raw_storage_database, data_range):
     parsed_database = f'{env}/database/'
 
     #Create database dir
@@ -142,6 +142,7 @@ def Parse_Zip_Files(input, raw_storage_database):
 
     # Filter out the already parsed files
     dcm_files_list = [file for file in dcm_files_list if file not in parsed_files_list]
+    dcm_files_list = dcm_files_list[data_range[0]:data_range[1]]
     print(f'New Dicom Files: {len(dcm_files_list)}')
 
     if len(dcm_files_list) <= 0:
