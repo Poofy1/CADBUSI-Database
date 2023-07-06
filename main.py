@@ -29,7 +29,7 @@ zip_input = f'{env}/zip_files/'
 raw_storage_database = f'D:/DATA/CASBUSI/dicoms/'
 
 # Debug Settings 
-data_range = [0, 100] # Set to None to use everything
+data_range = [0, 1000] # Set to None to use everything
 
 #############################
 

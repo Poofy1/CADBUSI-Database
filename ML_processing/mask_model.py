@@ -40,7 +40,7 @@ def find_masks(images_dir, model_name, max_width, max_height, batch_size=4):
     backbone = torchvision.models.squeezenet1_1(pretrained=True).features
     backbone.out_channels = 512
     anchor_generator = AnchorGenerator(sizes=((32, 64, 128, 256, 512),), aspect_ratios=((0.5, 1.0, 2.0),))
-    num_classes = 3
+    num_classes = 4
     model = FasterRCNN(backbone, num_classes=num_classes, rpn_anchor_generator=anchor_generator)
 
     model.load_state_dict(torch.load(f"{env}/models/{model_name}.pt"))
@@ -53,6 +53,7 @@ def find_masks(images_dir, model_name, max_width, max_height, batch_size=4):
 
     class1_results = []
     class2_results = []
+    class3_results = []
 
     with torch.no_grad():
         for images in tqdm(dataloader):
@@ -64,24 +65,24 @@ def find_masks(images_dir, model_name, max_width, max_height, batch_size=4):
                 pred_scores = output[i]['scores']
                 pred_labels = output[i]['labels']
 
-                threshold = 0.5
-                try:
-                    mask = pred_scores > threshold
-                    pred_boxes = pred_boxes[mask]
-                    pred_scores = pred_scores[mask]
-                    pred_labels = pred_labels[mask]
+                best_boxes = []
+                for class_id in range(1, 4):  # Assuming classes are 1, 2, and 3
+                    class_mask = pred_labels == class_id
+                    class_scores = pred_scores[class_mask]
 
-                    class1_boxes = pred_boxes[pred_labels == 1].cpu().numpy().astype(int)
-                    class2_boxes = pred_boxes[pred_labels == 2].cpu().numpy().astype(int)
-                except:
-                    print("image failed to find correct data")
-                    class1_boxes = None
-                    class2_boxes = None
+                    if len(class_scores) > 0:
+                        best_score_index = class_scores.argmax()
+                        best_box = pred_boxes[class_mask][best_score_index]
+                        best_boxes.append(best_box.cpu().numpy().astype(int))
+                    else:
+                        best_boxes.append(None)
 
-                class1_results.append(class1_boxes)
-                class2_results.append(class2_boxes)
+                class1_results.append(best_boxes[0])
+                class2_results.append(best_boxes[1])
+                class3_results.append(best_boxes[2])
 
     class1_results = [arr.tolist() if arr is not None else [] for arr in class1_results]
     class2_results = [arr.tolist() if arr is not None else [] for arr in class2_results]
+    class3_results = [arr.tolist() if arr is not None else [] for arr in class3_results]
 
-    return class1_results, class2_results
+    return class1_results, class2_results, class3_results

@@ -158,7 +158,6 @@ def Parse_Zip_Files(input, raw_storage_database, data_range):
     image_df = image_df[['Patient_ID', 
              'Accession_Number', 
              'ImageName',
-             'StudyDescription', 
              'RegionSpatialFormat', 
              'RegionDataType', 
              'RegionLocationMinX0', 
@@ -195,8 +194,8 @@ def Parse_Zip_Files(input, raw_storage_database, data_range):
     # Convert 'Patient_ID' to str in both dataframes before merging
     temp_df['Patient_ID'] = temp_df['Patient_ID'].astype(str)
     csv_df['Patient_ID'] = csv_df['Patient_ID'].astype(str)
-    csv_df = pd.merge(csv_df, temp_df[['Patient_ID', 'StudyDate', 'PatientSex', 'PatientSize', 'PatientWeight']], on='Patient_ID', how='inner')
-
+    csv_df = pd.merge(csv_df, temp_df[['Patient_ID', 'StudyDescription', 'StudyDate', 'PatientSex', 'PatientSize', 'PatientWeight']], on='Patient_ID', how='inner')
+    
     # Get count of duplicate rows for each Patient_ID in df
     duplicate_count = image_df.groupby('Patient_ID').size()
     duplicate_count = duplicate_count.reset_index(name='Image_Count')

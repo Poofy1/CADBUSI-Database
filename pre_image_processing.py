@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import easyocr
 from ML_processing.caliper_model import *
 from ML_processing.mask_model import *
+from collections.abc import Iterable
 env = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -244,6 +245,11 @@ def choose_images_to_label(db):
     db.loc[(db['area'] == 'unknown') | (db['area'].isna()), 'area'] = 'breast'
     db.loc[(db['area'] != 'breast'), 'label'] = False
     
+    # Remove Males from studies
+    case_study_data = pd.read_csv(f"{env}/database/CaseStudyData.csv")
+    male_patient_ids = case_study_data[case_study_data['PatientSex'] == 'M']['Patient_ID'].values
+    db.loc[db['Patient_ID'].isin(male_patient_ids),'label'] = False
+    
     
     mixedIDs = find_mixed_lateralities( db )
     db.loc[np.isin(db['Accession_Number'],mixedIDs),'label']=False
@@ -304,37 +310,41 @@ def process_image(image_file, description_mask, image_folder_path, reader, kw_li
     description = ''
 
     if description_mask:
-        for mask in description_mask:
-            x0, y0, x1, y1 = mask
-            cropped_image = image.crop((x0, y0, x1, y1))
+        x0, y0, x1, y1 = description_mask
+        cropped_image = image.crop((x0, y0, x1, y1))
 
-            # Convert the PIL Image to a numpy array
-            cropped_image_np = np.array(cropped_image)
+        # Convert the PIL Image to a numpy array
+        cropped_image_np = np.array(cropped_image)
 
-            # Apply blur to help OCR
-            img_focused = cv2.GaussianBlur(cropped_image_np, (3, 3), 0)
+        # Apply blur to help OCR
+        img_focused = cv2.GaussianBlur(cropped_image_np, (3, 3), 0)
 
-            result = reader.readtext(img_focused,paragraph=True)
+        result = reader.readtext(img_focused,paragraph=True)
 
-            #Fix OCR miss read
-            result = [[r[0], 'logiq' if r[1].lower() == 'loc' or r[1].lower() == 'lo' else r[1].lower()] for r in result]
-            result = [ [r[0], r[1].lower()] for r in result if contains_substring(r[1].lower(), kw_list) ]
+        #Fix OCR miss read
+        result = [[r[0], 'logiq' if r[1].lower() == 'loc' or r[1].lower() == 'lo' else r[1].lower()] for r in result]
+        result = [ [r[0], r[1].lower()] for r in result if contains_substring(r[1].lower(), kw_list) ]
 
-            # now loop over the remaining strings and get the total string and the bounding box
-            x0 = 10000
-            y0 = 10000
-            x1 = 0
-            y1 = 0
-            text = ''
-            for r in result:
-                for c in r[0]:
-                    x0 = min(x0,c[0])
-                    y0 = min(y0,c[1])
-                    x1 = max(x1,c[0])
-                    y1 = max(y1,c[1])
-                text = text + r[1] + ' '
+        # now loop over the remaining strings and get the total string and the bounding box
+        x0 = 10000
+        y0 = 10000
+        x1 = 0
+        y1 = 0
+        text = ''
+        for r in result:
+            for c in r[0]:
+                x0 = min(x0,c[0])
+                y0 = min(y0,c[1])
+                x1 = max(x1,c[0])
+                y1 = max(y1,c[1])
+            text = text + r[1] + ' '
 
-            description += text
+        description += text
+        
+        # use matplotlib to show image
+        #plt.imshow(cropped_image_np, cmap='gray')
+        #plt.title(description)
+        #plt.show()
 
     return description
 
@@ -369,7 +379,7 @@ def Perform_OCR():
     
     
     print("Finding Image Masks")
-    image_masks, description_masks = find_masks(image_folder_path, 'mask_model', 1292, 970)
+    image_masks, description_masks, inner_masks = find_masks(image_folder_path, 'mask_model', 1292, 970)
     
     print("Performing OCR")
     image_files = [f for f in os.listdir(image_folder_path) if os.path.isfile(os.path.join(image_folder_path, f))]
@@ -386,15 +396,29 @@ def Perform_OCR():
     
     
     # Convert mask data
-    converted_masks = []
-    for mask_list in image_masks:
-        for mask in mask_list:
-            x0, y0, x1, y1 = mask
+    outer_crop = []
+    for image_mask in image_masks:
+        if image_mask:
+            x0, y0, x1, y1 = image_mask
             x = x0
             y = y0
             w = x1 - x0
             h = y1 - y0
-            converted_masks.append([x, y, w, h])
+            outer_crop.append([x, y, w, h])
+        else:
+            outer_crop.append([])
+        
+    inner_crop = []
+    for inner_mask in inner_masks:
+        if inner_mask:
+            x0, y0, x1, y1 = inner_mask
+            x = x0
+            y = y0
+            w = x1 - x0
+            h = y1 - y0
+            inner_crop.append([x, y, w, h])
+        else:
+            inner_crop.append([])
     
 
     print("Finding Darkness")
@@ -403,12 +427,15 @@ def Perform_OCR():
     
     for i in image_numbers:
         # insert into total database
-        new_features = ['crop_x', 'crop_y', 'crop_w', 'crop_h', 'has_calipers', 'description', 'darkness']
-        crop_x, crop_y, crop_w, crop_h = converted_masks[i]
+        if outer_crop[i]:
+            crop_x, crop_y, crop_w, crop_h = outer_crop[i]
+        else:
+            crop_x, crop_y, crop_w, crop_h = 0, 0, 0, 0
         db_out.loc[i,'crop_x'] = crop_x
         db_out.loc[i,'crop_y'] = crop_y
         db_out.loc[i,'crop_w'] = crop_w
         db_out.loc[i,'crop_h'] = crop_h
+        db_out.loc[i,'inner_crop'] = str(inner_crop[i])
         db_out.loc[i,'description'] = descriptions[i]
         db_out.loc[i,'darkness'] = darknesses[i]
         db_out.loc[i,'has_calipers'] = has_calipers[i]
