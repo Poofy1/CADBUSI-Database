@@ -53,7 +53,8 @@ def get_files_by_extension(directory, extension):
 
 
 
-
+# this part sucks so bad because we are loading the entire dcm file and then passing it here. The dcm file holds ALL THE FRAMES. 
+# This plus we have it one each thread, very bad.
 def parse_video_data(dcm, data_dict, image, parsed_database, current_index):
 
     
@@ -62,7 +63,7 @@ def parse_video_data(dcm, data_dict, image, parsed_database, current_index):
     
     image_names = []
     i = 0
-    for frame_number in range(0, image.shape[0], 25):
+    for frame_number in range(0, image.shape[0], 30):
         # get the frame
         single_frame = image[frame_number]
 
@@ -74,6 +75,10 @@ def parse_video_data(dcm, data_dict, image, parsed_database, current_index):
         image_names.append(f'{video_path}/{image_name}')
         im.save(f"{parsed_database}/videos/{video_path}/{image_name}")
         i += 1
+        
+        # deallocating variables to free up memory
+        del single_frame, im, image_name
+        gc.collect()
         
         
     # Add custom data
@@ -91,7 +96,9 @@ def parse_single_dcm(dcm, current_index, parsed_database):
     data_dict = {}
     dataset = pydicom.dcmread(dcm)
 
-    
+    media_type = os.path.basename(dcm)[:5]
+    if media_type != 'image':
+        return None #parse_video_data(dcm, data_dict, dataset.pixel_array, parsed_database, current_index)
     
     # Traverse the DICOM dataset
     for elem in dataset:
@@ -108,10 +115,6 @@ def parse_single_dcm(dcm, current_index, parsed_database):
             data_dict[tag_name] = str(elem.value)
     
     
-    # If video type, save data differently
-    media_type = os.path.basename(dcm)[:5]
-    if media_type != 'image':
-        return parse_video_data(dcm, data_dict, dataset.pixel_array, parsed_database, current_index)
 
     # get image data
     im = Image.fromarray(dataset.pixel_array)
@@ -136,7 +139,7 @@ def parse_single_dcm(dcm, current_index, parsed_database):
 
 def parse_dcm_files(dcm_files_list, parsed_database):
     print("Parsing DCM Data")
-    
+
     # Load the current index from a file
     index_file = os.path.join(parsed_database, "IndexCounter.txt")
     if os.path.isfile(index_file):
@@ -144,43 +147,28 @@ def parse_dcm_files(dcm_files_list, parsed_database):
             current_index = int(file.read())
     else:
         current_index = 0
-    
-    BATCH_SIZE = 200
-    batch_count = len(dcm_files_list) // BATCH_SIZE
+
+    data_list = []
     lock = Lock()
 
     with ThreadPoolExecutor() as executor:
-        for batch_index in tqdm(range(batch_count+1)):
-            start_index = batch_index * BATCH_SIZE
-            end_index = start_index + BATCH_SIZE
-            batch_files = dcm_files_list[start_index:end_index]
-            data_list = []
-
-            futures = {executor.submit(parse_single_dcm, dcm, i+current_index, parsed_database): dcm for i, dcm in enumerate(batch_files)}
-            for future in as_completed(futures):
-                try:
-                    data = future.result()
-                except Exception as exc:
-                    print(f'An exception occurred: {exc}')
-                else:
-                    if data is not None:
+        futures = {executor.submit(parse_single_dcm, dcm, i+current_index, parsed_database): dcm for i, dcm in enumerate(dcm_files_list)}
+        for future in tqdm(as_completed(futures), total=len(futures), desc="Processing DCM files"):
+            try:
+                data = future.result()
+            except Exception as exc:
+                print(f'An exception occurred: {exc}')
+            else:
+                if data is not None:
+                    with lock:
                         data_list.append(data)
+                        # Save index
+                        with open(index_file, "w") as file:
+                            file.write(str(current_index + len(data_list)))
 
-            with lock:
-                # Save index
-                with open(index_file, "w") as file:
-                    file.write(str(current_index + len(data_list)))
-
-                # Create a DataFrame from the list of dictionaries
-                df = pd.DataFrame(data_list)
-                df.to_csv(f'{parsed_database}/temp.csv', mode='a', index=False, header=(not os.path.exists(f'{parsed_database}/temp.csv')))
-
-            # Clean up
-            del data_list
-            del df
-            gc.collect()
-
-    return pd.read_csv(f'{parsed_database}/temp.csv')
+    # Create a DataFrame from the list of dictionaries
+    df = pd.DataFrame(data_list)
+    return df
 
 
 
@@ -193,7 +181,7 @@ def Parse_Zip_Files(input, raw_storage_database, data_range):
     #Create database dir
     os.makedirs(parsed_database, exist_ok = True)
     os.makedirs(f'{parsed_database}/images/', exist_ok = True)
-    os.makedirs(f'{parsed_database}/videos/', exist_ok = True)
+    # os.makedirs(f'{parsed_database}/videos/', exist_ok = True)
     
     # Load the list of already parsed files
     parsed_files_list = []
@@ -220,10 +208,10 @@ def Parse_Zip_Files(input, raw_storage_database, data_range):
     image_df = image_df.rename(columns={'PatientID': 'Patient_ID'})
     image_df = image_df.rename(columns={'AccessionNumber': 'Accession_Number'})
     
-    video_df = image_df[image_df['DataType'] == 'video']
+    #video_df = image_df[image_df['DataType'] == 'video']
     image_df = image_df[image_df['DataType'] == 'image']
     
-    video_df = video_df[['Patient_ID', 
+    """video_df = video_df[['Patient_ID', 
              'Accession_Number', 
              'ImagesPath',
              'SavedFrames',
@@ -237,7 +225,7 @@ def Parse_Zip_Files(input, raw_storage_database, data_range):
              'Rows',
              'Columns',
              'FileName',
-             'DicomHash']]
+             'DicomHash']]"""
     
     #Prepare to move data to csv_df
     temp_df = image_df.drop_duplicates(subset='Patient_ID')
@@ -300,9 +288,9 @@ def Parse_Zip_Files(input, raw_storage_database, data_range):
         existing_image_df = pd.read_csv(image_csv_file)
         image_df = pd.concat([existing_image_df, image_df], ignore_index=True)
         
-    if os.path.isfile(video_csv_file):
+    """if os.path.isfile(video_csv_file):
         existing_video_df = pd.read_csv(video_csv_file)
-        video_df = pd.concat([existing_video_df, video_df], ignore_index=True)
+        video_df = pd.concat([existing_video_df, video_df], ignore_index=True)"""
 
     if os.path.isfile(case_study_csv_file):
         existing_case_study_df = pd.read_csv(case_study_csv_file)
@@ -310,7 +298,7 @@ def Parse_Zip_Files(input, raw_storage_database, data_range):
 
     # Export the DataFrames to CSV files
     image_df.to_csv(image_csv_file, index=False)
-    video_df.to_csv(video_csv_file, index=False)
+    #video_df.to_csv(video_csv_file, index=False)
     csv_df.to_csv(case_study_csv_file, index=False)
     
     

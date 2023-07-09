@@ -13,7 +13,7 @@ class MyDataset(Dataset):
     def __init__(self, root_dir, max_width, max_height, transform=None):
         self.root_dir = root_dir
         self.transform = transform
-        self.images = os.listdir(root_dir)
+        self.images = sorted(os.listdir(root_dir))
         self.max_width = max_width
         self.max_height = max_height
 
@@ -31,7 +31,7 @@ class MyDataset(Dataset):
         img_before_pad = preprocess(image)
         padding = transforms.Pad((0, 0, self.max_width - img_before_pad.shape[-1], self.max_height - img_before_pad.shape[-2]))
         img_after_pad = padding(img_before_pad)
-        return img_after_pad
+        return img_after_pad, self.images[idx] 
     
     
     
@@ -56,7 +56,7 @@ def find_masks(images_dir, model_name, max_width, max_height, batch_size=4):
     class3_results = []
 
     with torch.no_grad():
-        for images in tqdm(dataloader):
+        for images, filenames in tqdm(dataloader):  # Unpack filenames here
             images = images.to(device)
             output = model(images)
 
@@ -77,12 +77,10 @@ def find_masks(images_dir, model_name, max_width, max_height, batch_size=4):
                     else:
                         best_boxes.append(None)
 
-                class1_results.append(best_boxes[0])
-                class2_results.append(best_boxes[1])
-                class3_results.append(best_boxes[2])
-
-    class1_results = [arr.tolist() if arr is not None else [] for arr in class1_results]
-    class2_results = [arr.tolist() if arr is not None else [] for arr in class2_results]
-    class3_results = [arr.tolist() if arr is not None else [] for arr in class3_results]
+                # Pair each filename with its corresponding results
+                filename = filenames[i]
+                class1_results.append((filename, best_boxes[0].tolist() if best_boxes[0] is not None else []))
+                class2_results.append((filename, best_boxes[1].tolist() if best_boxes[1] is not None else []))
+                class3_results.append((filename, best_boxes[2].tolist() if best_boxes[2] is not None else []))
 
     return class1_results, class2_results, class3_results

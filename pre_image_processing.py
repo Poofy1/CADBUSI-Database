@@ -187,29 +187,6 @@ def fetch_index_for_patient_id( id, db, only_gray = False, only_calipers = False
     return indices
 
 
-class DescriptionDataset(Dataset):
-    def __init__(self, root_dir, description_masks, transform=None):
-        self.root_dir = root_dir
-        self.description_masks = description_masks
-        self.transform = transform
-        self.images = os.listdir(root_dir)
-
-    def __len__(self):
-        return len(self.images)
-
-    def __getitem__(self, idx):
-        img_name = os.path.join(self.root_dir, self.images[idx])
-        image = Image.open(img_name).convert('L')
-        mask = self.description_masks[idx]
-        x0, y0, x1, y1 = mask
-        cropped_image = image.crop((x0, y0, x1, y1))
-        cropped_image_np = np.array(cropped_image)
-        img_focused = cv2.GaussianBlur(cropped_image_np, (3, 3), 0)
-        if self.transform:
-            img_focused = self.transform(img_focused)
-        return img_focused
-
-
 def find_mixed_lateralities( db ):
     ''' returns a list of all patient ids for which the study contains both left and right lateralities (to be deleted for now)
     
@@ -276,29 +253,29 @@ def add_labeling_categories(db):
 
 def get_darkness(image_folder_path, image_masks):
     
-    image_files = [f for f in os.listdir(image_folder_path) if os.path.isfile(os.path.join(image_folder_path, f))]
-
     darknesses = []
     
-    for i, image in enumerate(tqdm(image_files)):
+    for mask in tqdm(image_masks):
         
-        image = Image.open(os.path.join(image_folder_path, image)).convert('L')
+        image_file, coordinates = mask
+        
+        image = Image.open(os.path.join(image_folder_path, image_file)).convert('L')
         image_np = np.array(image)  # Convert image to numpy array
-        
+
         try: 
-            x, y, w, h = image_masks[i][0]
+            x, y, w, h = coordinates
         except:
-            darknesses.append(None)
+            print('adding NONE!!')
+            darknesses.append((image_file, None))
             continue
         
         img_us = image_np[y:y+h, x:x+w]
         img_us_gray, isColor = make_grayscale(img_us)
         _,img_us_bw = cv2.threshold(img_us_gray, 20, 255, cv2.THRESH_BINARY)
         num_dark = np.sum( img_us_bw == 0)
-        darknesses.append(100*num_dark/(w*h))
+        darknesses.append((image_file, 100*num_dark/(w*h)))  # Append the filename along with its darkness
         
     return darknesses
-
 
 
 
@@ -340,14 +317,8 @@ def process_image(image_file, description_mask, image_folder_path, reader, kw_li
             text = text + r[1] + ' '
 
         description += text
-        
-        # use matplotlib to show image
-        #plt.imshow(cropped_image_np, cmap='gray')
-        #plt.title(description)
-        #plt.show()
 
-    return description
-
+    return [image_file, description]  # Return filename and description as a list
 
 
 
@@ -381,75 +352,85 @@ def Perform_OCR():
     print("Finding Image Masks")
     image_masks, description_masks, inner_masks = find_masks(image_folder_path, 'mask_model', 1292, 970)
     
-    print("Performing OCR")
-    image_files = [f for f in os.listdir(image_folder_path) if os.path.isfile(os.path.join(image_folder_path, f))]
-    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-        futures = {executor.submit(process_image, image_file, description_mask, image_folder_path, reader, description_kw): image_file for image_file, description_mask in zip(image_files, description_masks)}
-        progress = tqdm(total=len(futures), desc='')
-
-        descriptions = []
-        for future in as_completed(futures):
-            descriptions.append(future.result())
-            progress.update()
-
-        progress.close()
-    
     
     # Convert mask data
     outer_crop = []
-    for image_mask in image_masks:
+    for (filename, image_mask) in image_masks:  # Unpack filename and image_mask here
         if image_mask:
             x0, y0, x1, y1 = image_mask
             x = x0
             y = y0
             w = x1 - x0
             h = y1 - y0
-            outer_crop.append([x, y, w, h])
+            outer_crop.append([filename, x, y, w, h])  # Include filename in the result
         else:
-            outer_crop.append([])
-        
+            outer_crop.append([filename, []])  # Include filename even if no mask
+
     inner_crop = []
-    for inner_mask in inner_masks:
+    for (filename, inner_mask) in inner_masks:  # Unpack filename and inner_mask here
         if inner_mask:
             x0, y0, x1, y1 = inner_mask
             x = x0
             y = y0
             w = x1 - x0
             h = y1 - y0
-            inner_crop.append([x, y, w, h])
+            inner_crop.append([filename, x, y, w, h])  # Include filename in the result
         else:
-            inner_crop.append([])
+            inner_crop.append([filename, []])
     
+    print("Performing OCR")
+    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+        futures = {executor.submit(process_image, image_file, description_mask, image_folder_path, reader, description_kw): image_file for image_file, description_mask in description_masks}  # description_masks now include the filenames
+        progress = tqdm(total=len(futures), desc='')
+
+        # Initialize dictionary to store descriptions
+        descriptions = {}
+
+        for future in as_completed(futures):
+            result = future.result()  # result is now a list with the filename and the description
+            descriptions[result[0]] = result[1]  # Store description at corresponding image file
+            progress.update()
+
+        progress.close()
 
     print("Finding Darkness")
     darknesses = get_darkness(image_folder_path, image_masks)
-
     
-    for i in image_numbers:
-        # insert into total database
-        if outer_crop[i]:
-            crop_x, crop_y, crop_w, crop_h = outer_crop[i]
-        else:
-            crop_x, crop_y, crop_w, crop_h = 0, 0, 0, 0
-        db_out.loc[i,'crop_x'] = crop_x
-        db_out.loc[i,'crop_y'] = crop_y
-        db_out.loc[i,'crop_w'] = crop_w
-        db_out.loc[i,'crop_h'] = crop_h
-        db_out.loc[i,'inner_crop'] = str(inner_crop[i])
-        db_out.loc[i,'description'] = descriptions[i]
-        db_out.loc[i,'darkness'] = darknesses[i]
-        db_out.loc[i,'has_calipers'] = has_calipers[i]
-        if len(descriptions[i])>0:
-            feature_dict = extract_descript_features( descriptions[i], description_labels_dict )
-            display_str = ''
-            for feature in feature_dict.keys():
-                db_out.loc[i,feature] = feature_dict[feature]
-                display_str = display_str + feature_dict[feature] + ' '
-        else:
-            display_str = ''
+    # Convert lists of tuples to dictionaries
+    has_calipers_dict = {filename: value for filename, value in has_calipers}
+    darknesses_dict = {filename: value for filename, value in darknesses}
+    
+    # Convert dictionaries to Series for easy mapping
+    descriptions_series = pd.Series(descriptions)
+    darknesses_series = pd.Series(darknesses_dict)
+    has_calipers_series = pd.Series(has_calipers_dict)
+
+    # Update dataframe using map
+    db_out['description'] = db_out['ImageName'].map(descriptions_series)
+    db_out['darkness'] = db_out['ImageName'].map(darknesses_series)
+    db_out['has_calipers'] = db_out['ImageName'].map(has_calipers_series)
+
+    # Process the 'outer_crop' and 'inner_crop' lists
+    outer_crop_dict = {filename: values for filename, *values in outer_crop}
+    inner_crop_dict = {filename: values for filename, *values in inner_crop}
+
+    outer_crop_series = pd.Series(outer_crop_dict)
+    inner_crop_series = pd.Series(inner_crop_dict)
+
+    db_out[['crop_x', 'crop_y', 'crop_w', 'crop_h']] = db_out['ImageName'].map(outer_crop_series).apply(pd.Series)
+    db_out['inner_crop'] = db_out['ImageName'].map(inner_crop_series)
+
+    # Construct a temporary DataFrame with the feature extraction
+    temp_df = db_out.loc[db_out['description'].str.len() > 0, 'description'].apply(lambda x: extract_descript_features(x, labels_dict=description_labels_dict)).apply(pd.Series)
+
+    # Update the columns in db_out directly from temp_df
+    for column in temp_df.columns:
+        db_out[column] = temp_df[column]
+    
+    
+    db_out.drop('feature_dict', axis=1, inplace=True)
 
 
-    #db_out = extract_descript_features_df( db_out, description_labels_dict )
     db_out.to_csv(input_file,index=False)
 
 

@@ -15,7 +15,7 @@ class MyDataset(Dataset):
     def __init__(self, root_dir, transform=None):
         self.root_dir = root_dir
         self.transform = transform
-        self.images = os.listdir(root_dir)
+        self.images = sorted(os.listdir(root_dir))
 
     def __len__(self):
         return len(self.images)
@@ -25,7 +25,7 @@ class MyDataset(Dataset):
         image = Image.open(img_name)
         if self.transform:
             image = self.transform(image)
-        return image
+        return image, self.images[idx]  
     
 class Net(torch.nn.Module):
     def __init__(self, pretrained=True):
@@ -70,10 +70,12 @@ def find_calipers(images_dir, model_name, image_size=256, batch_size=4):
     results = []
     
     with torch.no_grad():
-        for images in tqdm(dataloader):
+        for images, filenames in tqdm(dataloader):  # Unpack filenames here
             images = images.to(device)
             has_calipers_pred = model(images)
             prediction = (has_calipers_pred > 0.5).cpu() 
-            results.extend(prediction.view(-1).tolist())     
+            # Pair each filename with its corresponding prediction
+            result_pairs = list(zip(filenames, prediction.view(-1).tolist()))
+            results.extend(result_pairs)  # Extend results with pairs
 
     return results
