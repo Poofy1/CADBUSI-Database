@@ -204,50 +204,50 @@ def find_mixed_lateralities( db ):
     return mixedPatientIDs
 
 def choose_images_to_label(db):
-    db['label']=True
+    db['label'] = True
 
     # find all of the rows with calipers
-    caliper_indices = np.where( db['has_calipers'])[0]
+    caliper_rows = db[db['has_calipers']]
 
     # loop over caliper rows and tag twin images (not efficient)
-    for idx in tqdm(caliper_indices):
-        distance = db.loc[idx,'distance']
+    for idx, row in tqdm(caliper_rows.iterrows(), total=len(caliper_rows)):
+        distance = row['distance']
         if distance <= 5:
-            #twin_filename = db.loc[idx,'closest_fn']
-            #twin_idx = np.where( db['image_filename'] == twin_filename )[0][0]
-            #db.loc[twin_idx,'label'] = True # redundant
-            db.loc[idx,'label'] = False
-            
+            db.at[idx,'label'] = False
+
     # set label = False for all non-breast images
     db.loc[(db['area'] == 'unknown') | (db['area'].isna()), 'area'] = 'breast'
     db.loc[(db['area'] != 'breast'), 'label'] = False
-    
+
     # Remove Males from studies
     case_study_data = pd.read_csv(f"{env}/database/CaseStudyData.csv")
     male_patient_ids = case_study_data[case_study_data['PatientSex'] == 'M']['Patient_ID'].values
     db.loc[db['Patient_ID'].isin(male_patient_ids),'label'] = False
-    
-    
+
     mixedIDs = find_mixed_lateralities( db )
-    db.loc[np.isin(db['Accession_Number'],mixedIDs),'label']=False
-    
+    db.loc[db['Accession_Number'].isin(mixedIDs),'label'] = False
+
     return db
+
 
 def add_labeling_categories(db):
     db['label_cat'] = ''
-    num_rows = db.shape[0]
-    for i in range(num_rows):
-        if db.loc[i,'label']:
-            orient = db.loc[i,'orientation']
-            image_type = db.loc[i,'PhotometricInterpretation']
-            if image_type=='RGB':
+
+    for idx, row in db.iterrows():
+        if row['label']:
+            orient = row['orientation']
+            image_type = row['PhotometricInterpretation']
+            if image_type == 'RGB':
                 label_cat = 'doppler'
-            elif orient in ['trans','long']:
+            elif orient in ['trans', 'long']:
                 label_cat = orient
             else:
                 label_cat = 'other'
-            db.loc[i,'label_cat'] = label_cat
+            
+            db.at[idx, 'label_cat'] = label_cat
+
     return db
+
 
 
 
@@ -265,7 +265,6 @@ def get_darkness(image_folder_path, image_masks):
         try: 
             x, y, w, h = coordinates
         except:
-            print('adding NONE!!')
             darknesses.append((image_file, None))
             continue
         
@@ -338,7 +337,7 @@ def Perform_OCR():
     image_numbers = np.arange(len(files))
 
     # Check if any new features are missing in db_out and add them
-    new_features = ['labeled', 'crop_x', 'crop_y', 'crop_w', 'crop_h', 'description', 'has_calipers', 'sector_detected', 'darkness', 'area', 'laterality', 'orientation', 'clock_pos', 'nipple_dist']
+    new_features = ['labeled', 'crop_x', 'crop_y', 'crop_w', 'crop_h', 'description', 'has_calipers', 'darkness', 'area', 'laterality', 'orientation', 'clock_pos', 'nipple_dist']
     missing_features = set(new_features) - set(db_out.columns)
     for nf in missing_features:
         db_out[nf] = None
@@ -428,7 +427,7 @@ def Perform_OCR():
         db_out[column] = temp_df[column]
     
     
-    db_out.drop('feature_dict', axis=1, inplace=True)
+    #db_out.drop('feature_dict', axis=1, inplace=True)
 
 
     db_out.to_csv(input_file,index=False)
@@ -447,7 +446,6 @@ def Perform_OCR():
 
 def find_nearest_images(db, patient_id, image_folder_path):
     idx = np.array(fetch_index_for_patient_id(patient_id, db))
-    num_images = len(idx)
     result = {}
     image_pairs_checked = set()
 
@@ -459,7 +457,8 @@ def find_nearest_images(db, patient_id, image_folder_path):
         y = int(db.loc[c]['crop_y'])
         w = int(db.loc[c]['crop_w'])
         h = int(db.loc[c]['crop_h'])
-        img_stack = np.zeros((num_images,w*h)).astype(np.uint8)
+        
+        img_list = []
         for i,image_id in enumerate(idx):
             file_name = db.loc[image_id]['ImageName']
             full_filename = os.path.join(image_folder_path, file_name)
@@ -472,7 +471,13 @@ def find_nearest_images(db, patient_id, image_folder_path):
             else: # fill in all ones for an image that will be distant
                 img = np.full((h,w),255,dtype=np.uint8)
             img = img.flatten()
-            img_stack[i,:] = img
+            img_list.append(img)
+        
+        num_images = len(img_list)
+        img_stack = np.array(img_list, dtype=np.uint8)
+        
+        
+        
         img_stack = np.abs(img_stack - img_stack[j, :])
         img_stack = np.mean(img_stack, axis=1)
         img_stack[j] = 1000
@@ -506,14 +511,21 @@ def process_patient_id(pid, db_out, image_folder_path):
     result = find_nearest_images(subset, pid, image_folder_path)
     idxs = result.keys()
     for i in idxs:
-        subset.loc[i,'closest_fn'] = result[i]['sister_filename']
-        subset.loc[i,'distance'] = result[i]['distance']
+        subset.loc[i, 'closest_fn'] = result[i]['sister_filename']
+        subset.loc[i, 'distance'] = result[i]['distance']
     return subset
+
 
 def Pre_Process():
     input_file = f'{env}/database/ImageData.csv'
     image_folder_path = f"{env}/database/images/"
     db_out = pd.read_csv(input_file)
+
+    # Copy the original DataFrame
+    original_db_out = db_out.copy()
+
+    # Remove rows with missing data in crop_x, crop_y, crop_w, crop_h
+    db_out = db_out.dropna(subset=['crop_x', 'crop_y', 'crop_w', 'crop_h'])
 
     print("Finding Similar Images")
     patient_ids = db_out['Accession_Number'].unique()
@@ -521,18 +533,21 @@ def Pre_Process():
     db_out['closest_fn']=''
     db_out['distance'] = -1
 
-    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor, tqdm(total=len(patient_ids), desc='') as progress:
         futures = {executor.submit(process_patient_id, pid, db_out, image_folder_path): pid for pid in patient_ids}
-        progress = tqdm(total=len(futures), desc='')
 
         for future in as_completed(futures):
-            db_out.update(future.result())
+            result = future.result()
+            if result is not None and not result.empty:
+                db_out.update(result)
             progress.update()
-
-        progress.close()
 
     db_out = choose_images_to_label(db_out)
     db_out = add_labeling_categories(db_out)
 
-    db_out = db_out.drop(columns=['latIsLeft'])
-    db_out.to_csv(input_file,index=False)
+    # Update the original DataFrame with the processed data
+    original_db_out.update(db_out)
+
+    if 'latIsLeft' in original_db_out.columns:
+        original_db_out = original_db_out.drop(columns=['latIsLeft'])
+    original_db_out.to_csv(f'{env}/database/ImageData2.csv',index=False)
