@@ -25,11 +25,11 @@ only_retreive_labelbox_data = False
 only_update_val = False
 
 # Paths
-zip_input = f'{env}/zip_files/'
+zip_input = f'D:/DATA/CASBUSI/zip_files/'
 raw_storage_database = f'D:/DATA/CASBUSI/dicoms/'
 
 # Debug Settings 
-data_range = None #[0, 2000] # Set to None to use everything
+data_range = None #[15000, 15500] # Set to None to use everything
 
 #############################
 

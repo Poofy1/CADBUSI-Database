@@ -68,10 +68,10 @@ description_labels_dict = {
             'axilla':['axilla'],
             'supraclavicular':['superclavicular','supraclavicular'],
             'subclavicular':['subclavicular','subclavcular']},
-    'laterality':{'left':['lt','left'],
-                  'right':['rt','right']},
-    'orientation':{'long':['long'],
-                    'trans':['trans'],
+    'laterality':{'left':['lt','left', 'eft', 'ft'],
+                  'right':['rt','right', 'ight', 'ght', 'ht']},
+    'orientation':{'long':['long', 'lon', 'ong'],
+                    'trans':['trans', 'tran', 'tra', 'ans'],
                     'anti-radial':['anti-rad','anti-radial'],
                     'radial':['radial'],
                     'oblique':['oblique']}
@@ -102,15 +102,15 @@ def find_time_substring(text):
         return 'unknown'
     
     # Regular expression to match time substrings of the form HH:MM or HH.MM
-    # does not need to have blank spaces
-    pattern = r'\d{1,2}[:.]\d{2}'
+    # with optional spaces
+    pattern = r'\d{1,2}\s*:\s*\d{2}'
     
     # Find all matches in the input text
-    matches = re.findall(pattern, str(text))
+    matches = re.findall(pattern, text)
     
     if len(matches) > 0:
-        # Return the first match
-        time = matches[0].replace('.', ':')
+        # Remove spaces from the first match, replace dot with colon
+        time = re.sub(r'\s', '', matches[0]).replace('.', ':')
         return time
     
     # Check for alternative substrings
@@ -210,7 +210,7 @@ def choose_images_to_label(db):
     caliper_rows = db[db['has_calipers']]
 
     # loop over caliper rows and tag twin images (not efficient)
-    for idx, row in tqdm(caliper_rows.iterrows(), total=len(caliper_rows)):
+    for idx, row in caliper_rows.iterrows():
         distance = row['distance']
         if distance <= 5:
             db.at[idx,'label'] = False
@@ -280,44 +280,48 @@ def get_darkness(image_folder_path, image_masks):
 
 
 
-
 def process_image(image_file, description_mask, image_folder_path, reader, kw_list):
     image = Image.open(os.path.join(image_folder_path, image_file)).convert('L')
-    description = ''
+
+    width, height = image.size
+    expand_ratio = 0.025  # Change this to control the crop expansion
 
     if description_mask:
         x0, y0, x1, y1 = description_mask
-        cropped_image = image.crop((x0, y0, x1, y1))
+    else:  # if description_mask is empty, crop upper 2/3 and 1/4 on both sides
+        x0 = width // 8
+        y0 = (2 * height) // 3
+        x1 = width - (width // 8)
+        y1 = height
 
-        # Convert the PIL Image to a numpy array
-        cropped_image_np = np.array(cropped_image)
+    # Calculate expanded coordinates, while ensuring they are within image bounds
+    x0_exp = max(0, x0 - int(width * expand_ratio))
+    y0_exp = max(0, y0 - int(height * expand_ratio))
+    x1_exp = min(width, x1 + int(width * expand_ratio))
+    y1_exp = min(height, y1 + int(height * expand_ratio))
 
-        # Apply blur to help OCR
-        img_focused = cv2.GaussianBlur(cropped_image_np, (3, 3), 0)
+    cropped_image = image.crop((x0_exp, y0_exp, x1_exp, y1_exp))
 
-        result = reader.readtext(img_focused,paragraph=True)
+    # Convert the PIL Image to a numpy array
+    cropped_image_np = np.array(cropped_image)
 
-        #Fix OCR miss read
-        result = [[r[0], 'logiq' if r[1].lower() == 'loc' or r[1].lower() == 'lo' else r[1].lower()] for r in result]
-        result = [ [r[0], r[1].lower()] for r in result if contains_substring(r[1].lower(), kw_list) ]
+    # Apply blur to help OCR
+    img_focused = cv2.GaussianBlur(cropped_image_np, (3, 3), 0)
+    
+    #cv2.imwrite(os.path.join(f'{env}/database/test/' + image_file), img_focused)
 
-        # now loop over the remaining strings and get the total string and the bounding box
-        x0 = 10000
-        y0 = 10000
-        x1 = 0
-        y1 = 0
-        text = ''
-        for r in result:
-            for c in r[0]:
-                x0 = min(x0,c[0])
-                y0 = min(y0,c[1])
-                x1 = max(x1,c[0])
-                y1 = max(y1,c[1])
-            text = text + r[1] + ' '
+    result = reader.readtext(img_focused,paragraph=True)
 
-        description += text
+    #Fix OCR miss read
+    result = [[r[0], 'logiq' if r[1].lower() == 'loc' or r[1].lower() == 'lo' else r[1].lower()] for r in result]
+    result = [ [r[0], r[1].lower()] for r in result]
+    
+    # now loop over the remaining strings and get the total string and the bounding box
+    text = ''
+    for r in result:
+        text = text + r[1] + ' '
 
-    return [image_file, description]  # Return filename and description as a list
+    return [image_file, text]
 
 
 
@@ -332,9 +336,6 @@ def Perform_OCR():
     image_folder_path = f"{env}/database/images/"
     input_file = f'{env}/database/ImageData.csv'
     db_out = pd.read_csv(input_file)
-
-    files = db_out['ImageName']
-    image_numbers = np.arange(len(files))
 
     # Check if any new features are missing in db_out and add them
     new_features = ['labeled', 'crop_x', 'crop_y', 'crop_w', 'crop_h', 'description', 'has_calipers', 'darkness', 'area', 'laterality', 'orientation', 'clock_pos', 'nipple_dist']
@@ -473,7 +474,6 @@ def find_nearest_images(db, patient_id, image_folder_path):
             img = img.flatten()
             img_list.append(img)
         
-        num_images = len(img_list)
         img_stack = np.array(img_list, dtype=np.uint8)
         
         
@@ -483,6 +483,8 @@ def find_nearest_images(db, patient_id, image_folder_path):
         img_stack[j] = 1000
         sister_image = np.argmin(img_stack)
         distance = img_stack[sister_image]
+        
+        
 
         # Save result for the current image
         result[c] = {
@@ -521,9 +523,6 @@ def Pre_Process():
     image_folder_path = f"{env}/database/images/"
     db_out = pd.read_csv(input_file)
 
-    # Copy the original DataFrame
-    original_db_out = db_out.copy()
-
     # Remove rows with missing data in crop_x, crop_y, crop_w, crop_h
     db_out = db_out.dropna(subset=['crop_x', 'crop_y', 'crop_w', 'crop_h'])
 
@@ -544,10 +543,9 @@ def Pre_Process():
 
     db_out = choose_images_to_label(db_out)
     db_out = add_labeling_categories(db_out)
+    
 
-    # Update the original DataFrame with the processed data
-    original_db_out.update(db_out)
 
-    if 'latIsLeft' in original_db_out.columns:
-        original_db_out = original_db_out.drop(columns=['latIsLeft'])
-    original_db_out.to_csv(f'{env}/database/ImageData2.csv',index=False)
+    if 'latIsLeft' in db_out.columns:
+        db_out = db_out.drop(columns=['latIsLeft'])
+    db_out.to_csv(f'{env}/database/ImageData2.csv',index=False)
