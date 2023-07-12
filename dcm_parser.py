@@ -172,8 +172,6 @@ def parse_dcm_files(dcm_files_list, parsed_database):
 
 
 
-
-
 # Main Method
 def Parse_Zip_Files(input, raw_storage_database, data_range):
     parsed_database = f'{env}/database/'
@@ -284,9 +282,19 @@ def Parse_Zip_Files(input, raw_storage_database, data_range):
     video_csv_file = f'{parsed_database}VideoData.csv'
     case_study_csv_file = f'{parsed_database}CaseStudyData.csv' 
     
+    image_combined_df = image_df
     if os.path.isfile(image_csv_file):
         existing_image_df = pd.read_csv(image_csv_file)
-        image_df = pd.concat([existing_image_df, image_df], ignore_index=True)
+        existing_image_df['Patient_ID'] = existing_image_df['Patient_ID'].astype(str)
+        
+        new_ids = image_df['Patient_ID'].unique()
+        
+        # keep only old IDs that don't exist in new data
+        existing_image_df = existing_image_df[~existing_image_df['Patient_ID'].isin(new_ids)]
+        
+        # now concatenate the old data with the new data
+        image_combined_df = pd.concat([existing_image_df, image_df])
+
         
     """if os.path.isfile(video_csv_file):
         existing_video_df = pd.read_csv(video_csv_file)
@@ -294,10 +302,12 @@ def Parse_Zip_Files(input, raw_storage_database, data_range):
 
     if os.path.isfile(case_study_csv_file):
         existing_case_study_df = pd.read_csv(case_study_csv_file)
-        csv_df = pd.concat([existing_case_study_df, csv_df], ignore_index=True)
+        csv_df = pd.concat([existing_case_study_df, csv_df])
+        csv_df = csv_df.sort_values('Patient_ID').drop_duplicates('Patient_ID', keep='last')
+        csv_df = csv_df.reset_index(drop=True)
 
     # Export the DataFrames to CSV files
-    image_df.to_csv(image_csv_file, index=False)
+    image_combined_df.to_csv(image_csv_file, index=False)
     #video_df.to_csv(video_csv_file, index=False)
     csv_df.to_csv(case_study_csv_file, index=False)
     
@@ -311,10 +321,24 @@ def Transfer_Laterality():
     csv_df = pd.read_csv(csv_df_path)
     image_df = pd.read_csv(image_df_path)
     
-    temp_df = image_df.drop_duplicates(subset='Patient_ID')
-    csv_df = pd.merge(csv_df, temp_df[['Patient_ID', 'laterality']], on='Patient_ID', how='left')
+    # create a dictionary to store the result
+    patient_laterality = {}
+
+    # group by Patient_ID
+    for name, group in image_df.groupby('Patient_ID'):
+        if 'unknown' in group['laterality'].values:
+            patient_laterality[name] = 'unknown'
+        elif 'left' in group['laterality'].values and 'right' in group['laterality'].values:
+            patient_laterality[name] = 'bilateral'
+        elif 'left' in group['laterality'].values:
+            patient_laterality[name] = 'left'
+        elif 'right' in group['laterality'].values:
+            patient_laterality[name] = 'right'
+        else:
+            # in case there are other values we haven't accounted for
+            patient_laterality[name] = 'unknown'
     
-    image_df = image_df.drop('laterality', axis=1)
+    # create a new column in csv_df based on patient_laterality dictionary
+    csv_df['laterality'] = csv_df['Patient_ID'].map(patient_laterality)
     
     csv_df.to_csv(csv_df_path, index=False)
-    image_df.to_csv(image_df_path, index=False)

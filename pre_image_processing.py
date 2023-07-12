@@ -65,7 +65,7 @@ description_kw_sub = {'scm':'5 cm',
 
 description_labels_dict = {
     'area':{'breast':['breast'],
-            'axilla':['axilla'],
+            'axilla':['axilla', 'axila', 'axlla'],
             'supraclavicular':['superclavicular','supraclavicular'],
             'subclavicular':['subclavicular','subclavcular']},
     'laterality':{'left':['lt','left', 'eft', 'ft'],
@@ -203,7 +203,7 @@ def find_mixed_lateralities( db ):
     mixedPatientIDs = df[df['notPure']].index.tolist()
     return mixedPatientIDs
 
-def choose_images_to_label(db):
+def choose_images_to_label(db, case_data):
     db['label'] = True
 
     # find all of the rows with calipers
@@ -220,12 +220,28 @@ def choose_images_to_label(db):
     db.loc[(db['area'] != 'breast'), 'label'] = False
 
     # Remove Males from studies
-    case_study_data = pd.read_csv(f"{env}/database/CaseStudyData.csv")
-    male_patient_ids = case_study_data[case_study_data['PatientSex'] == 'M']['Patient_ID'].values
+    male_patient_ids = case_data[case_data['PatientSex'] == 'M']['Patient_ID'].values
     db.loc[db['Patient_ID'].isin(male_patient_ids),'label'] = False
+    
+    #Add back majority focused images
+    # Parse 'StudyDescription' for 'FOCUSED LEFT' or 'FOCUSED RIGHT'
+    focus_left_studies = case_data[case_data['StudyDescription'].str.contains('FOCUSED LEFT')]['Accession_Number'].values
+    db.loc[(db['Accession_Number'].isin(focus_left_studies)) & (db['laterality'] == 'right'), 'label'] = False
 
-    mixedIDs = find_mixed_lateralities( db )
+    focus_right_studies = case_data[case_data['StudyDescription'].str.contains('FOCUSED RIGHT')]['Accession_Number'].values
+    db.loc[(db['Accession_Number'].isin(focus_right_studies)) & (db['laterality'] == 'left'), 'label'] = False
+    
+    # If 'BILATERAL' is present in 'StudyDescription', set 'label' to False for all images in that study
+    bilateral_studies = case_data[case_data['StudyDescription'].str.contains('BILATERAL')]['Accession_Number'].values
+    db.loc[db['Accession_Number'].isin(bilateral_studies), 'label'] = False
+    
+    # Check for mixed lateralities only in these non-focus studies
+    non_focus_studies = case_data[~case_data['StudyDescription'].str.contains('FOCUSED|BILATERAL')]['Accession_Number'].values
+    mixedIDs = find_mixed_lateralities( db[db['Accession_Number'].isin(non_focus_studies)] )
     db.loc[db['Accession_Number'].isin(mixedIDs),'label'] = False
+    
+    # Set label = False for all images with 'unknown' laterality
+    db.loc[db['laterality'] == 'unknown', 'label'] = False
 
     return db
 
@@ -520,8 +536,10 @@ def process_patient_id(pid, db_out, image_folder_path):
 
 def Pre_Process():
     input_file = f'{env}/database/ImageData.csv'
+    case_file = f'{env}/database/CaseStudyData.csv'
     image_folder_path = f"{env}/database/images/"
     db_out = pd.read_csv(input_file)
+    case_data = pd.read_csv(case_file)
 
     # Remove rows with missing data in crop_x, crop_y, crop_w, crop_h
     db_out = db_out.dropna(subset=['crop_x', 'crop_y', 'crop_w', 'crop_h'])
@@ -541,11 +559,11 @@ def Pre_Process():
                 db_out.update(result)
             progress.update()
 
-    db_out = choose_images_to_label(db_out)
+    db_out = choose_images_to_label(db_out, case_data)
     db_out = add_labeling_categories(db_out)
     
 
 
     if 'latIsLeft' in db_out.columns:
         db_out = db_out.drop(columns=['latIsLeft'])
-    db_out.to_csv(f'{env}/database/ImageData2.csv',index=False)
+    db_out.to_csv(input_file,index=False)

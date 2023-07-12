@@ -11,7 +11,7 @@ env = os.path.dirname(os.path.abspath(__file__))
 ########### Config ###########
 
 # General Settings
-enable_overwritting = True 
+enable_overwritting = True #Not functioning currently
 val_split = .2
 
 # Labelbox Settings
@@ -29,7 +29,7 @@ zip_input = f'D:/DATA/CASBUSI/zip_files/'
 raw_storage_database = f'D:/DATA/CASBUSI/dicoms/'
 
 # Debug Settings 
-data_range = None #[15000, 15500] # Set to None to use everything
+data_range = None #[0, 200] # Set to None to use everything
 
 #############################
 
@@ -63,7 +63,7 @@ if __name__ == '__main__':
         if user_input.lower() == "y":
             Perform_OCR()
             # Transfer Laterality to CaseStudyData
-            #Transfer_Laterality()
+            Transfer_Laterality()
         
         
         
