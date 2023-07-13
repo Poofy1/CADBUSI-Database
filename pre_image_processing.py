@@ -206,6 +206,9 @@ def find_mixed_lateralities( db ):
 def choose_images_to_label(db, case_data):
     db['label'] = True
 
+    #Remove images that are too dark
+    db.loc[db['darkness'] > 65, 'label'] = False
+    
     # find all of the rows with calipers
     caliper_rows = db[db['has_calipers']]
 
@@ -381,18 +384,6 @@ def Perform_OCR():
             outer_crop.append([filename, x, y, w, h])  # Include filename in the result
         else:
             outer_crop.append([filename, []])  # Include filename even if no mask
-
-    inner_crop = []
-    for (filename, inner_mask) in inner_masks:  # Unpack filename and inner_mask here
-        if inner_mask:
-            x0, y0, x1, y1 = inner_mask
-            x = x0
-            y = y0
-            w = x1 - x0
-            h = y1 - y0
-            inner_crop.append([filename, x, y, w, h])  # Include filename in the result
-        else:
-            inner_crop.append([filename, []])
     
     print("Performing OCR")
     with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
@@ -428,13 +419,10 @@ def Perform_OCR():
 
     # Process the 'outer_crop' and 'inner_crop' lists
     outer_crop_dict = {filename: values for filename, *values in outer_crop}
-    inner_crop_dict = {filename: values for filename, *values in inner_crop}
 
     outer_crop_series = pd.Series(outer_crop_dict)
-    inner_crop_series = pd.Series(inner_crop_dict)
 
     db_out[['crop_x', 'crop_y', 'crop_w', 'crop_h']] = db_out['ImageName'].map(outer_crop_series).apply(pd.Series)
-    db_out['inner_crop'] = db_out['ImageName'].map(inner_crop_series)
 
     # Construct a temporary DataFrame with the feature extraction
     temp_df = db_out.loc[db_out['description'].str.len() > 0, 'description'].apply(lambda x: extract_descript_features(x, labels_dict=description_labels_dict)).apply(pd.Series)
