@@ -29,7 +29,7 @@ zip_input = f'D:/DATA/CASBUSI/zip_files/'
 raw_storage_database = f'D:/DATA/CASBUSI/dicoms/'
 
 # Debug Settings 
-data_range = None #[0, 1000] # Set to None to use everything
+data_range = [0, 100] # Set to None to use everything
 
 #############################
 
@@ -44,8 +44,7 @@ if __name__ == '__main__':
         data_range = [0, 999999999999]
 
     
-    # WIP Inpaint feature
-    #Inpaint_Dataset(f'{env}/database/unlabeled_data.csv', f'{env}/database/images/', f'{env}/database/inpainted/')
+    
 
 
 
@@ -70,7 +69,11 @@ if __name__ == '__main__':
         user_input = input("Continue with Data_Selection step? (y/n): ")
         if user_input.lower() == "y":
             Pre_Process()
-        
+
+            
+        user_input = input("Continue with Inpainting step? (y/n): ")
+        if user_input.lower() == "y":
+            Inpaint_Dataset(f'{env}/database/ImageData.csv', f'{env}/database/images/', f'{env}/database/inpainted/')
         
         
         user_input = input("Continue with Labelbox_Tranform step? (y/n): ")

@@ -245,6 +245,11 @@ def choose_images_to_label(db, case_data):
     
     # Set label = False for all images with 'unknown' laterality
     db.loc[db['laterality'] == 'unknown', 'label'] = False
+    
+
+    # If 'chest' or 'mastectomy' is present in 'StudyDescription', set 'label' to False for all images in that study
+    chest_or_mastectomy_studies = case_data[case_data['StudyDescription'].str.contains('chest|mastectomy', case=False)]['Accession_Number'].values
+    db.loc[db['Accession_Number'].isin(chest_or_mastectomy_studies), 'label'] = False
 
     return db
 
@@ -327,7 +332,7 @@ def process_image(image_file, description_mask, image_folder_path, reader, kw_li
     # Apply blur to help OCR
     img_focused = cv2.GaussianBlur(cropped_image_np, (3, 3), 0)
     
-    #cv2.imwrite(os.path.join(f'{env}/database/test/' + image_file), img_focused)
+    cv2.imwrite(os.path.join(f'{env}/database/test/' + image_file), img_focused)
 
     result = reader.readtext(img_focused,paragraph=True)
 
@@ -369,7 +374,7 @@ def Perform_OCR():
     
     
     print("Finding Image Masks")
-    image_masks, description_masks, inner_masks = find_masks(image_folder_path, 'mask_model', 1292, 970)
+    image_masks, description_masks = find_masks(image_folder_path, 'mask_model', 1920, 1080)
     
     
     # Convert mask data
@@ -458,10 +463,11 @@ def find_nearest_images(db, patient_id, image_folder_path):
         if c in image_pairs_checked:
             continue
 
-        x = int(db.loc[c]['crop_x'])
-        y = int(db.loc[c]['crop_y'])
-        w = int(db.loc[c]['crop_w'])
-        h = int(db.loc[c]['crop_h'])
+        x = int(db.loc[c]['RegionLocationMinX0'])
+        y = int(db.loc[c]['RegionLocationMinY0'])
+        w = int(db.loc[c]['RegionLocationMaxX1']) - x
+        h = int(db.loc[c]['RegionLocationMaxY1']) - y
+
         
         img_list = []
         for i,image_id in enumerate(idx):

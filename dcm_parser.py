@@ -119,7 +119,7 @@ def parse_single_dcm(dcm, current_index, parsed_database):
     
     data_dict = {}
     dataset = pydicom.dcmread(dcm)
-    
+
     # Traverse the DICOM dataset
     for elem in dataset:
         if elem.VR == "SQ":  # if sequence
@@ -238,21 +238,22 @@ def Parse_Zip_Files(input, raw_storage_database, data_range):
     video_df = image_df[image_df['DataType'] == 'video']
     image_df = image_df[image_df['DataType'] == 'image']
     
-    video_df = video_df[['Patient_ID', 
-             'Accession_Number', 
-             'ImagesPath',
-             'SavedFrames',
-             'RegionSpatialFormat', 
-             'RegionDataType', 
-             'RegionLocationMinX0', 
-             'RegionLocationMinY0', 
-             'RegionLocationMaxX1', 
-             'RegionLocationMaxY1',
-             'PhotometricInterpretation',
-             'Rows',
-             'Columns',
-             'FileName',
-             'DicomHash']]
+    if not video_df.empty:
+        video_df = video_df[['Patient_ID', 
+                'Accession_Number', 
+                'ImagesPath',
+                'SavedFrames',
+                'RegionSpatialFormat', 
+                'RegionDataType', 
+                'RegionLocationMinX0', 
+                'RegionLocationMinY0', 
+                'RegionLocationMaxX1', 
+                'RegionLocationMaxY1',
+                'PhotometricInterpretation',
+                'Rows',
+                'Columns',
+                'FileName',
+                'DicomHash']]
     
     #Prepare to move data to csv_df
     temp_df = image_df.drop_duplicates(subset='Patient_ID')

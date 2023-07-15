@@ -40,7 +40,7 @@ def find_masks(images_dir, model_name, max_width, max_height, batch_size=4):
     backbone = torchvision.models.squeezenet1_1(pretrained=True).features
     backbone.out_channels = 512
     anchor_generator = AnchorGenerator(sizes=((32, 64, 128, 256, 512),), aspect_ratios=((0.5, 1.0, 2.0),))
-    num_classes = 4
+    num_classes = 3
     model = FasterRCNN(backbone, num_classes=num_classes, rpn_anchor_generator=anchor_generator)
 
     model.load_state_dict(torch.load(f"{env}/models/{model_name}.pt"))
@@ -53,7 +53,6 @@ def find_masks(images_dir, model_name, max_width, max_height, batch_size=4):
 
     class1_results = []
     class2_results = []
-    class3_results = []
 
     with torch.no_grad():
         for images, filenames in tqdm(dataloader):  # Unpack filenames here
@@ -66,7 +65,7 @@ def find_masks(images_dir, model_name, max_width, max_height, batch_size=4):
                 pred_labels = output[i]['labels']
 
                 best_boxes = []
-                for class_id in range(1, 4):  # Assuming classes are 1, 2, and 3
+                for class_id in range(1, 3):  # Assuming classes are 1, 2, and 3
                     class_mask = pred_labels == class_id
                     class_scores = pred_scores[class_mask]
 
@@ -81,6 +80,5 @@ def find_masks(images_dir, model_name, max_width, max_height, batch_size=4):
                 filename = filenames[i]
                 class1_results.append((filename, best_boxes[0].tolist() if best_boxes[0] is not None else []))
                 class2_results.append((filename, best_boxes[1].tolist() if best_boxes[1] is not None else []))
-                class3_results.append((filename, best_boxes[2].tolist() if best_boxes[2] is not None else []))
 
-    return class1_results, class2_results, class3_results
+    return class1_results, class2_results

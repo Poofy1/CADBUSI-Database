@@ -7,35 +7,26 @@ import cv2, os
 from PIL import Image
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-MASK_DATASET_PATH = "./Complete Package/masks/"
-INPUT_IMAGE_HEIGHT = 256
-INPUT_IMAGE_WIDTH = 256
+INPUT_IMAGE = 256
 
 
-
-def genUNetMask(imagePath):
-	"""
-	Uses a UNet model to generate a mask for the image.
-
-	Generated mask will always be of the size (256, 256)
-	"""
-
+def genUNetMask(image):
 	env = os.path.dirname(os.path.abspath(__file__))
-	print(f"{env}/models/UNetModel.pth")
-	unet = torch.load(f"{env}/models/UNetModel.pth").to(DEVICE)
-	return np.array(makePrediction(unet, imagePath))
+	unet = torch.load(f"{env}/models/UNetModel.pth")
+	unet.to(DEVICE)
 
-def makePrediction(model, imagePath):
+	return np.array(makePrediction(unet, image))
+
+def makePrediction(model, image):
 	# set model to evaluation mode
 	model.eval()
 	# turn off gradient tracking
 	with torch.no_grad():
 		# load the image from disk, swap its color channels, cast it
 		# to float data type, and scale its pixel values
-		image = cv2.imread(imagePath)
 		image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 		image = image.astype("float32") / 255.0
-		image = cv2.resize(image, (INPUT_IMAGE_WIDTH, INPUT_IMAGE_HEIGHT))
+		image = cv2.resize(image, (INPUT_IMAGE, INPUT_IMAGE))
 
         # make the channel axis to be the leading one, add a batch
 		# dimension, create a PyTorch tensor, and flash it to the

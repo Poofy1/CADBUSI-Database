@@ -2,54 +2,51 @@ from ML_processing.SegmentationModel import predictAnnotation
 from ML_processing.UNetModel import genUNetMask
 import cv2
 import os
+import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
 env = os.path.dirname(os.path.abspath(__file__))
 
-def run(input, output_path):
-    """
-    Method which takes in an image and outputs a cropped version of it.
+def Inpaint_Dataset(csv_file_path, input_folder, output_folder):    
+    # Create the output folder if it doesn't exist
+    os.makedirs(output_folder, exist_ok=True)
+    
+    # Load the CSV file
+    data = pd.read_csv(csv_file_path)
+    
+    # Get only relevant data rows
+    data = data[data['label'] == True]
+    data = data[data['has_calipers'] == True]
+    
+    for index, row in tqdm(data.iterrows()):
+        image_name = row['ImageName']
+        input_image_path = input_folder + image_name        
+        radius = 3
+        flags = cv2.INPAINT_TELEA
 
-    We use a ResNet18 model to predict if the image has any annotations or not, then use a UNet model to predict the mask of the image.
+        original_image = cv2.imread(input_image_path)
+        cv2.imwrite(output_folder + 'ORIGINAL' + image_name, original_image)
+        height, width, _ = original_image.shape
+        final_image = np.zeros_like(original_image)
 
-    We then perform inpainting on the image with the generated mask to remove these annotations.
+        tile_size = 256  # the size of the crop for inpainting
 
-    If the image goes through inpainting, the outputted image will always be of dimensions (256, 256) due to the UNet model.
+        for i in range(0, height, tile_size):
+            for j in range(0, width, tile_size):
+                tile = original_image[i:min(i+tile_size, height), j:min(j+tile_size, width)]
 
-    Returns the text found within the image.
-    """
+                # Resize the crop to required dimensions for UNet
+                resized_tile = cv2.resize(tile, (tile_size, tile_size))
 
-    # Generate mask and use inpainting to remove annotations
-    mask = genUNetMask(input)
+                mask = genUNetMask(resized_tile)
 
-    radius = 3
-    flags = cv2.INPAINT_TELEA
+                inpainted_resized_tile = cv2.inpaint(resized_tile, mask, radius, flags=flags)
 
-    image = cv2.imread(input)
-    image = cv2.resize(image, (256, 256))
+                # Resize back to original tile dimensions
+                inpainted_tile = cv2.resize(inpainted_resized_tile, (tile.shape[1], tile.shape[0]))
 
-    finalImage = cv2.inpaint(image, mask, radius, flags=flags)
 
-    # Visualize image, generated mask, and inpainted image
-    #cv2.imwrite(f"{env}/output/1.png", image)
-    #cv2.imwrite(f"{env}/output/2.png", mask)
-    #cv2.imwrite(f"{env}/output/3.png", finalImage)
+                final_image[i:min(i+tile_size, height), j:min(j+tile_size, width)] = inpainted_tile
 
-    cv2.imwrite(output_path, finalImage)
-
-def Inpaint_Dataset(csv_file_path, input_folder, output_folder):
-        
-         # Create the output folder if it doesn't exist
-        os.makedirs(output_folder, exist_ok=True)
-        
-        # Load the CSV file
-        data = pd.read_csv(csv_file_path)
-        
-        # Get only relavent data rows
-        data = data[data['label'] == True]
-        data = data[data['has_calipers'] == True]
-        
-        
-        for index, row in tqdm(data.iterrows()):
-            run(input_folder + row['image_filename'], output_folder + row['image_filename'])
+        cv2.imwrite(output_folder + image_name, final_image)
