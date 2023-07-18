@@ -91,10 +91,7 @@ def parse_video_data(dcm, current_index, parsed_database):
                 
                 image_name = f"{i}.png"
                 
-                if data_dict.get('PhotometricInterpretation', '') == 'RGB':
-                    im = im.convert("RGB")
-                else:
-                    im = im.convert("L")  # Convert to grayscale
+                im = im.convert("L")  # Convert to grayscale
                 
                 im.save(f"{parsed_database}/videos/{video_path}/{image_name}")
                 

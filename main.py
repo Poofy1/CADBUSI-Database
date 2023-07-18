@@ -1,4 +1,5 @@
 import os
+import pandas as pd
 from val_split import PerformVal
 from images_to_selection import Crop_and_save_images
 from pre_image_processing import Pre_Process, Perform_OCR
@@ -29,7 +30,8 @@ zip_input = f'D:/DATA/CASBUSI/zip_files/'
 raw_storage_database = f'D:/DATA/CASBUSI/dicoms/'
 
 # Debug Settings 
-data_range = None #[0,200] # Set to None to use everything
+data_range = [0,200] # Set to None to use everything
+reseted_processed = False
 
 #############################
 
@@ -45,7 +47,11 @@ if __name__ == '__main__':
 
     
     
-
+    if reseted_processed:
+        input_file = f'{env}/database/ImageData.csv'
+        df = pd.read_csv(input_file)
+        df['processed'] = False
+        df.to_csv(input_file, index=False)
 
 
     # Main Data Appender

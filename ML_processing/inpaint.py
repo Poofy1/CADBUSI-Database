@@ -15,21 +15,27 @@ def Inpaint_Dataset(csv_file_path, input_folder, output_folder, tile_size=256, o
     # Load the CSV file
     data = pd.read_csv(csv_file_path)
     
-    # Get only relevant data rows
-    data = data[data['label'] == True]
-    data = data[data['has_calipers'] == True]
+    # Initialize 'CaliperImage' column
+    data['CaliperImage'] = ''
+    
+    # Copy data for processing
+    processed_data = data.copy()
+
+    # Filter the copied data
+    processed_data = processed_data[processed_data['label'] == True]
+    processed_data = processed_data[processed_data['has_calipers'] == True]
     
     # Defining the structuring element for dilation
     structuring_element = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * dilate_radius + 1, 2 * dilate_radius + 1))
     
-    for index, row in tqdm(data.iterrows()):
+    for index, row in tqdm(processed_data.iterrows()):
         image_name = row['ImageName']
         input_image_path = input_folder + image_name 
         radius = 5
         flags = cv2.INPAINT_TELEA
 
         original_image = cv2.imread(input_image_path)
-        cv2.imwrite(output_folder + 'ORIGINAL' + image_name, original_image)
+
         height, width, _ = original_image.shape
         final_image = original_image.copy()
 
@@ -57,4 +63,12 @@ def Inpaint_Dataset(csv_file_path, input_folder, output_folder, tile_size=256, o
                 final_image[i + overlap//2:i + tile_size - overlap//2, j + overlap//2:j + tile_size - overlap//2] = \
                     inpainted_tile[overlap//2:-overlap//2, overlap//2:-overlap//2]
 
-        cv2.imwrite(output_folder + image_name, final_image)
+        caliper_image_name = f"clean_{row['ImageName']}"
+        cv2.imwrite(output_folder + caliper_image_name, final_image)
+
+        # Find the index of this row in the original DataFrame and update 'CaliperImage'
+        original_index = data[data['ImageName'] == row['ImageName']].index[0]
+        data.loc[original_index, 'CaliperImage'] = caliper_image_name
+
+    # Save the updated DataFrame back to the CSV file
+    data.to_csv(csv_file_path, index=False)

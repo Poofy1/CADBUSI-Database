@@ -354,6 +354,12 @@ def process_image(image_file, description_mask, image_folder_path, reader, kw_li
 
 
 
+def get_image_sizes(image_folder_path, filenames):
+    image_sizes = {}
+    for filename in tqdm(filenames):
+        with Image.open(os.path.join(image_folder_path, filename)) as img:
+            image_sizes[filename] = list(img.size)  # Store image size as a list [width, height]
+    return image_sizes
 
 
 
@@ -383,7 +389,7 @@ def Perform_OCR():
     db_to_process = db_out[db_out['processed'] != True]
     db_to_process['processed'] = False
     
-    
+
     
     print("Finding Calipers")
     has_calipers = find_calipers(image_folder_path, 'caliper_model', db_to_process)
@@ -485,6 +491,10 @@ def find_nearest_images(db, patient_id, image_folder_path):
         
         img_list = []
         for i,image_id in enumerate(idx):
+            # Skip RGB images
+            if db.loc[image_id]['PhotometricInterpretation'] == 'RGB':
+                continue
+            
             file_name = db.loc[image_id]['ImageName']
             full_filename = os.path.join(image_folder_path, file_name)
             img = Image.open(full_filename)
