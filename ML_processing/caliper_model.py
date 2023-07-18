@@ -12,10 +12,10 @@ env = os.path.dirname(os.path.abspath(__file__))
 device = torch.device("cuda")
 
 class MyDataset(Dataset):
-    def __init__(self, root_dir, transform=None):
+    def __init__(self, root_dir, db_to_process, transform=None):
         self.root_dir = root_dir
         self.transform = transform
-        self.images = sorted(os.listdir(root_dir))
+        self.images = sorted([img for img in os.listdir(root_dir) if img in db_to_process['ImageName'].values])
 
     def __len__(self):
         return len(self.images)
@@ -51,7 +51,7 @@ class Net(torch.nn.Module):
         return x
 
 
-def find_calipers(images_dir, model_name, image_size=256, batch_size=4):
+def find_calipers(images_dir, model_name, db_to_process, image_size=256, batch_size=4):
     model = Net()
     model.load_state_dict(torch.load(f"{env}/models/{model_name}.pt"))
     model = model.to(device)
@@ -64,13 +64,13 @@ def find_calipers(images_dir, model_name, image_size=256, batch_size=4):
         transforms.ToTensor(),
         transforms.Normalize([0.5], [0.5]),
     ])
-    dataset = MyDataset(images_dir, transform=preprocess)
+    dataset = MyDataset(images_dir, db_to_process, transform=preprocess)
     dataloader = DataLoader(dataset, batch_size=batch_size, num_workers=1)
 
     results = []
     
     with torch.no_grad():
-        for images, filenames in tqdm(dataloader):  # Unpack filenames here
+        for images, filenames in tqdm(dataloader, total=len(dataloader)):  # Unpack filenames here
             images = images.to(device)
             has_calipers_pred = model(images)
             prediction = (has_calipers_pred > 0.5).cpu() 

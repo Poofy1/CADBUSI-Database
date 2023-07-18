@@ -10,10 +10,10 @@ env = os.path.dirname(os.path.abspath(__file__))
 device = torch.device("cuda")
 
 class MyDataset(Dataset):
-    def __init__(self, root_dir, max_width, max_height, transform=None):
+    def __init__(self, root_dir, db_to_process, max_width, max_height, transform=None):
         self.root_dir = root_dir
         self.transform = transform
-        self.images = sorted(os.listdir(root_dir))
+        self.images = sorted([img for img in os.listdir(root_dir) if img in db_to_process['ImageName'].values])
         self.max_width = max_width
         self.max_height = max_height
 
@@ -35,7 +35,7 @@ class MyDataset(Dataset):
     
     
     
-def find_masks(images_dir, model_name, max_width, max_height, batch_size=4):
+def find_masks(images_dir, model_name, db_to_process, max_width, max_height, batch_size=4):
     # Load a pre-trained model for classification
     backbone = torchvision.models.squeezenet1_1(pretrained=True).features
     backbone.out_channels = 512
@@ -48,14 +48,14 @@ def find_masks(images_dir, model_name, max_width, max_height, batch_size=4):
     model.eval()
 
     # Data loader
-    dataset = MyDataset(images_dir, max_width, max_height)
+    dataset = MyDataset(images_dir, db_to_process, max_width, max_height)
     dataloader = DataLoader(dataset, batch_size=batch_size, num_workers=1)
 
     class1_results = []
     class2_results = []
 
     with torch.no_grad():
-        for images, filenames in tqdm(dataloader):  # Unpack filenames here
+        for images, filenames in tqdm(dataloader, total=len(dataloader)):  # Unpack filenames here
             images = images.to(device)
             output = model(images)
 

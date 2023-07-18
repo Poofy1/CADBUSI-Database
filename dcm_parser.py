@@ -118,22 +118,30 @@ def parse_single_dcm(dcm, current_index, parsed_database):
         return parse_video_data(dcm, current_index, parsed_database)
     
     data_dict = {}
+    region_count = 0
     dataset = pydicom.dcmread(dcm)
 
-    # Traverse the DICOM dataset
     for elem in dataset:
-        if elem.VR == "SQ":  # if sequence
+        # Check if element is a sequence
+        if elem.VR == "SQ":
+            # Count regions
+            for i, sub_elem in enumerate(elem):
+                if elem.keyword == 'SequenceOfUltrasoundRegions':
+                    region_count += 1
+            
+            #Get Data
             for sub_elem in elem.value[0]:  # only take the first item in the sequence
                 tag_name = pydicom.datadict.keyword_for_tag(sub_elem.tag)
                 if tag_name == "PixelData":
                     continue
                 data_dict[tag_name] = str(sub_elem.value)
+
         else:
             tag_name = pydicom.datadict.keyword_for_tag(elem.tag)
             if tag_name == "PixelData":
                 continue
             data_dict[tag_name] = str(elem.value)
-
+    
     # get image data
     im = Image.fromarray(dataset.pixel_array)
     if data_dict.get('PhotometricInterpretation', '') == 'RGB':
@@ -148,6 +156,7 @@ def parse_single_dcm(dcm, current_index, parsed_database):
     data_dict['FileName'] = os.path.basename(dcm)
     data_dict['ImageName'] = image_name
     data_dict['DicomHash'] = generate_hash(dcm)
+    data_dict['RegionCount'] = region_count
     
     return data_dict
 
@@ -223,8 +232,9 @@ def Parse_Zip_Files(input, raw_storage_database, data_range):
     print(f'Total Dicom Archive: {len(dcm_files_list)}')
 
     # Filter out the already parsed files
-    dcm_files_list = [file for file in dcm_files_list if file not in parsed_files_list]
     dcm_files_list = dcm_files_list[data_range[0]:data_range[1]]
+    dcm_files_list = [file for file in dcm_files_list if file not in parsed_files_list]
+    
     
 
     if len(dcm_files_list) <= 0:
@@ -262,6 +272,7 @@ def Parse_Zip_Files(input, raw_storage_database, data_range):
              'Accession_Number', 
              'ImageName',
              'RegionSpatialFormat', 
+             'RegionCount',
              'RegionDataType', 
              'RegionLocationMinX0', 
              'RegionLocationMinY0', 
@@ -316,14 +327,15 @@ def Parse_Zip_Files(input, raw_storage_database, data_range):
     if os.path.isfile(image_csv_file):
         existing_image_df = pd.read_csv(image_csv_file)
         existing_image_df['Patient_ID'] = existing_image_df['Patient_ID'].astype(str)
+        image_df['Patient_ID'] = image_df['Patient_ID'].astype(str)
         
         new_ids = image_df['Patient_ID'].unique()
         
         # keep only old IDs that don't exist in new data
-        existing_image_df = existing_image_df[~existing_image_df['Patient_ID'].isin(new_ids)]
+        image_df = image_df[~image_df['Patient_ID'].isin(existing_image_df['Patient_ID'].unique())]
         
         # now concatenate the old data with the new data
-        image_combined_df = pd.concat([existing_image_df, image_df])
+        image_combined_df = pd.concat([existing_image_df, image_df], ignore_index=True)
 
         
     if os.path.isfile(video_csv_file):

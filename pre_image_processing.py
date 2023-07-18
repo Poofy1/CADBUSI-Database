@@ -101,15 +101,15 @@ def find_time_substring(text):
     if text is None:  # If the input is None, return 'unknown'
         return 'unknown'
     
-    # Regular expression to match time substrings of the form HH:MM or HH.MM
+    # Regular expression to match time substrings of the form HH:MM or H.MM
     # with optional spaces
-    pattern = r'\d{1,2}\s*:\s*\d{2}'
+    pattern = r'\d{1,2}\s*[:.]\s*\d{1,2}'
     
     # Find all matches in the input text
     matches = re.findall(pattern, text)
     
     if len(matches) > 0:
-        # Remove spaces from the first match, replace dot with colon
+        # Remove spaces from the first match, convert period to colon
         time = re.sub(r'\s', '', matches[0]).replace('.', ':')
         return time
     
@@ -120,6 +120,7 @@ def find_time_substring(text):
             return substring
     
     return 'unknown'
+
     
 def find_cm_substring(input_str):
     """Find first substring of the form #cm or # cm or #-#cm or #-# cm, not case sensitive
@@ -250,7 +251,10 @@ def choose_images_to_label(db, case_data):
     # If 'chest' or 'mastectomy' is present in 'StudyDescription', set 'label' to False for all images in that study
     chest_or_mastectomy_studies = case_data[case_data['StudyDescription'].str.contains('chest|mastectomy', case=False)]['Accession_Number'].values
     db.loc[db['Accession_Number'].isin(chest_or_mastectomy_studies), 'label'] = False
-
+    
+     # Set label = False for all images with 'RegionCount' > 1
+    db.loc[db['RegionCount'] > 1, 'label'] = False
+    
     return db
 
 
@@ -367,14 +371,26 @@ def Perform_OCR():
     for nf in missing_features:
         db_out[nf] = None
     
+    
+    
     db_out['labeled'] = False
     
+    # Check if 'processed' column exists, if not, create it and set all to False
+    if 'processed' not in db_out.columns:
+        db_out['processed'] = False
+
+    # Only keep rows where 'processed' is False
+    db_to_process = db_out[db_out['processed'] != True]
+    db_to_process['processed'] = False
+    
+    
+    
     print("Finding Calipers")
-    has_calipers = find_calipers(image_folder_path, 'caliper_model')
+    has_calipers = find_calipers(image_folder_path, 'caliper_model', db_to_process)
     
     
     print("Finding Image Masks")
-    image_masks, description_masks = find_masks(image_folder_path, 'mask_model', 1920, 1080)
+    image_masks, description_masks = find_masks(image_folder_path, 'mask_model', db_to_process, 1920, 1080)
     
     
     # Convert mask data
@@ -418,27 +434,25 @@ def Perform_OCR():
     has_calipers_series = pd.Series(has_calipers_dict)
 
     # Update dataframe using map
-    db_out['description'] = db_out['ImageName'].map(descriptions_series)
-    db_out['darkness'] = db_out['ImageName'].map(darknesses_series)
-    db_out['has_calipers'] = db_out['ImageName'].map(has_calipers_series)
+    db_to_process['description'] = db_to_process['ImageName'].map(descriptions_series)
+    db_to_process['darkness'] = db_to_process['ImageName'].map(darknesses_series)
+    db_to_process['has_calipers'] = db_to_process['ImageName'].map(has_calipers_series)
 
     # Process the 'outer_crop' and 'inner_crop' lists
     outer_crop_dict = {filename: values for filename, *values in outer_crop}
 
     outer_crop_series = pd.Series(outer_crop_dict)
 
-    db_out[['crop_x', 'crop_y', 'crop_w', 'crop_h']] = db_out['ImageName'].map(outer_crop_series).apply(pd.Series)
+    db_to_process[['crop_x', 'crop_y', 'crop_w', 'crop_h']] = db_to_process['ImageName'].map(outer_crop_series).apply(pd.Series)
 
     # Construct a temporary DataFrame with the feature extraction
-    temp_df = db_out.loc[db_out['description'].str.len() > 0, 'description'].apply(lambda x: extract_descript_features(x, labels_dict=description_labels_dict)).apply(pd.Series)
+    temp_df = db_to_process.loc[db_to_process['description'].str.len() > 0, 'description'].apply(lambda x: extract_descript_features(x, labels_dict=description_labels_dict)).apply(pd.Series)
 
     # Update the columns in db_out directly from temp_df
     for column in temp_df.columns:
-        db_out[column] = temp_df[column]
-    
-    
-    #db_out.drop('feature_dict', axis=1, inplace=True)
-
+        db_to_process[column] = temp_df[column]
+        
+    db_out.update(db_to_process, overwrite=True)
 
     db_out.to_csv(input_file,index=False)
 
@@ -535,29 +549,46 @@ def Pre_Process():
     db_out = pd.read_csv(input_file)
     case_data = pd.read_csv(case_file)
 
+    # Check if 'processed' column exists, if not create it
+    if 'processed' not in db_out.columns:
+        db_out['processed'] = False
+
     # Remove rows with missing data in crop_x, crop_y, crop_w, crop_h
     db_out = db_out.dropna(subset=['crop_x', 'crop_y', 'crop_w', 'crop_h'])
 
-    print("Finding Similar Images")
-    patient_ids = db_out['Accession_Number'].unique()
+    # Filter the rows where 'processed' is False
+    db_to_process = db_out[db_out['processed'] == False]
 
-    db_out['closest_fn']=''
-    db_out['distance'] = -1
+    print("Finding Similar Images")
+    patient_ids = db_to_process['Accession_Number'].unique()
+
+    db_to_process['closest_fn']=''
+    db_to_process['distance'] = -1
 
     with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor, tqdm(total=len(patient_ids), desc='') as progress:
-        futures = {executor.submit(process_patient_id, pid, db_out, image_folder_path): pid for pid in patient_ids}
+        futures = {executor.submit(process_patient_id, pid, db_to_process, image_folder_path): pid for pid in patient_ids}
 
         for future in as_completed(futures):
             result = future.result()
             if result is not None and not result.empty:
-                db_out.update(result)
+                db_to_process.update(result)
             progress.update()
 
-    db_out = choose_images_to_label(db_out, case_data)
-    db_out = add_labeling_categories(db_out)
+    db_to_process = choose_images_to_label(db_to_process, case_data)
+    db_to_process = add_labeling_categories(db_to_process)
     
+    # Update 'processed' status to True for processed rows and merge back to the original dataframe
+    db_to_process['processed'] = True
+    # List all columns that are common to both dataframes
+    common_columns = db_out.columns.intersection(db_to_process.columns)
 
+    # Set 'ImageName' as the key for merging
+    key_column = 'ImageName'
+
+    # Take in all rows from db_to_process and only rows from db_out that aren't already present.
+    db_out = pd.merge(db_to_process, db_out[~db_out[key_column].isin(db_to_process[key_column])], on=common_columns.tolist(), how='outer')
 
     if 'latIsLeft' in db_out.columns:
         db_out = db_out.drop(columns=['latIsLeft'])
-    db_out.to_csv(input_file,index=False)
+    db_out.to_csv(input_file, index=False)
+
