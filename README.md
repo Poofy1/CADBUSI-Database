@@ -17,8 +17,9 @@ This program is designed to process Breast Ultrasound data from multiple sources
 ### Prerequisites
 
 - Install Python 3.8
-- Install required Python packages with pip:
 - 6GB Nvidia GPU (Recommended)
+- Install required Python packages with pip:
+
 
 ```
 pip install -r requirements.txt
@@ -73,6 +74,24 @@ python main.py
     - `Perform_Val`: Adds or edits the validation split column to the database.
 
 ![CASBUSI WORKFLOW](https://github.com/Poofy1/CASBUSI-Database/assets/70146048/70594e4b-026e-4a0b-b544-7e1edb003ce1)
+
+
+
+
+## Current Pipeline
+
+1. Get Datamart file of studies to be downloaded
+2. Manually import Notion files
+    - Download studies as dicom files
+    - Remove pixel level patient info
+    - Number patients starting from previous batch
+    - Save key file in secure location
+3. (This Software) Data Processing
+    - Parse data into CSV files
+    - Remove bad images
+    - Prepare data for labeling
+4. Upload data to Labelbox and label data
+5. (This Software) Retrieve label and masks from Labelbox
 
 
 
