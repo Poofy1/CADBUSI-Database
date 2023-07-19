@@ -1,9 +1,9 @@
 import os
 import pandas as pd
 from val_split import PerformVal
-from images_to_selection import Crop_and_save_images
+from images_to_labelbox import Crop_and_save_images
 from pre_image_processing import Pre_Process, Perform_OCR
-from selection_to_images import Read_Labelbox_Data
+from labelbox_to_images import Read_Labelbox_Data
 from ML_processing.inpaint import Inpaint_Dataset
 from dcm_parser import Parse_Zip_Files, Transfer_Laterality
 env = os.path.dirname(os.path.abspath(__file__))
@@ -30,7 +30,7 @@ zip_input = f'D:/DATA/CASBUSI/zip_files/'
 raw_storage_database = f'D:/DATA/CASBUSI/dicoms/'
 
 # Debug Settings 
-data_range = [0,200] # Set to None to use everything
+data_range = [51000,52000] # Set to None to use everything
 reseted_processed = False
 
 #############################

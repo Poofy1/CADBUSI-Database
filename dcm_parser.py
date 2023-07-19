@@ -1,4 +1,5 @@
-import os, pydicom, zipfile, hashlib, gc
+import os, pydicom, zipfile, hashlib
+import numpy as np
 from PIL import Image
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
@@ -142,7 +143,17 @@ def parse_single_dcm(dcm, current_index, parsed_database):
     # get image data
     im = Image.fromarray(dataset.pixel_array)
     if data_dict.get('PhotometricInterpretation', '') == 'RGB':
-        im = im.convert("RGB")
+        np_im = np.array(im)
+        
+        # check if there is any blue pixel
+        is_blue = (np_im[:, :, 0] < 50) & (np_im[:, :, 1] < 50) & (np_im[:, :, 2] > 200)
+        if np.any(is_blue):
+            im = im.convert("RGB")
+            print(f'{current_index}  IS BLUE')
+        else:
+            im = im.convert("L")  # Convert to grayscale
+            print(f'{current_index}  IS NOT BLUE')
+            data_dict['PhotometricInterpretation'] = 'MONOCHROME2_OVERRIDE'
     else:
         im = im.convert("L")  # Convert to grayscale
     image_name = f"{data_dict.get('PatientID', '')}_{data_dict.get('AccessionNumber', '')}_{current_index}.png"
