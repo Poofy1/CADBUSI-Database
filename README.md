@@ -77,6 +77,24 @@ python main.py
 
 
 
+
+## Current Pipeline
+
+1. Get Datamart file of studies to be downloaded
+2. Manually import Notion files
+    - Download studies as dicom files
+    - Remove pixel level patient info
+    - Number patients starting from previous batch
+    - Save key file in secure location
+3. (This Software) Data Processing
+    - Parse data into CSV files
+    - Remove bad images
+    - Prepare data for labeling
+4. Upload data to Labelbox and label data
+5. (This Software) Retrieve label and masks from Labelbox
+
+
+
 ## License
 
 This program is released under the MIT License. See the [LICENSE](LICENSE) file for more details.
