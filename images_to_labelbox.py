@@ -17,10 +17,7 @@ def process_group(Patient_ID, patient_group, images_per_row, existing_data, outp
         group_images = []
 
         for index, row in group.iterrows():
-            if pd.notna(row['CaliperImage']):
-                image_path = os.path.join(inpainted_folder, row['CaliperImage'])
-            else:
-                image_path = os.path.join(image_input_folder, row['ImageName'])
+            image_path = os.path.join(image_input_folder, row['ImageName'])
                 
                 
             if os.path.isfile(image_path):
@@ -51,23 +48,15 @@ def process_group(Patient_ID, patient_group, images_per_row, existing_data, outp
             total_height += 100
 
             for index, row in group.iterrows():
-                inpainted = False
-                if pd.notna(row['CaliperImage']):
-                    image_name = row['CaliperImage']
-                    image_path = os.path.join(inpainted_folder, image_name)
-                    inpainted = True
-                else:
-                    image_name = row['ImageName']
+                image_name = row['ImageName']
                 
-                
-                
+
                 image_records.append({'group': group_val, 
                                     'ImageName': image_name, 
                                     'us_x0': row['RegionLocationMinX0'], 
                                     'us_y0': row['RegionLocationMinY0'], 
                                     'us_x1': row['RegionLocationMaxX1'], 
-                                    'us_y1': row['RegionLocationMaxY1'],
-                                    'inpainted': inpainted})
+                                    'us_y1': row['RegionLocationMaxY1'],})
             
             row_width = 0
             for i in range(0, len(group_images), images_per_row):
@@ -106,7 +95,7 @@ def process_group(Patient_ID, patient_group, images_per_row, existing_data, outp
                         existing_data.loc[existing_data['ImageName'] == record['ImageName'], 
                                         ['Patient_ID', 'group', 'x', 'y', 'width', 'height', 'us_x0', 'us_y0', 'us_x1', 'us_y1', 'inpainted']] = [
                                             int(Patient_ID), record['group'], x_offset, y_offset, img.width, img.height, int(record['us_x0']), 
-                                            int(record['us_y0']), int(record['us_x1']), int(record['us_y1']), record['inpainted']]
+                                            int(record['us_y0']), int(record['us_x1']), int(record['us_y1'])]
                     else: # If the image filename doesn't exist
                         new_row = pd.DataFrame([{
                             'Patient_ID': int(Patient_ID),
@@ -119,8 +108,7 @@ def process_group(Patient_ID, patient_group, images_per_row, existing_data, outp
                             'us_x0': int(record['us_x0']),
                             'us_y0': int(record['us_y0']),
                             'us_x1': int(record['us_x1']),
-                            'us_y1': int(record['us_y1']),
-                            'inpainted': record['inpainted']}])
+                            'us_y1': int(record['us_y1'])}])
                         existing_data = existing_data.append(new_row, ignore_index=True)
                     
                 new_img.paste(img, (x_offset, y_offset))
@@ -175,7 +163,7 @@ def Crop_and_save_images(images_per_row):
         if 'inpainted' not in existing_data.columns:
             existing_data['inpainted'] = False
     else:
-        existing_data = pd.DataFrame(columns=['Patient_ID', 'group', 'ImageName', 'x', 'y', 'width', 'height', 'us_x0', 'us_y0', 'us_x1', 'us_y1', 'inpainted'])
+        existing_data = pd.DataFrame(columns=['Patient_ID', 'group', 'ImageName', 'x', 'y', 'width', 'height', 'us_x0', 'us_y0', 'us_x1', 'us_y1'])
     
     
     # Create a ThreadPoolExecutor

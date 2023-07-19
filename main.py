@@ -30,8 +30,8 @@ zip_input = f'D:/DATA/CASBUSI/zip_files/'
 raw_storage_database = f'D:/DATA/CASBUSI/dicoms/'
 
 # Debug Settings 
-data_range = [51000,52000] # Set to None to use everything
-reseted_processed = False
+data_range = [0,1000] # Set to None to use everything
+reseted_processed = True
 
 #############################
 
@@ -79,7 +79,7 @@ if __name__ == '__main__':
             
         user_input = input("Continue with Inpainting step? (y/n): ")
         if user_input.lower() == "y":
-            Inpaint_Dataset(f'{env}/database/ImageData.csv', f'{env}/database/images/', f'{env}/database/inpainted/')
+            Inpaint_Dataset(f'{env}/database/ImageData.csv', f'{env}/database/images/')
         
         
         user_input = input("Continue with Labelbox_Tranform step? (y/n): ")

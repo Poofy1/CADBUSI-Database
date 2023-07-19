@@ -475,7 +475,10 @@ def Perform_OCR():
 
 
 def find_nearest_images(db, patient_id, image_folder_path):
-    idx = np.array(fetch_index_for_patient_id(patient_id, db))
+    # Filter to only RGB images
+    subset = db[db['PhotometricInterpretation'] != 'RGB'] 
+    # Get index array 
+    idx = np.array(fetch_index_for_patient_id(patient_id, subset))
     result = {}
     image_pairs_checked = set()
 
@@ -491,9 +494,6 @@ def find_nearest_images(db, patient_id, image_folder_path):
         
         img_list = []
         for i,image_id in enumerate(idx):
-            # Skip RGB images
-            if db.loc[image_id]['PhotometricInterpretation'] == 'RGB':
-                continue
             
             file_name = db.loc[image_id]['ImageName']
             full_filename = os.path.join(image_folder_path, file_name)
@@ -502,7 +502,7 @@ def find_nearest_images(db, patient_id, image_folder_path):
             (rows, cols) = img.shape[0:2]
             if rows >= y + h and cols >= x + w:
                 img,_ = make_grayscale(img)
-                img = img[y:y+h,x:x+w] # this can break if the root image is too big
+                img = img[y:y+h,x:x+w]
             else: # fill in all ones for an image that will be distant
                 img = np.full((h,w),255,dtype=np.uint8)
             img = img.flatten()
@@ -511,14 +511,12 @@ def find_nearest_images(db, patient_id, image_folder_path):
         img_stack = np.array(img_list, dtype=np.uint8)
         
         
-        
         img_stack = np.abs(img_stack - img_stack[j, :])
         img_stack = np.mean(img_stack, axis=1)
         img_stack[j] = 1000
         sister_image = np.argmin(img_stack)
         distance = img_stack[sister_image]
-        
-        
+
 
         # Save result for the current image
         result[c] = {
@@ -544,6 +542,7 @@ def find_nearest_images(db, patient_id, image_folder_path):
 
 def process_patient_id(pid, db_out, image_folder_path):
     subset = db_out[db_out['Accession_Number'] == pid]
+    
     result = find_nearest_images(subset, pid, image_folder_path)
     idxs = result.keys()
     for i in idxs:

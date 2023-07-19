@@ -8,15 +8,13 @@ from tqdm import tqdm
 
 env = os.path.dirname(os.path.abspath(__file__))
 
-def Inpaint_Dataset(csv_file_path, input_folder, output_folder, tile_size=256, overlap=84, dilate_radius=5):    
-    # Create the output folder if it doesn't exist
-    os.makedirs(output_folder, exist_ok=True)
+def Inpaint_Dataset(csv_file_path, input_folder, tile_size=256, overlap=84, dilate_radius=5):    
     
     # Load the CSV file
     data = pd.read_csv(csv_file_path)
     
     # Initialize 'CaliperImage' column
-    data['CaliperImage'] = ''
+    data['Inpainted'] = False
     
     # Copy data for processing
     processed_data = data.copy()
@@ -28,7 +26,7 @@ def Inpaint_Dataset(csv_file_path, input_folder, output_folder, tile_size=256, o
     # Defining the structuring element for dilation
     structuring_element = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * dilate_radius + 1, 2 * dilate_radius + 1))
     
-    for index, row in tqdm(processed_data.iterrows()):
+    for index, row in tqdm(processed_data.iterrows(), total=len(processed_data)):
         image_name = row['ImageName']
         input_image_path = input_folder + image_name 
         radius = 5
@@ -63,12 +61,13 @@ def Inpaint_Dataset(csv_file_path, input_folder, output_folder, tile_size=256, o
                 final_image[i + overlap//2:i + tile_size - overlap//2, j + overlap//2:j + tile_size - overlap//2] = \
                     inpainted_tile[overlap//2:-overlap//2, overlap//2:-overlap//2]
 
-        caliper_image_name = f"clean_{row['ImageName']}"
-        cv2.imwrite(output_folder + caliper_image_name, final_image)
+        #Replace image
+        os.remove(input_image_path)
+        cv2.imwrite(input_image_path, final_image)
 
         # Find the index of this row in the original DataFrame and update 'CaliperImage'
         original_index = data[data['ImageName'] == row['ImageName']].index[0]
-        data.loc[original_index, 'CaliperImage'] = caliper_image_name
+        data.loc[original_index, 'Inpainted'] = True
 
     # Save the updated DataFrame back to the CSV file
     data.to_csv(csv_file_path, index=False)

@@ -149,10 +149,8 @@ def parse_single_dcm(dcm, current_index, parsed_database):
         is_blue = (np_im[:, :, 0] < 50) & (np_im[:, :, 1] < 50) & (np_im[:, :, 2] > 200)
         if np.any(is_blue):
             im = im.convert("RGB")
-            print(f'{current_index}  IS BLUE')
         else:
             im = im.convert("L")  # Convert to grayscale
-            print(f'{current_index}  IS NOT BLUE')
             data_dict['PhotometricInterpretation'] = 'MONOCHROME2_OVERRIDE'
     else:
         im = im.convert("L")  # Convert to grayscale
