@@ -335,8 +335,6 @@ def process_image(image_file, description_mask, image_folder_path, reader, kw_li
 
     # Apply blur to help OCR
     img_focused = cv2.GaussianBlur(cropped_image_np, (3, 3), 0)
-    
-    cv2.imwrite(os.path.join(f'{env}/database/test/' + image_file), img_focused)
 
     result = reader.readtext(img_focused,paragraph=True)
 
@@ -360,6 +358,105 @@ def get_image_sizes(image_folder_path, filenames):
         with Image.open(os.path.join(image_folder_path, filename)) as img:
             image_sizes[filename] = list(img.size)  # Store image size as a list [width, height]
     return image_sizes
+
+
+
+
+def process_single_image(image_path):
+    buffer_size = 5  # Define buffer size here
+    num_top_contours = 12  # Define how many of the top contours to consider
+
+    margin = 10
+    image = cv2.imread(image_path, 0)  # Load grayscale image directly
+    
+    #Remove caliper box
+    # Create a copy of the original image for visualization
+    vis_image = image.copy()
+
+    # Calculate the start and end row indices for the bottom quarter of the image
+    start_row = int(3 * image.shape[0] / 4)
+    end_row = image.shape[0]
+
+    # Crop the image to only the bottom quarter
+    cropped_image = image[start_row:end_row, :]
+
+    # Read the bottom quarter of the image using easyocr
+    output = reader.readtext(cropped_image)
+    
+    # Process each of the detected text boxes
+    for detection in output:
+        top_left = tuple(map(int, detection[0][0]))
+        bottom_right = tuple(map(int, detection[0][2]))
+
+        # Adjust the coordinates to account for the cropping
+        top_left = (0, max(0, top_left[1] + start_row - margin))
+        bottom_right = (image.shape[1], min(image.shape[0], bottom_right[1] + start_row + margin))
+
+        # Create a wider black rectangle at the detected text location
+        cv2.rectangle(image, top_left, bottom_right, (0, 0, 0), -1)
+        # Create a wider red rectangle at the detected text location for visualization
+        cv2.rectangle(vis_image, top_left, bottom_right, (255, 0, 0), 2)
+
+    
+    
+
+    # Create binary mask of nonzero pixels
+    _, binary_mask = cv2.threshold(image, 0, 255, cv2.THRESH_BINARY)
+
+    # Apply morphological closing to fill small holes in the binary mask
+    kernel = np.ones((20,20),np.uint8)
+    closing = cv2.morphologyEx(binary_mask, cv2.MORPH_CLOSE, kernel)
+
+    # Define structural element for erosion and dilation
+    kernel = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=np.uint8)
+
+    # Apply erosion and dilation
+    eroded_mask = cv2.erode(closing, kernel, iterations=30)
+    dilated_mask = cv2.dilate(eroded_mask, kernel, iterations=20)
+
+    # Find contours and get the largest one
+    contours, _ = cv2.findContours(dilated_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    largest_contour = max(contours, key=cv2.contourArea)
+
+    # Get the bounding box
+    x, y, w, h = cv2.boundingRect(largest_contour)
+
+    # Find top left and top right points of the trapezoid's top edge
+    # Sort contours by their y coordinate (in ascending order) and select the top few
+    sorted_contours = sorted([(c[0][0], c[0][1]) for c in largest_contour], key=lambda point: point[1])
+    upper_points = sorted_contours[:num_top_contours]
+    if upper_points:
+        xleft, _ = min(upper_points, key=lambda point: point[0])
+        xright, _ = max(upper_points, key=lambda point: point[0])
+
+        # Adjust x and w values based on new found xleft and xright
+        x = max(x, xleft - buffer_size)
+        w = min(x + w, xright + buffer_size) - x
+        
+    
+    
+    
+    # Store rectangle coordinates and aspect ratio in the image data dictionary
+    image_name = os.path.basename(image_path)  # Get image name from image path
+    return (image_name, (x, y, w, h))
+
+
+def get_ultrasound_region(image_folder_path):
+    # Construct image paths
+    image_paths = [os.path.join(image_folder_path, filename) for filename in os.listdir(image_folder_path)]
+
+    # Collect image data in list
+    image_data = []
+    
+    # Thread pool and TQDM
+    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+        futures = {executor.submit(process_single_image, image_path): image_path for image_path in image_paths}
+        # Wrap the futures list with tqdm for progress bar
+        for future in tqdm(as_completed(futures), total=len(futures)):
+            # Append the result to image_data
+            image_data.append(future.result())
+
+    return image_data
 
 
 
@@ -394,10 +491,12 @@ def Perform_OCR():
     print("Finding Calipers")
     has_calipers = find_calipers(image_folder_path, 'caliper_model', db_to_process)
     
-    
     print("Finding Image Masks")
-    image_masks, description_masks = find_masks(image_folder_path, 'mask_model', db_to_process, 1920, 1080)
+    image_masks = get_ultrasound_region(image_folder_path)
     
+    print("Finding OCR Masks")
+    _, description_masks = find_masks(image_folder_path, 'mask_model', db_to_process, 1920, 1080)
+
     
     # Convert mask data
     outer_crop = []
