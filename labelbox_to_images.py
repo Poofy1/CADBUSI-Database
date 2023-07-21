@@ -260,7 +260,14 @@ def Read_Labelbox_Data(LB_API_KEY, PROJECT_ID, original_images):
     cols = ordering + [col for col in df.columns if col not in ordering]
     df = df.reindex(columns=cols)
 
-    df = df.drop(['bad_images', 'doppler_image', '==== SECTION 1 ====', '==== SECTION 2 ====', '==== SECTION 5 ====', ], axis = 1)
+    # List of columns to be dropped
+    columns_to_drop = ['bad_images', 'doppler_image', '==== SECTION 1 ====', '==== SECTION 2 ====', '==== SECTION 5 ====']
+
+    # Check if the columns exist in the DataFrame before dropping them
+    columns_to_drop_existing = [col for col in columns_to_drop if col in df.columns]
+
+    # Drop the existing columns
+    df = df.drop(columns_to_drop_existing, axis=1)
 
     # Write final csv to disk
     df.to_csv(f'{env}/database/LabeledData.csv', index=False)

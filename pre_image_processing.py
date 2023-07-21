@@ -416,6 +416,10 @@ def process_single_image(image_path):
 
     # Find contours and get the largest one
     contours, _ = cv2.findContours(dilated_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    if not contours:  # Check if contours list is empty
+        return (image_path, None)  # or however you want to handle this case
+
     largest_contour = max(contours, key=cv2.contourArea)
 
     # Get the bounding box
