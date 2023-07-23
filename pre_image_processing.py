@@ -504,16 +504,9 @@ def Perform_OCR():
     
     # Convert mask data
     outer_crop = []
-    for (filename, image_mask) in image_masks:  # Unpack filename and image_mask here
+    for (filename, image_mask) in image_masks:
         if image_mask:
-            x0, y0, x1, y1 = image_mask
-            x = x0
-            y = y0
-            w = x1 - x0
-            h = y1 - y0
-            outer_crop.append([filename, x, y, w, h])  # Include filename in the result
-        else:
-            outer_crop.append([filename, []])  # Include filename even if no mask
+            outer_crop.append([filename] + list(image_mask))
     
     print("Performing OCR")
     with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:

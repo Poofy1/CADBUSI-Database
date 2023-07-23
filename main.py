@@ -5,6 +5,7 @@ from images_to_labelbox import Crop_and_save_images
 from pre_image_processing import Pre_Process, Perform_OCR
 from labelbox_to_images import Read_Labelbox_Data
 from ML_processing.inpaint import Inpaint_Dataset
+from ML_processing.orientation_detection import Find_Orientation
 from dcm_parser import Parse_Zip_Files, Transfer_Laterality
 env = os.path.dirname(os.path.abspath(__file__))
 
@@ -77,10 +78,10 @@ if __name__ == '__main__':
             Pre_Process()
 
             
-        user_input = input("Continue with Inpainting step? (y/n): ")
+        user_input = input("Continue with Data Cleaning step? (y/n): ")
         if user_input.lower() == "y":
+            Find_Orientation(f'{env}/database/images/', 'ori_model', f'{env}/database/ImageData.csv')
             Inpaint_Dataset(f'{env}/database/ImageData.csv', f'{env}/database/images/')
-        
         
         user_input = input("Continue with Labelbox_Tranform step? (y/n): ")
         if user_input.lower() == "y":
