@@ -455,10 +455,11 @@ def get_ultrasound_region(image_folder_path):
     # Thread pool and TQDM
     with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
         futures = {executor.submit(process_single_image, image_path): image_path for image_path in image_paths}
-        # Wrap the futures list with tqdm for progress bar
-        for future in tqdm(as_completed(futures), total=len(futures)):
-            # Append the result to image_data
-            image_data.append(future.result())
+        with tqdm(total=len(futures)) as pbar:
+            for future in as_completed(futures):
+                # Append the result to image_data
+                image_data.append(future.result())
+                pbar.update()
 
     return image_data
 
