@@ -8,7 +8,6 @@ def Crop_Debug():
     
     image_output = f"{env}/debug_output/"
     os.makedirs(image_output, exist_ok=True)
-
     
     image_folder_path = f"{env}/database/images/"
     input_file = f'{env}/database/ImageData.csv'
@@ -34,14 +33,19 @@ def Crop_Debug():
         # Draw the box
         start_point = (x, y)
         end_point = (x + w, y + h)
-        color = (255, 0, 0)  # Blue color in BGR
-        thickness = 2
+        color = (0, 0, 255)  # Blue color in BGR
+        thickness = 4
         image = cv2.rectangle(image, start_point, end_point, color, thickness)
+        
+        # Add text to the image
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        text = str(row['description']).upper()  # Convert text to uppercase
+        text_color = (0, 255, 0)  # Green color in BGR
+        font_scale = 1  # Increase this to make the text bigger
+        image = cv2.putText(image, text, (x, y - 10), font, font_scale, text_color, 2, cv2.LINE_AA)
         
         # Save the image with bounding box
         output_path = os.path.join(image_output, row['ImageName'])
-        print(output_path)
         cv2.imwrite(output_path, image)
-
 
 Crop_Debug()

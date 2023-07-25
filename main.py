@@ -2,7 +2,8 @@ import os
 import pandas as pd
 from val_split import PerformVal
 from images_to_labelbox import Crop_and_save_images
-from pre_image_processing import Pre_Process, Perform_OCR
+from pre_image_processing import Perform_OCR
+from data_selection import Parse_Data
 from labelbox_to_images import Read_Labelbox_Data
 from ML_processing.inpaint import Inpaint_Dataset
 from ML_processing.orientation_detection import Find_Orientation
@@ -75,7 +76,7 @@ if __name__ == '__main__':
         
         user_input = input("Continue with Data_Selection step? (y/n): ")
         if user_input.lower() == "y":
-            Pre_Process()
+            Parse_Data()
 
             
         user_input = input("Continue with Data Cleaning step? (y/n): ")
