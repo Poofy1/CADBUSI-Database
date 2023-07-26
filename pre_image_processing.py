@@ -181,8 +181,8 @@ def fetch_index_for_patient_id( id, db, only_gray = False, only_calipers = False
     # only_calipers = True → return only files that include calipers
     # returns list of indices
     
-    if id in db['Accession_Number'].tolist():
-         indices= db.index[db['Accession_Number']==id].tolist()
+    if id in db['Patient_ID'].tolist():
+         indices= db.index[db['Patient_ID']==id].tolist()
     else:
         indices = []
     return indices
@@ -198,8 +198,8 @@ def find_mixed_lateralities( db ):
         list of patient ids from db for which the lateralities are mixed
     '''
     db['latIsLeft']=(db['laterality']=='left')
-    df = db.groupby(['Accession_Number']).agg({'Accession_Number':'count', 'latIsLeft':'sum'})
-    df['notPure'] = ~( (df['latIsLeft']==0) |  (df['latIsLeft']==df['Accession_Number']) )
+    df = db.groupby(['Patient_ID']).agg({'Patient_ID':'count', 'latIsLeft':'sum'})
+    df['notPure'] = ~( (df['latIsLeft']==0) |  (df['latIsLeft']==df['Patient_ID']) )
     
     mixedPatientIDs = df[df['notPure']].index.tolist()
     return mixedPatientIDs
@@ -295,10 +295,10 @@ def get_image_sizes(image_folder_path, filenames):
 
 
 def process_single_image(image_path):
-    buffer_size = 5  # Define buffer size here
+    buffer_size = 10  # Define buffer size here
     num_top_contours = 12  # Define how many of the top contours to consider
 
-    margin = 10
+    margin = 15
     image = cv2.imread(image_path, 0)  # Load grayscale image directly
     
     #Remove caliper box
@@ -366,8 +366,8 @@ def process_single_image(image_path):
         xright, _ = max(upper_points, key=lambda point: point[0])
 
         # Adjust x and w values based on new found xleft and xright
-        x = max(x, xleft - buffer_size)
-        w = min(x + w, xright + buffer_size) - x
+        x = max(x, xleft + buffer_size)
+        w = min(x + w, xright - buffer_size) - x
         
     
     
@@ -377,9 +377,9 @@ def process_single_image(image_path):
     return (image_name, (x, y, w, h))
 
 
-def get_ultrasound_region(image_folder_path):
-    # Construct image paths
-    image_paths = [os.path.join(image_folder_path, filename) for filename in os.listdir(image_folder_path)]
+def get_ultrasound_region(image_folder_path, db_to_process):
+    # Construct image paths for only the new data
+    image_paths = [os.path.join(image_folder_path, filename) for filename in db_to_process['ImageName']]
 
     # Collect image data in list
     image_data = []
@@ -394,6 +394,7 @@ def get_ultrasound_region(image_folder_path):
                 pbar.update()
 
     return image_data
+
 
 
 
@@ -429,17 +430,11 @@ def Perform_OCR():
     has_calipers = find_calipers(image_folder_path, 'caliper_model', db_to_process)
     
     print("Finding Image Masks")
-    image_masks = get_ultrasound_region(image_folder_path)
+    image_masks = get_ultrasound_region(image_folder_path, db_to_process)
     
     print("Finding OCR Masks")
     _, description_masks = find_masks(image_folder_path, 'mask_model', db_to_process, 1920, 1080)
 
-    
-    # Convert mask data
-    outer_crop = []
-    for (filename, image_mask) in image_masks:
-        if image_mask:
-            outer_crop.append([filename] + list(image_mask))
     
     print("Performing OCR")
     with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
@@ -462,23 +457,22 @@ def Perform_OCR():
     # Convert lists of tuples to dictionaries
     has_calipers_dict = {filename: value for filename, value in has_calipers}
     darknesses_dict = {filename: value for filename, value in darknesses}
+    image_masks_dict = {filename: mask for filename, mask in image_masks}
     
     # Convert dictionaries to Series for easy mapping
     descriptions_series = pd.Series(descriptions)
     darknesses_series = pd.Series(darknesses_dict)
     has_calipers_series = pd.Series(has_calipers_dict)
+    image_masks_series = pd.Series(image_masks_dict)
 
     # Update dataframe using map
     db_to_process['description'] = db_to_process['ImageName'].map(descriptions_series)
     db_to_process['darkness'] = db_to_process['ImageName'].map(darknesses_series)
     db_to_process['has_calipers'] = db_to_process['ImageName'].map(has_calipers_series)
-
-    # Process the 'outer_crop' and 'inner_crop' lists
-    outer_crop_dict = {filename: values for filename, *values in outer_crop}
-
-    outer_crop_series = pd.Series(outer_crop_dict)
-
-    db_to_process[['crop_x', 'crop_y', 'crop_w', 'crop_h']] = db_to_process['ImageName'].map(outer_crop_series).apply(pd.Series)
+    db_to_process['bounding_box'] = db_to_process['ImageName'].map(image_masks_series)
+    
+    
+    db_to_process[['crop_x', 'crop_y', 'crop_w', 'crop_h']] = pd.DataFrame(db_to_process['bounding_box'].tolist(), index=db_to_process.index)
 
     # Construct a temporary DataFrame with the feature extraction
     temp_df = db_to_process.loc[db_to_process['description'].str.len() > 0, 'description'].apply(lambda x: extract_descript_features(x, labels_dict=description_labels_dict)).apply(pd.Series)
@@ -488,7 +482,6 @@ def Perform_OCR():
         db_to_process[column] = temp_df[column]
         
     db_out.update(db_to_process, overwrite=True)
-
     db_out.to_csv(input_file,index=False)
 
 

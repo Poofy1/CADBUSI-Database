@@ -9,24 +9,27 @@ from tqdm import tqdm
 env = os.path.dirname(os.path.abspath(__file__))
 
 def Inpaint_Dataset(csv_file_path, input_folder, tile_size=256, overlap=84, dilate_radius=5):    
+    print("Inpainting Useful Caliper Images")
     
     # Load the CSV file
     data = pd.read_csv(csv_file_path)
     
-    # Initialize 'CaliperImage' column
-    data['Inpainted'] = False
-    
-    # Copy data for processing
-    processed_data = data.copy()
+    # Add 'Inpainted' column if not present in the CSV
+    if 'Inpainted' not in data.columns:
+        data['Inpainted'] = False
+    else:
+        data['Inpainted'] = data['Inpainted'].where(data['Inpainted'], False)
 
     # Filter the copied data
-    processed_data = processed_data[processed_data['label'] == True]
-    processed_data = processed_data[processed_data['has_calipers'] == True]
-    
+    processed_data = data[(data['label'] == True) & 
+                          (data['has_calipers'] == True) & 
+                          (data['Inpainted'] == False)]
+
     # Defining the structuring element for dilation
     structuring_element = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * dilate_radius + 1, 2 * dilate_radius + 1))
     
     for index, row in tqdm(processed_data.iterrows(), total=len(processed_data)):
+        
         image_name = row['ImageName']
         input_image_path = input_folder + image_name 
         radius = 5
@@ -65,7 +68,7 @@ def Inpaint_Dataset(csv_file_path, input_folder, tile_size=256, overlap=84, dila
         os.remove(input_image_path)
         cv2.imwrite(input_image_path, final_image)
 
-        # Find the index of this row in the original DataFrame and update 'CaliperImage'
+        # Find the index of this row in the original DataFrame and update 'Inpainted'
         original_index = data[data['ImageName'] == row['ImageName']].index[0]
         data.loc[original_index, 'Inpainted'] = True
 

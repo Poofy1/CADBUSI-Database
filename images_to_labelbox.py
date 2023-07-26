@@ -12,22 +12,26 @@ def process_group(Patient_ID, patient_group, images_per_row, existing_data, outp
     total_height = 0
     total_width = 0
     
+    # Track groups that we have found
+    found_groups = set()
+
     for group_val in ['long', 'trans', 'doppler', 'other']:
         group = patient_group[patient_group['group'] == group_val]
         group_images = []
 
         for index, row in group.iterrows():
             image_path = os.path.join(image_input_folder, row['ImageName'])
-                
-                
+
             if os.path.isfile(image_path):
                 img = Image.open(image_path)
                 # Crop the image
                 cropped_img = img.crop((row['RegionLocationMinX0'], row['RegionLocationMinY0'], row['RegionLocationMaxX1'], row['RegionLocationMaxY1']))
                 group_images.append(cropped_img)
-        
 
         if group_images:
+            # This group has images, so add it to the found_groups set
+            found_groups.add(group_val)
+            
             # Create a title bar
             if group_val == 'long':
                 title_bar_color = (100, 100, 255) 
@@ -74,56 +78,56 @@ def process_group(Patient_ID, patient_group, images_per_row, existing_data, outp
                 row_width = 0
                 total_height += img1.height
 
-
-    if images:
-        # Join all images into one
-        new_img = Image.new('RGB', (total_width, total_height))
-        y_offset = 0
-        x_offset = 0
-        reset_row = 0
-        # Add the images to the new image
-        for index, img in enumerate(images):
-            record = image_records[index]
-            if record is None:
-                new_img.paste(img, (0, y_offset))
-                reset_row = 0
-                x_offset = 0
-                y_offset += img.height
-            else:
-                if record['group'] != "empty_space": # Skip Empty Spaces
-                    if record['ImageName'] in existing_data['ImageName'].values: # If the image filename exists
-                        existing_data.loc[existing_data['ImageName'] == record['ImageName'], 
-                                        ['Patient_ID', 'group', 'x', 'y', 'width', 'height', 'us_x0', 'us_y0', 'us_x1', 'us_y1', 'inpainted']] = [
-                                            int(Patient_ID), record['group'], x_offset, y_offset, img.width, img.height, int(record['us_x0']), 
-                                            int(record['us_y0']), int(record['us_x1']), int(record['us_y1'])]
-                    else: # If the image filename doesn't exist
-                        new_row = pd.DataFrame([{
-                            'Patient_ID': int(Patient_ID),
-                            'group': record['group'],
-                            'ImageName': record['ImageName'],
-                            'x': x_offset,
-                            'y': y_offset,
-                            'width': img.width,
-                            'height': img.height,
-                            'us_x0': int(record['us_x0']),
-                            'us_y0': int(record['us_y0']),
-                            'us_x1': int(record['us_x1']),
-                            'us_y1': int(record['us_y1'])}])
-                        existing_data = existing_data.append(new_row, ignore_index=True)
-                    
-                new_img.paste(img, (x_offset, y_offset))
-                
-                reset_row += 1
-                if reset_row == images_per_row:
+    if set(['long', 'trans', 'doppler']).issubset(found_groups):
+        if images:
+            # Join all images into one
+            new_img = Image.new('RGB', (total_width, total_height))
+            y_offset = 0
+            x_offset = 0
+            reset_row = 0
+            # Add the images to the new image
+            for index, img in enumerate(images):
+                record = image_records[index]
+                if record is None:
+                    new_img.paste(img, (0, y_offset))
                     reset_row = 0
                     x_offset = 0
                     y_offset += img.height
                 else:
-                    x_offset += img.width
+                    if record['group'] != "empty_space": # Skip Empty Spaces
+                        if record['ImageName'] in existing_data['ImageName'].values: # If the image filename exists
+                            existing_data.loc[existing_data['ImageName'] == record['ImageName'], 
+                                            ['Patient_ID', 'group', 'x', 'y', 'width', 'height', 'us_x0', 'us_y0', 'us_x1', 'us_y1', 'inpainted']] = [
+                                                int(Patient_ID), record['group'], x_offset, y_offset, img.width, img.height, int(record['us_x0']), 
+                                                int(record['us_y0']), int(record['us_x1']), int(record['us_y1'])]
+                        else: # If the image filename doesn't exist
+                            new_row = pd.DataFrame([{
+                                'Patient_ID': int(Patient_ID),
+                                'group': record['group'],
+                                'ImageName': record['ImageName'],
+                                'x': x_offset,
+                                'y': y_offset,
+                                'width': img.width,
+                                'height': img.height,
+                                'us_x0': int(record['us_x0']),
+                                'us_y0': int(record['us_y0']),
+                                'us_x1': int(record['us_x1']),
+                                'us_y1': int(record['us_y1'])}])
+                            existing_data = existing_data.append(new_row, ignore_index=True)
+                        
+                    new_img.paste(img, (x_offset, y_offset))
                     
-            # Save the new image
-            new_img.save(os.path.join(output_folder, f'{int(Patient_ID)}.png'))
-            
+                    reset_row += 1
+                    if reset_row == images_per_row:
+                        reset_row = 0
+                        x_offset = 0
+                        y_offset += img.height
+                    else:
+                        x_offset += img.width
+                        
+                # Save the new image
+                new_img.save(os.path.join(output_folder, f'{int(Patient_ID)}.png'))
+
     return existing_data
 
 
@@ -153,7 +157,7 @@ def Crop_and_save_images(images_per_row):
     data['group'] = data['label_cat']
 
     # Group the data by 'Patient_ID'
-    grouped_patient = data.groupby('Accession_Number')
+    grouped_patient = data.groupby('Patient_ID')
     # Check if the output CSV file exists
     csv_exists = os.path.isfile(output_csv)
 

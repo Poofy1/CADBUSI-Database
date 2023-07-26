@@ -70,8 +70,19 @@ def Find_Orientation(images_dir, model_name, csv_input, image_size=375):
         transforms.Normalize([0.5], [0.5]),
     ])
     db_out = pd.read_csv(csv_input)
-    db_to_process = db_out[(db_out['orientation'] == 'unknown')]
-    db_to_process = db_to_process[(db_to_process['RegionCount'] == 1)]
+    if 'reparsed_orientation' not in db_out.columns:
+        db_out['reparsed_orientation'] = False
+    else:
+        db_out['reparsed_orientation'] = db_out['reparsed_orientation'].where(db_out['reparsed_orientation'], False)
+        
+    db_to_process = db_out[(db_out['orientation'] == 'unknown') 
+                       & (db_out['RegionCount'] == 1) 
+                       & (db_out['reparsed_orientation'] != True)]
+    
+    
+    
+    # Add new column 'reparsed_orientation' and set its value to True
+    db_to_process['reparsed_orientation'] = True
     
     dataset = MyDataset(images_dir, db_to_process, transform=preprocess)
     dataloader = DataLoader(dataset, batch_size=4, num_workers = 1)

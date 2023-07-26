@@ -47,28 +47,28 @@ def choose_images_to_label(db, case_data):
     
     #Add back majority focused images
     # Parse 'StudyDescription' for 'FOCUSED LEFT' or 'FOCUSED RIGHT'
-    focus_left_studies = case_data[case_data['StudyDescription'].str.contains('FOCUSED LEFT')]['Accession_Number'].values
-    db.loc[(db['Accession_Number'].isin(focus_left_studies)) & (db['laterality'] == 'right'), 'label'] = False
+    focus_left_studies = case_data[case_data['StudyDescription'].str.contains('FOCUSED LEFT')]['Patient_ID'].values
+    db.loc[(db['Patient_ID'].isin(focus_left_studies)) & (db['laterality'] == 'right'), 'label'] = False
 
-    focus_right_studies = case_data[case_data['StudyDescription'].str.contains('FOCUSED RIGHT')]['Accession_Number'].values
-    db.loc[(db['Accession_Number'].isin(focus_right_studies)) & (db['laterality'] == 'left'), 'label'] = False
+    focus_right_studies = case_data[case_data['StudyDescription'].str.contains('FOCUSED RIGHT')]['Patient_ID'].values
+    db.loc[(db['Patient_ID'].isin(focus_right_studies)) & (db['laterality'] == 'left'), 'label'] = False
     
     # If 'BILATERAL' is present in 'StudyDescription', set 'label' to False for all images in that study
-    bilateral_studies = case_data[case_data['StudyDescription'].str.contains('BILATERAL')]['Accession_Number'].values
-    db.loc[db['Accession_Number'].isin(bilateral_studies), 'label'] = False
+    bilateral_studies = case_data[case_data['StudyDescription'].str.contains('BILATERAL')]['Patient_ID'].values
+    db.loc[db['Patient_ID'].isin(bilateral_studies), 'label'] = False
     
     # Check for mixed lateralities only in these non-focus studies
-    non_focus_studies = case_data[~case_data['StudyDescription'].str.contains('FOCUSED|BILATERAL')]['Accession_Number'].values
-    mixedIDs = find_mixed_lateralities( db[db['Accession_Number'].isin(non_focus_studies)] )
-    db.loc[db['Accession_Number'].isin(mixedIDs),'label'] = False
+    non_focus_studies = case_data[~case_data['StudyDescription'].str.contains('FOCUSED|BILATERAL')]['Patient_ID'].values
+    mixedIDs = find_mixed_lateralities( db[db['Patient_ID'].isin(non_focus_studies)] )
+    db.loc[db['Patient_ID'].isin(mixedIDs),'label'] = False
     
     # Set label = False for all images with 'unknown' laterality
     db.loc[db['laterality'] == 'unknown', 'label'] = False
     
 
     # If 'chest' or 'mastectomy' is present in 'StudyDescription', set 'label' to False for all images in that study
-    chest_or_mastectomy_studies = case_data[case_data['StudyDescription'].str.contains('chest|mastectomy', case=False)]['Accession_Number'].values
-    db.loc[db['Accession_Number'].isin(chest_or_mastectomy_studies), 'label'] = False
+    chest_or_mastectomy_studies = case_data[case_data['StudyDescription'].str.contains('chest|mastectomy', case=False)]['Patient_ID'].values
+    db.loc[db['Patient_ID'].isin(chest_or_mastectomy_studies), 'label'] = False
     
      # Set label = False for all images with 'RegionCount' > 1
     db.loc[db['RegionCount'] > 1, 'label'] = False
@@ -146,7 +146,7 @@ def find_nearest_images(db, patient_id, image_folder_path):
 
 
 def process_patient_id(pid, db_out, image_folder_path):
-    subset = db_out[db_out['Accession_Number'] == pid]
+    subset = db_out[db_out['Patient_ID'] == pid]
     
     result = find_nearest_images(subset, pid, image_folder_path)
     idxs = result.keys()
@@ -175,7 +175,7 @@ def Parse_Data():
     db_to_process = db_out[db_out['processed'] == False]
 
     print("Finding Similar Images")
-    patient_ids = db_to_process['Accession_Number'].unique()
+    patient_ids = db_to_process['Patient_ID'].unique()
 
     db_to_process['closest_fn']=''
     db_to_process['distance'] = -1
