@@ -297,19 +297,22 @@ def Parse_Zip_Files(input, raw_storage_database, data_range):
             file.write('%s\n' % item)
 
     # Find all csv files and combine into df
-    csv_files_list = get_files_by_extension(raw_storage_database, '.csv')
-    dataframes = [pd.read_csv(csv_file) for csv_file in csv_files_list]
-    csv_df = pd.concat(dataframes, ignore_index=True)
+    csv_df = pd.read_csv("D:/DATA/CASBUSI/cases_anon/total_cases_anon.csv")
+    
     # group the dataframe by Patient_ID and Accession_Number
     grouped_df = csv_df.groupby(['Patient_ID','Accession_Number'])
-    csv_df = grouped_df.agg({'BI-RADS': 'first',
+    csv_df = grouped_df.agg({'Biopsy_Accession': list,
+                            'Biopsy_Laterality': list,
+                            'BI-RADS': 'first',
+                            'Study_Laterality': 'first',
                             'Biopsy': list,
                             'Path_Desc': list,
                             'Density_Desc': list,
+                            'Facility': 'first',
                             'Age': 'first', 
                             'Race': 'first', 
                             'Ethnicity': 'first'}).reset_index()
-    
+
     
     # Convert 'Patient_ID' to str in both dataframes before merging
     temp_df['Patient_ID'] = temp_df['Patient_ID'].astype(int)
@@ -324,10 +327,47 @@ def Parse_Zip_Files(input, raw_storage_database, data_range):
     # Merge duplicate_count with csv_df
     csv_df = pd.merge(csv_df, duplicate_count, on='Patient_ID', how='left')
 
+        
+    # Create Breast level data
+    breast_csv = csv_df[['Patient_ID', 'Accession_Number']].copy()
+
+    # Duplicate the rows and add 'Breast' column
+    breast_csv['Breast'] = 'left'
+    breast_csv_right = breast_csv.copy()
+    breast_csv_right['Breast'] = 'right'
+
+    # Concatenate the original and duplicate rows
+    breast_csv = pd.concat([breast_csv, breast_csv_right], ignore_index=True)
+    breast_csv = breast_csv.sort_values('Accession_Number')
+    
+    breast_csv['Biopsy'] = None
+    breast_csv['Path_Desc'] = None
+    breast_csv['Density_Desc'] = None
+
+    # Iterate over the rows of the original DataFrame
+    for idx, row in csv_df.iterrows():
+        if row['Biopsy_Laterality'] is not None:
+            # Iterate over the elements of 'Biopsy_Laterality'
+            for i, laterality in enumerate(row['Biopsy_Laterality']):
+                if isinstance(laterality, str):
+                    # Find the matching rows in breast_csv
+                    matching_rows = (breast_csv['Patient_ID'] == row['Patient_ID']) & \
+                                    (breast_csv['Accession_Number'] == row['Accession_Number']) & \
+                                    (breast_csv['Breast'] == laterality.lower())
+                    # Set 'Biopsy', 'Path_Desc', and 'Density_Desc' for the matching rows
+                    if isinstance(row['Biopsy'], list) and len(row['Biopsy']) > i:
+                        breast_csv.loc[matching_rows, 'Biopsy'] = row['Biopsy'][i]
+                    if isinstance(row['Path_Desc'], list) and len(row['Path_Desc']) > i:
+                        breast_csv.loc[matching_rows, 'Path_Desc'] = row['Path_Desc'][i]
+                    if isinstance(row['Density_Desc'], list) and len(row['Density_Desc']) > i:
+                        breast_csv.loc[matching_rows, 'Density_Desc'] = row['Density_Desc'][i]
+
+    
     # Check if CSV files already exist
     image_csv_file = f'{parsed_database}ImageData.csv'
     video_csv_file = f'{parsed_database}VideoData.csv'
     case_study_csv_file = f'{parsed_database}CaseStudyData.csv' 
+    breast_csv_file = f'{parsed_database}BreastData.csv' 
     
     image_combined_df = image_df
     if os.path.isfile(image_csv_file):
@@ -353,40 +393,17 @@ def Parse_Zip_Files(input, raw_storage_database, data_range):
         csv_df = pd.concat([existing_case_study_df, csv_df])
         csv_df = csv_df.sort_values('Patient_ID').drop_duplicates('Patient_ID', keep='last')
         csv_df = csv_df.reset_index(drop=True)
+        
+    if os.path.isfile(breast_csv_file):
+        existing_breast_df = pd.read_csv(breast_csv_file)
+        breast_csv = pd.concat([existing_breast_df, breast_csv], ignore_index=True)
+        breast_csv = breast_csv.sort_values(['Patient_ID', 'Accession_Number', 'Breast'])
+        breast_csv = breast_csv.drop_duplicates(subset=['Patient_ID', 'Accession_Number', 'Breast'], keep='last')
+        breast_csv = breast_csv.reset_index(drop=True)
+
 
     # Export the DataFrames to CSV files
     image_combined_df.to_csv(image_csv_file, index=False)
     video_df.to_csv(video_csv_file, index=False)
     csv_df.to_csv(case_study_csv_file, index=False)
-    
-    
-
-def Transfer_Laterality():
-    
-    csv_df_path = f"{env}/database/CaseStudyData.csv"
-    image_df_path = f"{env}/database/ImageData.csv"
-    
-    csv_df = pd.read_csv(csv_df_path)
-    image_df = pd.read_csv(image_df_path)
-    
-    # create a dictionary to store the result
-    patient_laterality = {}
-
-    # group by Patient_ID
-    for name, group in image_df.groupby('Patient_ID'):
-        if 'unknown' in group['laterality'].values:
-            patient_laterality[name] = 'unknown'
-        elif 'left' in group['laterality'].values and 'right' in group['laterality'].values:
-            patient_laterality[name] = 'bilateral'
-        elif 'left' in group['laterality'].values:
-            patient_laterality[name] = 'left'
-        elif 'right' in group['laterality'].values:
-            patient_laterality[name] = 'right'
-        else:
-            # in case there are other values we haven't accounted for
-            patient_laterality[name] = 'unknown'
-    
-    # create a new column in csv_df based on patient_laterality dictionary
-    csv_df['laterality'] = csv_df['Patient_ID'].map(patient_laterality)
-    
-    csv_df.to_csv(csv_df_path, index=False)
+    breast_csv.to_csv(breast_csv_file, index=False)

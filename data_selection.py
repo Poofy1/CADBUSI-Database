@@ -45,32 +45,39 @@ def choose_images_to_label(db, case_data):
     male_patient_ids = case_data[case_data['PatientSex'] == 'M']['Patient_ID'].values
     db.loc[db['Patient_ID'].isin(male_patient_ids),'label'] = False
     
-    #Add back majority focused images
-    # Parse 'StudyDescription' for 'FOCUSED LEFT' or 'FOCUSED RIGHT'
-    focus_left_studies = case_data[case_data['StudyDescription'].str.contains('FOCUSED LEFT')]['Patient_ID'].values
+    # Parse 'Study_Laterality' for 'LEFT' or 'RIGHT'
+    focus_left_studies = case_data[case_data['Study_Laterality'] == 'LEFT']['Patient_ID'].values
     db.loc[(db['Patient_ID'].isin(focus_left_studies)) & (db['laterality'] == 'right'), 'label'] = False
 
-    focus_right_studies = case_data[case_data['StudyDescription'].str.contains('FOCUSED RIGHT')]['Patient_ID'].values
+    focus_right_studies = case_data[case_data['Study_Laterality'] == 'RIGHT']['Patient_ID'].values
     db.loc[(db['Patient_ID'].isin(focus_right_studies)) & (db['laterality'] == 'left'), 'label'] = False
     
-    # If 'BILATERAL' is present in 'StudyDescription', set 'label' to False for all images in that study
-    bilateral_studies = case_data[case_data['StudyDescription'].str.contains('BILATERAL')]['Patient_ID'].values
-    db.loc[db['Patient_ID'].isin(bilateral_studies), 'label'] = False
+    # If 'BILATERAL' is present in 'Study_Laterality', handle it based on 'Biopsy_Laterality'
+    bilateral_cases = case_data[case_data['Study_Laterality'] == 'BILATERAL']
+    for idx, row in bilateral_cases.iterrows():
+        if row['Biopsy_Laterality'] is not None:
+            # Count the number of 'left' and 'right' in 'Biopsy_Laterality'
+            left_count = row['Biopsy_Laterality'].count('left')
+            right_count = row['Biopsy_Laterality'].count('right')
+            # Remove the images of the other laterality if 'Biopsy_Laterality' contains only 'left' or only 'right'
+            if left_count > 0 and right_count == 0:
+                db.loc[(db['Patient_ID'] == row['Patient_ID']) & (db['laterality'] == 'right'), 'label'] = False
+            elif right_count > 0 and left_count == 0:
+                db.loc[(db['Patient_ID'] == row['Patient_ID']) & (db['laterality'] == 'left'), 'label'] = False
+            # Use both 'left' and 'right' if 'Biopsy_Laterality' contains both and they have at least 2 images
+            elif left_count > 1 and right_count > 1:
+                db.loc[(db['Patient_ID'] == row['Patient_ID']) & (db['laterality'] == 'unknown'), 'label'] = False
     
-    # Check for mixed lateralities only in these non-focus studies
-    non_focus_studies = case_data[~case_data['StudyDescription'].str.contains('FOCUSED|BILATERAL')]['Patient_ID'].values
-    mixedIDs = find_mixed_lateralities( db[db['Patient_ID'].isin(non_focus_studies)] )
-    db.loc[db['Patient_ID'].isin(mixedIDs),'label'] = False
     
     # Set label = False for all images with 'unknown' laterality
     db.loc[db['laterality'] == 'unknown', 'label'] = False
     
 
-    # If 'chest' or 'mastectomy' is present in 'StudyDescription', set 'label' to False for all images in that study
+    """# If 'chest' or 'mastectomy' is present in 'StudyDescription', set 'label' to False for all images in that study
     chest_or_mastectomy_studies = case_data[case_data['StudyDescription'].str.contains('chest|mastectomy', case=False)]['Patient_ID'].values
-    db.loc[db['Patient_ID'].isin(chest_or_mastectomy_studies), 'label'] = False
+    db.loc[db['Patient_ID'].isin(chest_or_mastectomy_studies), 'label'] = False"""
     
-     # Set label = False for all images with 'RegionCount' > 1
+    # Set label = False for all images with 'RegionCount' > 1
     db.loc[db['RegionCount'] > 1, 'label'] = False
     
     return db

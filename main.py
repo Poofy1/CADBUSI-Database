@@ -7,7 +7,7 @@ from data_selection import Parse_Data
 from labelbox_to_images import Read_Labelbox_Data
 from ML_processing.inpaint import Inpaint_Dataset
 from ML_processing.orientation_detection import Find_Orientation
-from dcm_parser import Parse_Zip_Files, Transfer_Laterality
+from dcm_parser import Parse_Zip_Files
 env = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -23,8 +23,8 @@ LB_API_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJjbGc5emFjOTIyM
 PROJECT_ID = 'clgr3eeyn00tr071n6tjgatsu'
 
 # Select Mode (Only one true at a time!)
-only_append_to_database = False
-only_retreive_labelbox_data = True
+only_append_to_database = True
+only_retreive_labelbox_data = False
 only_update_val = False
 
 # Paths
@@ -32,17 +32,14 @@ zip_input = f'D:/DATA/CASBUSI/zip_files/'
 raw_storage_database = f'D:/DATA/CASBUSI/dicoms/'
 
 # Debug Settings 
-data_range = None #[12900,13800] # Set to None to use everything
+data_range = [0,400] # Set to None to use everything
 reseted_processed = False
 
 #############################
 
 
 
-
-
 # Start Opterations
-# Static vars
 if __name__ == '__main__':
     if data_range is None:
         data_range = [0, 999999999999]
@@ -67,7 +64,6 @@ if __name__ == '__main__':
         user_input = input("Continue with OCR step? (y/n): ")
         if user_input.lower() == "y":
             Perform_OCR()
-            Transfer_Laterality() # Transfer Laterality to CaseStudyData
         
         user_input = input("Continue with Data Cleaning step? (y/n): ")
         if user_input.lower() == "y":
