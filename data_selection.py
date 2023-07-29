@@ -73,9 +73,9 @@ def choose_images_to_label(db, case_data):
     db.loc[db['laterality'] == 'unknown', 'label'] = False
     
 
-    """# If 'chest' or 'mastectomy' is present in 'StudyDescription', set 'label' to False for all images in that study
+    # If 'chest' or 'mastectomy' is present in 'StudyDescription', set 'label' to False for all images in that study
     chest_or_mastectomy_studies = case_data[case_data['StudyDescription'].str.contains('chest|mastectomy', case=False)]['Patient_ID'].values
-    db.loc[db['Patient_ID'].isin(chest_or_mastectomy_studies), 'label'] = False"""
+    db.loc[db['Patient_ID'].isin(chest_or_mastectomy_studies), 'label'] = False
     
     # Set label = False for all images with 'RegionCount' > 1
     db.loc[db['RegionCount'] > 1, 'label'] = False
@@ -213,4 +213,51 @@ def Parse_Data():
     if 'latIsLeft' in db_out.columns:
         db_out = db_out.drop(columns=['latIsLeft'])
     db_out.to_csv(input_file, index=False)
+    
+    
+
+
+def Rename_Images():
+    input_file = f'{env}/database/ImageData.csv'
+    image_folder_path = f"{env}/database/images/"
+    df = pd.read_csv(input_file)
+    
+    print("Renaming Images With Laterality")
+    
+    # Create a dictionary to keep track of the instance numbers
+    instance_dict = {}
+
+    # Iterate over the rows in the DataFrame
+    for index, row in tqdm(df.iterrows(), total=len(df)):
+        # Get the old image name
+        old_image_name = row['ImageName']
+        
+        # Extract the relevant information
+        patient_id = int(row['Patient_ID'])
+        accession_number = int(row['Accession_Number'])
+        laterality = row['laterality']
+
+        # Create a unique key for this combination
+        key = (patient_id, accession_number, laterality)
+
+        # Get the current instance number for this combination
+        instance_number = instance_dict.get(key, 0)
+
+        # Generate the new image name
+        new_image_name = f"{patient_id}_{accession_number}_{laterality}_{instance_number}.png"
+
+        # Update the instance number in the dictionary
+        instance_dict[key] = instance_number + 1
+
+        # Rename the image file
+        os.rename(os.path.join(image_folder_path, old_image_name), os.path.join(image_folder_path, new_image_name))
+
+        # Update the image name in the DataFrame
+        df.loc[index, 'ImageName'] = new_image_name
+
+    # Save the updated DataFrame to the same CSV file
+    df.to_csv(input_file, index=False)
+
+
+
 

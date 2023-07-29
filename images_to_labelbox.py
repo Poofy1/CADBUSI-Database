@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 env = os.path.dirname(os.path.abspath(__file__))
 
 
-def process_group(Patient_ID, patient_group, images_per_row, existing_data, output_folder, image_input_folder, inpainted_folder):
+def process_group(Patient_ID, laterality, patient_group, images_per_row, existing_data, output_folder, image_input_folder, inpainted_folder):
     images = []
     image_records = []
     total_height = 0
@@ -126,7 +126,7 @@ def process_group(Patient_ID, patient_group, images_per_row, existing_data, outp
                         x_offset += img.width
                         
                 # Save the new image
-                new_img.save(os.path.join(output_folder, f'{int(Patient_ID)}.png'))
+                new_img.save(os.path.join(output_folder, f'{int(Patient_ID)}_{laterality}.png'))
 
     return existing_data
 
@@ -157,7 +157,7 @@ def Crop_and_save_images(images_per_row):
     data['group'] = data['label_cat']
 
     # Group the data by 'Patient_ID'
-    grouped_patient = data.groupby('Patient_ID')
+    grouped_patient = data.groupby(['Patient_ID', 'laterality'])
     # Check if the output CSV file exists
     csv_exists = os.path.isfile(output_csv)
 
@@ -173,8 +173,8 @@ def Crop_and_save_images(images_per_row):
     # Create a ThreadPoolExecutor
     results = []
     with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-        futures = {executor.submit(process_group, Patient_ID, patient_group, images_per_row, existing_data, output_folder, image_input_folder, inpainted_folder) 
-                for Patient_ID, patient_group in grouped_patient}
+        futures = {executor.submit(process_group, Patient_ID, laterality, patient_group, images_per_row, existing_data, output_folder, image_input_folder, inpainted_folder) 
+                for (Patient_ID, laterality), patient_group in grouped_patient}
         pbar = tqdm(total=len(futures), desc="", unit="patient")
         for future in as_completed(futures):
             df_records = future.result()

@@ -3,7 +3,7 @@ import pandas as pd
 from val_split import PerformVal
 from images_to_labelbox import Crop_and_save_images
 from pre_image_processing import Perform_OCR
-from data_selection import Parse_Data
+from data_selection import Parse_Data, Rename_Images
 from labelbox_to_images import Read_Labelbox_Data
 from ML_processing.inpaint import Inpaint_Dataset
 from ML_processing.orientation_detection import Find_Orientation
@@ -32,7 +32,7 @@ zip_input = f'D:/DATA/CASBUSI/zip_files/'
 raw_storage_database = f'D:/DATA/CASBUSI/dicoms/'
 
 # Debug Settings 
-data_range = [0,400] # Set to None to use everything
+data_range = [0,500] # Set to None to use everything
 reseted_processed = False
 
 #############################
@@ -70,6 +70,7 @@ if __name__ == '__main__':
             Find_Orientation(f'{env}/database/images/', 'ori_model', f'{env}/database/ImageData.csv')
             Parse_Data()
             Inpaint_Dataset(f'{env}/database/ImageData.csv', f'{env}/database/images/')
+            Rename_Images()
         
             
         
