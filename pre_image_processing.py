@@ -9,8 +9,15 @@ import easyocr
 from ML_processing.caliper_model import *
 from ML_processing.mask_model import *
 import threading
-local_data = threading.local()
+thread_local = threading.local()
 env = os.path.dirname(os.path.abspath(__file__))
+
+def get_reader():
+    # Check if this thread already has a reader
+    if not hasattr(thread_local, "reader"):
+        # If not, create a new reader and store it in the thread-local storage
+        thread_local.reader = easyocr.Reader(['en'])
+    return thread_local.reader
 
 
 def is_color( img ):
@@ -242,7 +249,14 @@ def get_darkness(image_folder_path, image_masks):
 
 
 def process_image(image_file, description_mask, image_folder_path, reader, kw_list):
-    image = Image.open(os.path.join(image_folder_path, image_file)).convert('L')
+    reader_thread = get_reader()
+    
+    try:
+        image = Image.open(os.path.join(image_folder_path, image_file)).convert('L')
+    except:
+        return [image_file, None]
+    
+    
 
     width, height = image.size
     expand_ratio = 0.025  # Change this to control the crop expansion
@@ -269,7 +283,7 @@ def process_image(image_file, description_mask, image_folder_path, reader, kw_li
     # Apply blur to help OCR
     img_focused = cv2.GaussianBlur(cropped_image_np, (3, 3), 0)
 
-    result = reader.readtext(img_focused,paragraph=True)
+    result = reader_thread.readtext(img_focused,paragraph=True)
 
     #Fix OCR miss read
     result = [[r[0], 'logiq' if r[1].lower() == 'loc' or r[1].lower() == 'lo' else r[1].lower()] for r in result]
@@ -296,11 +310,9 @@ def get_image_sizes(image_folder_path, filenames):
 
 def find_crop(image, num_top_contours, buffer_size, start_row, end_row, margin):
     # Remove caliper box
-    if not hasattr(local_data, "reader"):
-        # If not, create one
-        local_data.reader = easyocr.Reader(['en'])
+    reader_thread = get_reader()
         
-    output = local_data.reader.readtext(image[start_row:end_row, :])
+    output = reader_thread.readtext(image[start_row:end_row, :])
     for detection in output:
         top_left = tuple(map(int, detection[0][0]))
         bottom_right = tuple(map(int, detection[0][2]))
@@ -325,6 +337,10 @@ def find_crop(image, num_top_contours, buffer_size, start_row, end_row, margin):
 
     # Find contours and get the largest one
     contours, _ = cv2.findContours(dilated_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    if not contours:  # Check if contours is empty
+        return None
+    
     largest_contour = max(contours, key=cv2.contourArea)
 
     # Get the bounding box
@@ -357,17 +373,22 @@ def process_single_image(image_path):
     start_row = int(3 * image.shape[0] / 4)
     end_row = image.shape[0]
     margin = 10
-
-    x, y, w, h = find_crop(image, num_top_contours=2, buffer_size=buffer_size, start_row=start_row, end_row=end_row, margin=margin)
-
+    
+    result = find_crop(image, num_top_contours=2, buffer_size=buffer_size, start_row=start_row, end_row=end_row, margin=margin)
+    if result is None:
+        return None
+    x, y, w, h = result
+    
     # Check aspect ratio
     if h != 0:
         aspect_ratio = w / h
         if aspect_ratio < 0.4:  # Adjust this threshold as needed
             # If the aspect ratio is too vertical, find the crop again with a larger num_top_contours
-            x, y, w, h = find_crop(image, num_top_contours=12, buffer_size=buffer_size, start_row=start_row, end_row=end_row, margin=margin)
-
-    
+            result = find_crop(image, num_top_contours=2, buffer_size=buffer_size, start_row=start_row, end_row=end_row, margin=margin)
+            if result is None:
+                return None
+            
+    x, y, w, h = result
     # Store rectangle coordinates and aspect ratio in the image data dictionary
     image_name = os.path.basename(image_path)  # Get image name from image path
     return (image_name, (x, y, w, h))
@@ -385,8 +406,9 @@ def get_ultrasound_region(image_folder_path, db_to_process):
         futures = {executor.submit(process_single_image, image_path): image_path for image_path in image_paths}
         with tqdm(total=len(futures)) as pbar:
             for future in as_completed(futures):
-                # Append the result to image_data
-                image_data.append(future.result())
+                result = future.result()
+                if result is not None:
+                    image_data.append(result)
                 pbar.update()
 
     return image_data
@@ -420,12 +442,6 @@ def Perform_OCR():
     db_to_process = db_out[db_out['processed'] != True]
     db_to_process['processed'] = False
     
-    print("Finding Image Masks")
-    image_masks = get_ultrasound_region(image_folder_path, db_to_process)
-    
-    print("Finding Calipers")
-    has_calipers = find_calipers(image_folder_path, 'caliper_model', db_to_process)
-    
     print("Finding OCR Masks")
     _, description_masks = find_masks(image_folder_path, 'mask_model', db_to_process, 1920, 1080)
 
@@ -445,6 +461,13 @@ def Perform_OCR():
 
         progress.close()
 
+    print("Finding Image Masks")
+    image_masks = get_ultrasound_region(image_folder_path, db_to_process)
+    
+    print("Finding Calipers")
+    has_calipers = find_calipers(image_folder_path, 'caliper_model', db_to_process)
+    
+    
     print("Finding Darkness")
     darknesses = get_darkness(image_folder_path, image_masks)
     

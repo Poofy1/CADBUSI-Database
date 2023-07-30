@@ -52,6 +52,12 @@ def choose_images_to_label(db, case_data):
     focus_right_studies = case_data[case_data['Study_Laterality'] == 'RIGHT']['Patient_ID'].values
     db.loc[(db['Patient_ID'].isin(focus_right_studies)) & (db['laterality'] == 'left'), 'label'] = False
     
+    
+    ###### REMOVESS BILATERAL DATA
+    bilateral_patient_ids = case_data[case_data['Study_Laterality'] == 'BILATERAL']['Patient_ID'].values
+    db.loc[db['Patient_ID'].isin(bilateral_patient_ids), 'label'] = False
+    ######
+    
     # If 'BILATERAL' is present in 'Study_Laterality', handle it based on 'Biopsy_Laterality'
     bilateral_cases = case_data[case_data['Study_Laterality'] == 'BILATERAL']
     for idx, row in bilateral_cases.iterrows():
@@ -74,7 +80,7 @@ def choose_images_to_label(db, case_data):
     
 
     # If 'chest' or 'mastectomy' is present in 'StudyDescription', set 'label' to False for all images in that study
-    chest_or_mastectomy_studies = case_data[case_data['StudyDescription'].str.contains('chest|mastectomy', case=False)]['Patient_ID'].values
+    chest_or_mastectomy_studies = case_data[case_data['StudyDescription'].fillna('').str.contains('chest|mastectomy', case=False)]['Patient_ID'].values
     db.loc[db['Patient_ID'].isin(chest_or_mastectomy_studies), 'label'] = False
     
     # Set label = False for all images with 'RegionCount' > 1
