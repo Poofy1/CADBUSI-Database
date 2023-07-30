@@ -54,6 +54,8 @@ def Get_Labels(response):
             mask_paths = []  # Initialize an empty list to store mask paths
             bad_images = [] 
             doppler_image = []
+            cyst_image = []
+            normal_image = []
             
             for _, row in segmentation_df.iterrows():
                 row = pd.json_normalize(row)
@@ -67,6 +69,10 @@ def Get_Labels(response):
                         doppler_image.append([single_segmentation_row['point.x'], single_segmentation_row['point.y']])
                     elif data_type == "bad_images":
                         bad_images.append([single_segmentation_row['point.x'], single_segmentation_row['point.y']])
+                    elif data_type == "cyst":
+                        cyst_image.append([single_segmentation_row['point.x'], single_segmentation_row['point.y']])
+                    elif data_type == "normal_tissue":
+                        normal_image.append([single_segmentation_row['point.x'], single_segmentation_row['point.y']])
                     else:
                         # Get the mask image
                         mask_response = get_with_retry(single_segmentation_row['instanceURI'])
@@ -112,13 +118,15 @@ def Get_Labels(response):
             data_dict['mask_names'] = str(', '.join(mask_paths))
             data_dict['bad_images'] = bad_images
             data_dict['doppler_image'] = doppler_image
+            data_dict['cyst_images'] = cyst_image
+            data_dict['normal_images'] = normal_image
             data_dict['Patient_ID'] = external_id_digits
 
             # Add data to dataframe
             joined_labels_df = pd.concat([joined_labels_df, pd.DataFrame([data_dict])], ignore_index=True)
 
         # Move Patient_ID to the left
-        cols = ['Patient_ID', 'mask_names', 'bad_images', 'doppler_image'] + [col for col in joined_labels_df.columns if col not in ['Patient_ID', 'mask_names', 'bad_images', 'doppler_image']]
+        cols = ['Patient_ID', 'mask_names', 'bad_images', 'doppler_image', 'cyst_images', 'normal_images'] + [col for col in joined_labels_df.columns if col not in ['Patient_ID', 'mask_names', 'bad_images', 'doppler_image', 'cyst_images', 'normal_images']]
         joined_labels_df = joined_labels_df.reindex(columns=cols)
         
         return joined_labels_df
@@ -254,15 +262,17 @@ def Read_Labelbox_Data(LB_API_KEY, PROJECT_ID, original_images):
     crop_data = pd.read_csv(f'{env}/database/CropData.csv')
     df = Find_Images(df, crop_data, 'doppler_image', 'doppler_image_names')
     df = Find_Images(df, crop_data, 'bad_images', 'bad_image_names')
+    df = Find_Images(df, crop_data, 'cyst_images', 'cyst_image_names')
+    df = Find_Images(df, crop_data, 'normal_images', 'normal_image_names')
     df = Find_Masks(df, crop_data, 'mask_names', 'masked_original_names', original_images)
 
     # Reorder Columns
-    ordering = ['Patient_ID', 'mask_names', 'masked_original_names', 'bad_images', 'bad_image_names', 'doppler_image', 'doppler_image_names']
+    ordering = ['Patient_ID', 'mask_names', 'masked_original_names', 'bad_image_names', 'doppler_image_names', 'cyst_image_names', 'normal_image_names']
     cols = ordering + [col for col in df.columns if col not in ordering]
     df = df.reindex(columns=cols)
 
     # List of columns to be dropped
-    columns_to_drop = ['bad_images', 'doppler_image', '==== SECTION 1 ====', '==== SECTION 2 ====', '==== SECTION 5 ====']
+    columns_to_drop = ['bad_images', 'doppler_image', 'cyst_images', 'normal_images', '==== SECTION 1 ====', '==== SECTION 2 ====', '==== SECTION 5 ====']
 
     # Check if the columns exist in the DataFrame before dropping them
     columns_to_drop_existing = [col for col in columns_to_drop if col in df.columns]

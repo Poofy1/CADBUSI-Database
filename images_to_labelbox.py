@@ -6,7 +6,15 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 env = os.path.dirname(os.path.abspath(__file__))
 
 
-def process_group(Patient_ID, laterality, patient_group, images_per_row, existing_data, output_folder, image_input_folder, inpainted_folder):
+def process_group(Patient_ID, laterality, patient_group, images_per_row, output_folder, image_input_folder):
+    
+    # Define the output image path
+    output_image_path = os.path.join(output_folder, f'{int(Patient_ID)}_{laterality}.png')
+
+    # Check if the image already exists
+    if os.path.isfile(output_image_path):
+        return pd.DataFrame()
+    
     images = []
     image_records = []
     total_height = 0
@@ -78,6 +86,8 @@ def process_group(Patient_ID, laterality, patient_group, images_per_row, existin
                 row_width = 0
                 total_height += img1.height
 
+    new_data = pd.DataFrame(columns=['Patient_ID', 'group', 'ImageName', 'x', 'y', 'width', 'height', 'us_x0', 'us_y0', 'us_x1', 'us_y1'])
+    
     if set(['long', 'trans', 'doppler']).issubset(found_groups):
         if images:
             # Join all images into one
@@ -86,6 +96,10 @@ def process_group(Patient_ID, laterality, patient_group, images_per_row, existin
             x_offset = 0
             reset_row = 0
             # Add the images to the new image
+            
+            
+            
+            
             for index, img in enumerate(images):
                 record = image_records[index]
                 if record is None:
@@ -95,25 +109,21 @@ def process_group(Patient_ID, laterality, patient_group, images_per_row, existin
                     y_offset += img.height
                 else:
                     if record['group'] != "empty_space": # Skip Empty Spaces
-                        if record['ImageName'] in existing_data['ImageName'].values: # If the image filename exists
-                            existing_data.loc[existing_data['ImageName'] == record['ImageName'], 
-                                            ['Patient_ID', 'group', 'x', 'y', 'width', 'height', 'us_x0', 'us_y0', 'us_x1', 'us_y1', 'inpainted']] = [
-                                                int(Patient_ID), record['group'], x_offset, y_offset, img.width, img.height, int(record['us_x0']), 
-                                                int(record['us_y0']), int(record['us_x1']), int(record['us_y1'])]
-                        else: # If the image filename doesn't exist
-                            new_row = pd.DataFrame([{
-                                'Patient_ID': int(Patient_ID),
-                                'group': record['group'],
-                                'ImageName': record['ImageName'],
-                                'x': x_offset,
-                                'y': y_offset,
-                                'width': img.width,
-                                'height': img.height,
-                                'us_x0': int(record['us_x0']),
-                                'us_y0': int(record['us_y0']),
-                                'us_x1': int(record['us_x1']),
-                                'us_y1': int(record['us_y1'])}])
-                            existing_data = existing_data.append(new_row, ignore_index=True)
+                        # If the image filename exists
+                        new_row = pd.DataFrame([{
+                            'Patient_ID': int(Patient_ID),
+                            'group': record['group'],
+                            'ImageName': record['ImageName'],
+                            'x': x_offset,
+                            'y': y_offset,
+                            'width': img.width,
+                            'height': img.height,
+                            'us_x0': int(record['us_x0']),
+                            'us_y0': int(record['us_y0']),
+                            'us_x1': int(record['us_x1']),
+                            'us_y1': int(record['us_y1'])}])
+                        # New code: append the new row to new_data
+                        new_data = new_data.append(new_row, ignore_index=True)
                         
                     new_img.paste(img, (x_offset, y_offset))
                     
@@ -126,9 +136,9 @@ def process_group(Patient_ID, laterality, patient_group, images_per_row, existin
                         x_offset += img.width
                         
                 # Save the new image
-                new_img.save(os.path.join(output_folder, f'{int(Patient_ID)}_{laterality}.png'))
+                new_img.save(output_image_path)
 
-    return existing_data
+    return new_data
 
 
 
@@ -139,7 +149,7 @@ def Crop_and_save_images(images_per_row):
     image_input_folder = f"{env}/database/images/"
     output_csv = f"{env}/database/CropData.csv"
     output_folder = f"{env}/database/labelbox_images/"
-    inpainted_folder = f"{env}/database/inpainted/"
+    labeled_data_file = f"{env}/database/LabeledData.csv"
     
     # Create the output folder if it doesn't exist
     os.makedirs(output_folder, exist_ok=True)
@@ -168,24 +178,34 @@ def Crop_and_save_images(images_per_row):
             existing_data['inpainted'] = False
     else:
         existing_data = pd.DataFrame(columns=['Patient_ID', 'group', 'ImageName', 'x', 'y', 'width', 'height', 'us_x0', 'us_y0', 'us_x1', 'us_y1'])
+        
+    
+    labeled_data = pd.read_csv(labeled_data_file) if os.path.isfile(labeled_data_file) else pd.DataFrame(columns=['Patient_ID'])
     
     
     # Create a ThreadPoolExecutor
     results = []
     with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-        futures = {executor.submit(process_group, Patient_ID, laterality, patient_group, images_per_row, existing_data, output_folder, image_input_folder, inpainted_folder) 
-                for (Patient_ID, laterality), patient_group in grouped_patient}
+        futures = {executor.submit(process_group, Patient_ID, laterality, patient_group, images_per_row, output_folder, image_input_folder) 
+                for (Patient_ID, laterality), patient_group in grouped_patient if int(Patient_ID) not in labeled_data['Patient_ID'].values}
         pbar = tqdm(total=len(futures), desc="", unit="patient")
         for future in as_completed(futures):
             df_records = future.result()
             results.append(df_records)
             pbar.update()
         pbar.close()
+        
+        
+    new_data = pd.concat(results, ignore_index=True)
+    existing_data = existing_data.set_index(['Patient_ID', 'ImageName'])
+    new_data = new_data.set_index(['Patient_ID', 'ImageName'])
 
+    # Concatenate existing_data and new_data, and drop duplicates
+    all_data = pd.concat([existing_data, new_data])
+    all_data = all_data.loc[~all_data.index.duplicated(keep='last')]
+    all_data.reset_index(inplace=True)
     
-    # Concatenate all dataframes into one
-    existing_data = pd.concat(results, ignore_index=True)
-    existing_data = existing_data[existing_data['group'] != "empty_space"]
+    # Apply the filtering to 'all_data' instead of 'existing_data'
+    all_data = all_data[all_data['group'] != "empty_space"]
                         
-    existing_data.to_csv(output_csv, index=False)
-    print("Image processing completed.")
+    all_data.to_csv(output_csv, index=False)
