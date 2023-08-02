@@ -1,4 +1,4 @@
-from pre_image_processing import *
+from OCR import *
 
 
 

@@ -150,6 +150,7 @@ def Crop_and_save_images(images_per_row):
     output_csv = f"{env}/database/CropData.csv"
     output_folder = f"{env}/database/labelbox_images/"
     labeled_data_file = f"{env}/database/LabeledData.csv"
+    case_data = pd.read_csv(f"{env}/database/CaseStudyData.csv")
     
     # Create the output folder if it doesn't exist
     os.makedirs(output_folder, exist_ok=True)
@@ -165,6 +166,14 @@ def Crop_and_save_images(images_per_row):
         return
     
     data['group'] = data['label_cat']
+    
+    # Merge the image data with the trustworthiness data on Patient_ID field
+    case_data = case_data.drop_duplicates(subset='Patient_ID')
+    merged_data = pd.merge(data, case_data, on='Patient_ID', how='left')
+
+    # Filter out data with trustworthiness score above the threshold
+    trust_threshold = 1
+    data = merged_data[merged_data['trustworthiness'] <= trust_threshold]
 
     # Group the data by 'Patient_ID'
     grouped_patient = data.groupby(['Patient_ID', 'laterality'])
@@ -182,10 +191,11 @@ def Crop_and_save_images(images_per_row):
     
     labeled_data = pd.read_csv(labeled_data_file) if os.path.isfile(labeled_data_file) else pd.DataFrame(columns=['Patient_ID'])
     
-    
+
     # Create a ThreadPoolExecutor
     results = []
     with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+        # Submit the process_group function to the executor with the trust threshold
         futures = {executor.submit(process_group, Patient_ID, laterality, patient_group, images_per_row, output_folder, image_input_folder) 
                 for (Patient_ID, laterality), patient_group in grouped_patient if int(Patient_ID) not in labeled_data['Patient_ID'].values}
         pbar = tqdm(total=len(futures), desc="", unit="patient")

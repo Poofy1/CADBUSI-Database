@@ -1,4 +1,4 @@
-from pre_image_processing import *
+from OCR import *
 import cv2
 import pandas as pd
 import os

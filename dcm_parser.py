@@ -56,9 +56,6 @@ def get_files_by_extension(directory, extension):
     return file_paths
 
 
-
-# this part sucks so bad because we are loading the entire dcm file and then passing it here. The dcm file holds ALL THE FRAMES. 
-# This plus we have it one each thread, very bad.
 def parse_video_data(dcm, current_index, parsed_database):
 
     data_dict = {}

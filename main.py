@@ -2,7 +2,8 @@ import os
 import pandas as pd
 from val_split import PerformVal
 from images_to_labelbox import Crop_and_save_images
-from pre_image_processing import Perform_OCR
+from OCR import Perform_OCR
+from trustworthiness import Find_Trust
 from data_selection import Parse_Data, Rename_Images
 from labelbox_to_images import Read_Labelbox_Data
 from ML_processing.inpaint import Inpaint_Dataset
@@ -32,7 +33,7 @@ zip_input = f'D:/DATA/CASBUSI/zip_files/'
 raw_storage_database = f'D:/DATA/CASBUSI/dicoms/'
 
 # Debug Settings 
-data_range = None #[0,100] # Set to None to use everything
+data_range = None #[0,1000] # Set to None to use everything
 reseted_processed = False
 
 #############################
@@ -59,6 +60,7 @@ if __name__ == '__main__':
         user_input = input("Continue with DCM Parsing step? (y/n): ")
         if user_input.lower() == "y":
             Parse_Zip_Files(zip_input, raw_storage_database, data_range)
+            Find_Trust()
             
         
         user_input = input("Continue with OCR step? (y/n): ")
