@@ -1,4 +1,4 @@
-import labelbox, requests, os, re, shutil, time, PIL
+import labelbox, requests, os, re, shutil, time, PIL, glob
 import pandas as pd
 from PIL import Image
 from io import BytesIO
@@ -239,8 +239,23 @@ def Find_Masks(df, crop_data, df_mask_names_col, df_image_names_col, original_im
     #Delete old masks
     shutil.rmtree(f"{env}/database/temp_labelbox_data/")
     
-    return df 
+    return df
+        
+        
+        
+def move_used_images(df, original_images_dir, used_images_dir):
+    # Create directory for used images
+    os.makedirs(used_images_dir, exist_ok=True)
 
+    # Get all unique patient IDs from the df
+    patient_ids = df['Patient_ID'].unique()
+
+    # Iterate over each patient ID
+    for patient_id in patient_ids:
+        # Find the image that contains the patient ID in its name
+        for image_path in glob.glob(f"{original_images_dir}{patient_id}_*.png"):
+            # Move the image to the used_images_dir
+            shutil.move(image_path, f"{used_images_dir}{os.path.basename(image_path)}")
 
 
 def Read_Labelbox_Data(LB_API_KEY, PROJECT_ID, original_images):
@@ -265,6 +280,10 @@ def Read_Labelbox_Data(LB_API_KEY, PROJECT_ID, original_images):
     df = Find_Images(df, crop_data, 'cyst_images', 'cyst_image_names')
     df = Find_Images(df, crop_data, 'normal_images', 'normal_image_names')
     df = Find_Masks(df, crop_data, 'mask_names', 'masked_original_names', original_images)
+    
+    labelbox_images = f"{env}/database/labelbox_images/"
+    used_images_dir = f"{env}/database/used_images/"
+    move_used_images(df, labelbox_images, used_images_dir)
 
     # Reorder Columns
     ordering = ['Patient_ID', 'mask_names', 'masked_original_names', 'bad_image_names', 'doppler_image_names', 'cyst_image_names', 'normal_image_names']

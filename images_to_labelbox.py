@@ -174,9 +174,13 @@ def Crop_and_save_images(images_per_row):
     # Filter out data with trustworthiness score above the threshold
     trust_threshold = 1
     data = merged_data[merged_data['trustworthiness'] <= trust_threshold]
-
+    
+    #Debug Data range
+    #data = data[(data['Patient_ID'] >= 1100) & (data['Patient_ID'] <= 1200)]
+    
     # Group the data by 'Patient_ID'
     grouped_patient = data.groupby(['Patient_ID', 'laterality'])
+
     # Check if the output CSV file exists
     csv_exists = os.path.isfile(output_csv)
 
