@@ -212,7 +212,6 @@ def parse_dcm_files(dcm_files_list, parsed_database):
 
 
 
-
 # Main Method
 def Parse_Zip_Files(input, raw_storage_database, data_range):
     parsed_database = f'{env}/database/'

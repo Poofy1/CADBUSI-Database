@@ -1,6 +1,6 @@
 import os, cv2
-import shutil
 import pandas as pd
+import ast
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 env = os.path.dirname(os.path.abspath(__file__))
@@ -9,6 +9,28 @@ env = os.path.dirname(os.path.abspath(__file__))
 parsed_database = f'{env}/database/'
 output_dir = f'{env}/train/'
 
+biopsy_mapping = {
+        'Pathology Malignant': 'malignant',
+        'Known Biopsy-Proven Malignancy': 'malignant',
+        'High Suspicion for Malignancy': 'malignant',
+        'Highly Suggestive of Malignancy': 'malignant',
+        
+        'Pathology Benign': 'benign',
+        'Probably Benign': 'benign',
+        'Pathology Elevated Risk': 'benign',
+        'Benign': 'benign',
+        
+        'Waiting for Pathology': 'unknown',
+        'Low Suspicion for Malignancy': 'unknown',
+        'Suspicious': 'unknown',
+        'Need Additional Imaging Evaluation': 'unknown',
+        'Post Procedure Mammogram for Marker Placement': 'unknown',
+        'Moderate Suspicion for Malignancy': 'unknown',
+        'Negative': 'unknown',
+    }
+
+def transform_biopsy_list(biopsy_list):
+    return [biopsy_mapping.get(biopsy, 'unknown') for biopsy in biopsy_list]
 
 def process_single_image(row, image_folder_path, image_output):
     image_path = os.path.join(image_folder_path, row['ImageName'])
@@ -48,18 +70,23 @@ def Crop_Images(df):
 
 
 
-def Export_Database():
-    
-    trust_threshold = 2
+def Export_Database(trust_threshold):
     
     os.makedirs(output_dir, exist_ok = True)
     
     image_csv_file = f'{parsed_database}ImageData.csv'
+    breast_csv_file = f'{parsed_database}BreastData.csv' 
     case_study_csv_file = f'{parsed_database}CaseStudyData.csv' 
-    
+
     # Read the case study data and filter it
     case_study_df = pd.read_csv(case_study_csv_file)
     filtered_case_study_df = case_study_df[case_study_df['trustworthiness'] <= trust_threshold]
+    
+    # Reformat biopsy
+    filtered_case_study_df['Biopsy'] = filtered_case_study_df['Biopsy'].apply(ast.literal_eval)
+    filtered_case_study_df['Biopsy'] = filtered_case_study_df['Biopsy'].apply(transform_biopsy_list)
+    
+    
     
     # Read the image data
     image_df = pd.read_csv(image_csv_file)
@@ -70,6 +97,17 @@ def Export_Database():
     # Crop the images for the relevant studies
     Crop_Images(filtered_image_df)
     
-    # Copy the CSV files to the output directory
-    shutil.copy(image_csv_file, output_dir)
-    shutil.copy(case_study_csv_file, output_dir)
+    
+    
+    # Read the breast data
+    breast_df = pd.read_csv(breast_csv_file)
+    
+    # Reformat biopsy
+    breast_df['Biopsy'] = breast_df['Biopsy'].map(biopsy_mapping).fillna('unknown')
+    
+    
+    
+    # Write the filtered dataframes to CSV files in the output directory
+    filtered_image_df.to_csv(os.path.join(output_dir, 'ImageData.csv'), index=False)
+    breast_df.to_csv(os.path.join(output_dir, 'BreastData.csv'), index=False)
+    filtered_case_study_df.to_csv(os.path.join(output_dir, 'CaseStudyData.csv'), index=False)

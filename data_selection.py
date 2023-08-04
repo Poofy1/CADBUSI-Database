@@ -78,18 +78,12 @@ def choose_images_to_label(db, case_data):
     # Set label = False for all images with 'unknown' laterality
     db.loc[db['laterality'] == 'unknown', 'label'] = False
     
-
     # If 'chest' or 'mastectomy' is present in 'StudyDescription', set 'label' to False for all images in that study
     chest_or_mastectomy_studies = case_data[case_data['StudyDescription'].fillna('').str.contains('chest|mastectomy', case=False)]['Patient_ID'].values
     db.loc[db['Patient_ID'].isin(chest_or_mastectomy_studies), 'label'] = False
     
     # Set label = False for all images with 'RegionCount' > 1
     db.loc[db['RegionCount'] > 1, 'label'] = False
-    
-    
-    # Check the aspect ratio of the crop region
-    db['crop_aspect_ratio'] = db['crop_w'] / db['crop_h']
-    db.loc[(db['crop_aspect_ratio'] < 0.15) | (db['crop_aspect_ratio'] > 1.85), 'label'] = False
     
     return db
 

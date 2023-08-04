@@ -384,7 +384,7 @@ def process_single_image(image_path):
         aspect_ratio = w / h
         if aspect_ratio < 0.4:  # Adjust this threshold as needed
             # If the aspect ratio is too vertical, find the crop again with a larger num_top_contours
-            result = find_crop(image, num_top_contours=2, buffer_size=buffer_size, start_row=start_row, end_row=end_row, margin=margin)
+            result = find_crop(image, num_top_contours=12, buffer_size=buffer_size, start_row=start_row, end_row=end_row, margin=margin)
             if result is None:
                 return None
             

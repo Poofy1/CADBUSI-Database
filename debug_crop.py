@@ -30,6 +30,11 @@ def Crop_Debug():
         w = int(row['crop_w'])
         h = int(row['crop_h'])
         
+        # Check if the box is too vertical
+        aspect_ratio = w / h
+        if aspect_ratio < 0.25:  # Adjust this threshold as needed
+            print(f"Image is too vertical: {row['ImageName']}")
+        
         # Draw the box
         start_point = (x, y)
         end_point = (x + w, y + h)

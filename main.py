@@ -17,6 +17,7 @@ env = os.path.dirname(os.path.abspath(__file__))
 
 # General Settings
 val_split = .2
+export_trust_ceiling = 2 #inclusive
 
 # Labelbox Settings
 images_per_row = 4
@@ -24,17 +25,17 @@ LB_API_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJjbGc5emFjOTIyM
 PROJECT_ID = 'clgr3eeyn00tr071n6tjgatsu'
 
 # Select Mode (Only one true at a time!)
-only_append_to_database = True
+only_append_to_database = False
 only_retreive_labelbox_data = False
 only_update_val = False
-only_export = False
+only_export = True
 
 # Paths
 zip_input = f'D:/DATA/CASBUSI/zip_files/'
 raw_storage_database = f'D:/DATA/CASBUSI/dicoms/'
 
 # Debug Settings 
-data_range = None #[0,1000] # Set to None to use everything
+data_range = [0,100] # Set to None to use everything
 reseted_processed = False
 
 #############################
@@ -69,10 +70,10 @@ if __name__ == '__main__':
         
         user_input = input("Continue with Data Cleaning step? (y/n): ")
         if user_input.lower() == "y":
-            #Find_Orientation(f'{env}/database/images/', 'ori_model', f'{env}/database/ImageData.csv')
+            Find_Orientation(f'{env}/database/images/', 'ori_model', f'{env}/database/ImageData.csv')
             Parse_Data()
-            #Inpaint_Dataset(f'{env}/database/ImageData.csv', f'{env}/database/images/')
-            #Rename_Images()
+            Inpaint_Dataset(f'{env}/database/ImageData.csv', f'{env}/database/images/')
+            Rename_Images()
         
             
         
@@ -93,7 +94,7 @@ if __name__ == '__main__':
         
     # Export Database
     if only_export:
-        Export_Database()
+        Export_Database(export_trust_ceiling)
         
         
     if only_retreive_labelbox_data:
