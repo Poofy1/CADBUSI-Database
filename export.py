@@ -7,7 +7,7 @@ env = os.path.dirname(os.path.abspath(__file__))
 
 # Paths
 parsed_database = f'{env}/database/'
-output_dir = f'{env}/train/'
+output_dir = f'{env}/export/'
 
 biopsy_mapping = {
         'Pathology Malignant': 'malignant',

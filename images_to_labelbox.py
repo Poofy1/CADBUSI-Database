@@ -12,8 +12,8 @@ def process_group(Patient_ID, laterality, patient_group, images_per_row, output_
     output_image_path = os.path.join(output_folder, f'{int(Patient_ID)}_{laterality}.png')
 
     # Check if the image already exists
-    if os.path.isfile(output_image_path):
-        return pd.DataFrame()
+    #if os.path.isfile(output_image_path):
+    #    return pd.DataFrame()
     
     images = []
     image_records = []
@@ -192,9 +192,9 @@ def Crop_and_save_images(images_per_row):
     else:
         existing_data = pd.DataFrame(columns=['Patient_ID', 'group', 'ImageName', 'x', 'y', 'width', 'height', 'us_x0', 'us_y0', 'us_x1', 'us_y1'])
         
-    
-    labeled_data = pd.read_csv(labeled_data_file) if os.path.isfile(labeled_data_file) else pd.DataFrame(columns=['Patient_ID'])
-    
+    #Skip formated data
+    #labeled_data = pd.read_csv(labeled_data_file) if os.path.isfile(labeled_data_file) else pd.DataFrame(columns=['Patient_ID'])
+    labeled_data = pd.DataFrame(columns=['Patient_ID'])
 
     # Create a ThreadPoolExecutor
     results = []

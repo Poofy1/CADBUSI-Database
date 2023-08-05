@@ -35,7 +35,7 @@ zip_input = f'D:/DATA/CASBUSI/zip_files/'
 raw_storage_database = f'D:/DATA/CASBUSI/dicoms/'
 
 # Debug Settings 
-data_range = [0,100] # Set to None to use everything
+data_range = None #[0,100] # Set to None to use everything
 reseted_processed = False
 
 #############################
