@@ -1,6 +1,7 @@
 import os, cv2
 import pandas as pd
 import ast
+import shutil
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 env = os.path.dirname(os.path.abspath(__file__))
@@ -12,8 +13,6 @@ output_dir = f'{env}/export/'
 biopsy_mapping = {
         'Pathology Malignant': 'malignant',
         'Known Biopsy-Proven Malignancy': 'malignant',
-        'High Suspicion for Malignancy': 'malignant',
-        'Highly Suggestive of Malignancy': 'malignant',
         
         'Pathology Benign': 'benign',
         'Probably Benign': 'benign',
@@ -25,6 +24,8 @@ biopsy_mapping = {
         'Suspicious': 'unknown',
         'Need Additional Imaging Evaluation': 'unknown',
         'Post Procedure Mammogram for Marker Placement': 'unknown',
+        'High Suspicion for Malignancy': 'unknown',
+        'Highly Suggestive of Malignancy': 'unknown',
         'Moderate Suspicion for Malignancy': 'unknown',
         'Negative': 'unknown',
     }
@@ -72,11 +73,17 @@ def Crop_Images(df):
 
 def Export_Database(trust_threshold):
     
+    print("Exporting Data:")
+    
     os.makedirs(output_dir, exist_ok = True)
     
+    #Dirs
     image_csv_file = f'{parsed_database}ImageData.csv'
     breast_csv_file = f'{parsed_database}BreastData.csv' 
     case_study_csv_file = f'{parsed_database}CaseStudyData.csv' 
+    mask_folder_input = f'{parsed_database}masks/'
+    mask_folder_output = f'{output_dir}masks/'
+    labeled_csv_file = f'{parsed_database}LabeledData.csv'
 
     # Read the case study data and filter it
     case_study_df = pd.read_csv(case_study_csv_file)
@@ -105,9 +112,22 @@ def Export_Database(trust_threshold):
     # Reformat biopsy
     breast_df['Biopsy'] = breast_df['Biopsy'].map(biopsy_mapping).fillna('unknown')
     
-    
+
+
+    # Create the destination directory if it doesn't exist
+    os.makedirs(mask_folder_output, exist_ok=True)
+
+    for filename in os.listdir(mask_folder_input):
+        source_file_path = os.path.join(mask_folder_input, filename)
+        destination_file_path = os.path.join(mask_folder_output, filename)
+        
+        if os.path.isfile(source_file_path):
+            shutil.copy2(source_file_path, destination_file_path)
+            
+    labeled_df = pd.read_csv(labeled_csv_file)
     
     # Write the filtered dataframes to CSV files in the output directory
     filtered_image_df.to_csv(os.path.join(output_dir, 'ImageData.csv'), index=False)
     breast_df.to_csv(os.path.join(output_dir, 'BreastData.csv'), index=False)
     filtered_case_study_df.to_csv(os.path.join(output_dir, 'CaseStudyData.csv'), index=False)
+    labeled_df.to_csv(os.path.join(output_dir, 'LabeledData.csv'), index=False)
