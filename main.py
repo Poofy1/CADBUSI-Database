@@ -10,6 +10,7 @@ from export import Export_Database
 from ML_processing.inpaint import Inpaint_Dataset
 from ML_processing.orientation_detection import Find_Orientation
 from dcm_parser import Parse_Zip_Files
+from video_processing import ProcessVideoData
 env = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -25,17 +26,17 @@ LB_API_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJjbGc5emFjOTIyM
 PROJECT_ID = 'clgr3eeyn00tr071n6tjgatsu'
 
 # Select Mode (Only one true at a time!)
-only_append_to_database = False
+only_append_to_database = True
 only_retreive_labelbox_data = False
 only_update_val = False
-only_export = True
+only_export = False
 
 # Paths
 zip_input = f'D:/DATA/CASBUSI/zip_files/'
 raw_storage_database = f'D:/DATA/CASBUSI/dicoms/'
 
 # Debug Settings 
-data_range = None #[0,100] # Set to None to use everything
+data_range = [800,1500] # Set to None to use everything
 reseted_processed = False
 
 #############################
@@ -75,12 +76,13 @@ if __name__ == '__main__':
             Inpaint_Dataset(f'{env}/database/ImageData.csv', f'{env}/database/images/')
             Rename_Images()
         
-            
-        
         user_input = input("Continue with Labelbox_Tranform step? (y/n): ")
         if user_input.lower() == "y":
-            print("Transforming Images for Labelbox")
             Crop_and_save_images(images_per_row)
+            
+        user_input = input("Process Video Data? (y/n): ")
+        if user_input.lower() == "y":
+            ProcessVideoData(images_per_row)
         
         
         # Update val split amount

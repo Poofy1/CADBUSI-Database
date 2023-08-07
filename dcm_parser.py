@@ -82,25 +82,27 @@ def parse_video_data(dcm, current_index, parsed_database):
     image_count = 0
     
     with ImageFileReader(dcm) as image:
-        for i in range(image.number_of_frames):
-            if i % 25 == 0:
-                frame = image.read_frame(i, correct_color=False)
-                im = Image.fromarray(frame)
-                
-                image_name = f"{i}.png"
-                
-                im = im.convert("L")  # Convert to grayscale
-                
-                im.save(f"{parsed_database}/videos/{video_path}/{image_name}")
-                
-                image_count += 1
-                
+        # Calculate the index of the middle frame
+        middle_frame_index = image.number_of_frames // 2
+
+        # Save the first and middle frames
+        for i in [0, middle_frame_index]:
+            frame = image.read_frame(i, correct_color=False)
+            im = Image.fromarray(frame)
+            
+            image_name = f"{i}.png"
+            
+            im = im.convert("L")  # Convert to grayscale
+            
+            im.save(f"{parsed_database}/videos/{video_path}/{image_name}")
+            
+            image_count += 1
 
     # Add custom data
     data_dict['DataType'] = 'video'
     data_dict['FileName'] = os.path.basename(dcm)
     data_dict['ImagesPath'] = video_path
-    data_dict['SavedFrames'] = image_count
+    #data_dict['SavedFrames'] = image_count
     data_dict['DicomHash'] = generate_hash(dcm)
     
     return data_dict
@@ -160,6 +162,10 @@ def parse_single_dcm(dcm, current_index, parsed_database):
     data_dict['ImageName'] = image_name
     data_dict['DicomHash'] = generate_hash(dcm)
     data_dict['RegionCount'] = region_count
+    
+    if data_dict.get('PatientID', '') == '2679':
+        print("Patient ID: ", data_dict.get('PatientID', ''))
+        print(dataset)
     
     return data_dict
 
@@ -254,7 +260,7 @@ def Parse_Zip_Files(input, raw_storage_database, data_range):
         video_df = video_df[['Patient_ID', 
                 'Accession_Number', 
                 'ImagesPath',
-                'SavedFrames',
+                #'SavedFrames',
                 'RegionSpatialFormat', 
                 'RegionDataType', 
                 'RegionLocationMinX0', 

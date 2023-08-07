@@ -145,6 +145,7 @@ def process_group(Patient_ID, laterality, patient_group, images_per_row, output_
 
 
 def Crop_and_save_images(images_per_row):
+    print("Transforming Images for Labelbox")
 
     image_input_folder = f"{env}/database/images/"
     output_csv = f"{env}/database/CropData.csv"
