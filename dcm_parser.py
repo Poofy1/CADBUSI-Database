@@ -23,26 +23,45 @@ def generate_hash(filename):
     return sha256_hash.hexdigest()
 
 
+def extract_single_zip_file(file_name, output_folder):
+    if os.path.exists(output_folder):
+        print(f'Skipping {file_name}. Output folder {output_folder} already exists.')
+        return
+
+    try:
+        zip_ref = zipfile.ZipFile(file_name)  # create zipfile object
+        zip_ref.extractall(output_folder)  # extract file to dir
+        zip_ref.close()  # close file
+        #os.remove(file_name) # delete zipped file
+    except Exception as e:
+        print(f'Skipping Bad Zip File: {file_name}. Exception: {e}')
+
 def extract_zip_files(input, output):
-    #Create database dir
-    os.makedirs(output, exist_ok = True)
-    
-    if (len(os.listdir(input)) == 0):
+    os.makedirs(output, exist_ok=True)
+
+    if len(os.listdir(input)) == 0:
         print("No zip files found")
         return
-    
+
     print("Unzipping Files")
-    for item in tqdm(os.listdir(input)): # loop through items in dir
-        if item.endswith('.zip'): # check for ".zip" extension
-            file_name = os.path.abspath(input) + "/" + item # get full path of files
+
+    with ThreadPoolExecutor() as executor:
+        futures = [
+            executor.submit(
+                extract_single_zip_file, 
+                os.path.abspath(input) + "/" + item, 
+                os.path.join(output, os.path.splitext(item)[0])
+            ) 
+            for item in os.listdir(input) 
+            if item.endswith('.zip')
+        ]
+
+        for future in tqdm(as_completed(futures), total=len(futures), desc=""):
             try:
-                zip_ref = zipfile.ZipFile(file_name) # create zipfile object
-            except:
-                print(f'Skipping Bad Zip File: {file_name}')
-                continue
-            zip_ref.extractall(output) # extract file to dir
-            zip_ref.close() # close file
-            os.remove(file_name) # delete zipped file
+                future.result()
+            except Exception as exc:
+                print(f'An exception occurred: {exc}')
+            
 
 
 def get_files_by_extension(directory, extension):
@@ -89,10 +108,9 @@ def parse_video_data(dcm, current_index, parsed_database):
         for i in [0, middle_frame_index]:
             frame = image.read_frame(i, correct_color=False)
             im = Image.fromarray(frame)
-            
-            image_name = f"{i}.png"
-            
             im = im.convert("L")  # Convert to grayscale
+            
+            image_name = f"{data_dict.get('PatientID', '')}_{data_dict.get('AccessionNumber', '')}_{current_index}_{image_count}.png"
             
             im.save(f"{parsed_database}/videos/{video_path}/{image_name}")
             
@@ -235,7 +253,7 @@ def Parse_Zip_Files(input, raw_storage_database, data_range):
             parsed_files_list = file.read().splitlines()
 
     # Unzip input data and get every Dicom File
-    extract_zip_files(input, raw_storage_database)
+    #extract_zip_files(input, raw_storage_database)
     dcm_files_list = get_files_by_extension(raw_storage_database, '.dcm')
     print(f'Total Dicom Archive: {len(dcm_files_list)}')
 
@@ -342,28 +360,57 @@ def Parse_Zip_Files(input, raw_storage_database, data_range):
     breast_csv = pd.concat([breast_csv, breast_csv_right], ignore_index=True)
     breast_csv = breast_csv.sort_values('Accession_Number')
     
-    breast_csv['Biopsy'] = None
     breast_csv['Path_Desc'] = None
     breast_csv['Density_Desc'] = None
+    breast_csv['Has_Malignant'] = False
+    breast_csv['Has_Benign'] = False
+    breast_csv['Has_Unknown'] = False
 
-    # Iterate over the rows of the original DataFrame
+    biopsy_mapping = {
+        'Pathology Malignant': 'malignant',
+        'Known Biopsy-Proven Malignancy': 'malignant',
+        'Pathology Benign': 'benign',
+        'Probably Benign': 'benign',
+        'Pathology Elevated Risk': 'benign',
+        'Benign': 'benign',
+        'Waiting for Pathology': 'unknown',
+        'Low Suspicion for Malignancy': 'unknown',
+        'Suspicious': 'unknown',
+        'Need Additional Imaging Evaluation': 'unknown',
+        'Post Procedure Mammogram for Marker Placement': 'unknown',
+        'High Suspicion for Malignancy': 'unknown',
+        'Highly Suggestive of Malignancy': 'unknown',
+        'Moderate Suspicion for Malignancy': 'unknown',
+        'Negative': 'unknown',
+    }
+
     for idx, row in csv_df.iterrows():
         if row['Biopsy_Laterality'] is not None:
-            # Iterate over the elements of 'Biopsy_Laterality'
             for i, laterality in enumerate(row['Biopsy_Laterality']):
                 if isinstance(laterality, str):
-                    # Find the matching rows in breast_csv
                     matching_rows = (breast_csv['Patient_ID'] == row['Patient_ID']) & \
                                     (breast_csv['Accession_Number'] == row['Accession_Number']) & \
                                     (breast_csv['Breast'] == laterality.lower())
-                    # Set 'Biopsy', 'Path_Desc', and 'Density_Desc' for the matching rows
                     if isinstance(row['Biopsy'], list) and len(row['Biopsy']) > i:
-                        breast_csv.loc[matching_rows, 'Biopsy'] = row['Biopsy'][i]
+                        biopsy_result = biopsy_mapping.get(row['Biopsy'][i], 'unknown')
+                        if biopsy_result == 'malignant':
+                            breast_csv.loc[matching_rows, 'Has_Malignant'] = True
+                        elif biopsy_result == 'benign':
+                            breast_csv.loc[matching_rows, 'Has_Benign'] = True
+                        elif biopsy_result == 'unknown':
+                            breast_csv.loc[matching_rows, 'Has_Unknown'] = True
                     if isinstance(row['Path_Desc'], list) and len(row['Path_Desc']) > i:
                         breast_csv.loc[matching_rows, 'Path_Desc'] = row['Path_Desc'][i]
                     if isinstance(row['Density_Desc'], list) and len(row['Density_Desc']) > i:
                         breast_csv.loc[matching_rows, 'Density_Desc'] = row['Density_Desc'][i]
 
+    # Count lesions
+    lesion_count = csv_df['Biopsy_Laterality'].apply(lambda x: pd.Series(x).value_counts()).fillna(0)
+    lesion_count['Patient_ID'] = csv_df['Patient_ID']
+    lesion_count['Accession_Number'] = csv_df['Accession_Number']
+    breast_csv = pd.merge(breast_csv, lesion_count, on=['Patient_ID', 'Accession_Number'], how='left')
+    breast_csv['LesionCount'] = np.where(breast_csv['Breast'] == 'left', breast_csv['left'], breast_csv['right'])
+    breast_csv = breast_csv.drop(['left', 'right'], axis=1)
     
     # Check if CSV files already exist
     image_csv_file = f'{parsed_database}ImageData.csv'

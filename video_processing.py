@@ -1,56 +1,55 @@
 from OCR import *
 
-def get_first_image_in_each_folder(video_folder_path):
-    first_images = []
 
-    # Walk through the directory
-    for root, dirs, files in os.walk(video_folder_path):
-        # Sort the files and get the first image file
-        image_files = sorted([file for file in files if file.endswith('.png')])
-        if image_files:
-            first_image_file = image_files[0]
-            first_images.append(os.path.join(root, first_image_file))
+def modify_keys(dictionary):
+    # Create a new dictionary with modified keys
+    modified_dictionary = {}
+    for key, value in dictionary.items():
+        modified_key = os.path.basename(key).rsplit('_', 1)[0]
+        modified_dictionary[modified_key] = value
+    return modified_dictionary
 
-    return first_images
 
 def get_ultrasound_region(image_folder_path, db_to_process):
     # Construct image paths for only the new data
     video_folders = [os.path.join(image_folder_path, filename) for filename in db_to_process['ImagesPath']]
-    image_paths = get_first_image_in_each_folder(video_folders)
     
     # Collect image data in list
     image_data = []
     
     # Thread pool and TQDM
     with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-        futures = {executor.submit(process_single_image, image_path): image_path for image_path in image_paths}
+        futures = {}
+        for video_folder in video_folders:
+            image_paths = get_first_image_in_each_folder(video_folder)
+            futures.update({executor.submit(process_single_image, image_path): image_path for image_path in image_paths})
+        
         with tqdm(total=len(futures)) as pbar:
             for future in as_completed(futures):
                 result = future.result()
                 if result is not None:
                     image_data.append(result)
                 pbar.update()
+                
+    image_masks_dict = {filename: mask for filename, mask in image_data}
 
-    return image_data
+    return image_masks_dict
 
 
 def ProcessVideoData():
-    print("Processing Video Data")
     
     video_folder_path = f"{env}/database/videos/"
     input_file = f'{env}/database/VideoData.csv'
     db_out = pd.read_csv(input_file)
 
     # Check if any new features are missing in db_out and add them
-    new_features = ['labeled', 'crop_x', 'crop_y', 'crop_w', 'crop_h', 'description', 'has_calipers', 'darkness', 'area', 'laterality', 'orientation', 'clock_pos', 'nipple_dist']
+    new_features = ['crop_x', 'crop_y', 'crop_w', 'crop_h', 'description', 'area', 'laterality', 'orientation', 'clock_pos', 'nipple_dist']
     missing_features = set(new_features) - set(db_out.columns)
     for nf in missing_features:
         db_out[nf] = None
     
     
-    
-    db_out['labeled'] = False
-    
+
     # Check if 'processed' column exists, if not, create it and set all to False
     if 'processed' not in db_out.columns:
         db_out['processed'] = False
@@ -60,12 +59,18 @@ def ProcessVideoData():
     db_to_process['processed'] = False
     
     print("Finding OCR Masks")
-    _, description_masks = find_masks(image_folder_path, 'mask_model', db_to_process, 1920, 1080)
+    video_folders = [os.path.join(video_folder_path, filename) for filename in db_to_process['ImagesPath']]
+    _, description_masks = find_masks(video_folder_path, 'mask_model', db_to_process, 1920, 1080, video_format=True, video_folders=video_folders)
 
-    
     print("Performing OCR")
+    first_images = get_first_image_in_each_folder(video_folder_path)
+
+    # Separate image names and description masks into their own lists
+    image_names = [dm[0] for dm in description_masks]
+    description_masks_coords = [dm[1] for dm in description_masks]
+
     with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-        futures = {executor.submit(process_image, image_file, description_mask, image_folder_path, reader, description_kw): image_file for image_file, description_mask in description_masks}  # description_masks now include the filenames
+        futures = {executor.submit(process_image, image_file, description_mask, video_folder_path, reader, description_kw): image_file for image_file, description_mask in zip(first_images, description_masks_coords)}
         progress = tqdm(total=len(futures), desc='')
 
         # Initialize dictionary to store descriptions
@@ -79,31 +84,29 @@ def ProcessVideoData():
         progress.close()
 
     print("Finding Image Masks")
-    image_masks = get_ultrasound_region(video_folder_path, db_to_process)
+    image_masks_dict = get_ultrasound_region(video_folder_path, db_to_process)
     
+    db_to_process['processed'] = True
+    
+    descriptions = modify_keys(descriptions)
+    image_masks_dict = modify_keys(image_masks_dict)
 
-    
-    # Convert lists of tuples to dictionaries
-    image_masks_dict = {filename: mask for filename, mask in image_masks}
-    
     # Convert dictionaries to Series for easy mapping
     descriptions_series = pd.Series(descriptions)
     image_masks_series = pd.Series(image_masks_dict)
 
     # Update dataframe using map
-    db_to_process['description'] = db_to_process['ImageName'].map(descriptions_series)
-    db_to_process['bounding_box'] = db_to_process['ImageName'].map(image_masks_series)
-    
+    db_to_process['description'] = db_to_process['ImagesPath'].map(descriptions_series)
+    db_to_process['bounding_box'] = db_to_process['ImagesPath'].map(image_masks_series)
     
     db_to_process[['crop_x', 'crop_y', 'crop_w', 'crop_h']] = pd.DataFrame(db_to_process['bounding_box'].tolist(), index=db_to_process.index)
 
     # Construct a temporary DataFrame with the feature extraction
     temp_df = db_to_process.loc[db_to_process['description'].str.len() > 0, 'description'].apply(lambda x: extract_descript_features(x, labels_dict=description_labels_dict)).apply(pd.Series)
 
-    # Update the columns in db_out directly from temp_df
     for column in temp_df.columns:
         db_to_process[column] = temp_df[column]
-        
+
     db_out.update(db_to_process, overwrite=True)
     db_out.to_csv(input_file,index=False)
 

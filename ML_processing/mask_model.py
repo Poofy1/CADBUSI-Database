@@ -9,6 +9,19 @@ from torch.utils.data import Dataset, DataLoader
 env = os.path.dirname(os.path.abspath(__file__))
 device = torch.device("cuda")
 
+def get_first_image_in_each_folder(video_folder_path):
+    first_images = []
+
+    # Walk through the directory
+    for root, dirs, files in os.walk(video_folder_path):
+        # Sort the files and get the first image file
+        image_files = sorted([file for file in files if file.endswith('.png')])
+        if image_files:
+            first_image_file = image_files[0]
+            first_images.append(os.path.join(root, first_image_file))
+
+    return first_images
+
 class MyDataset(Dataset):
     def __init__(self, root_dir, db_to_process, max_width, max_height, transform=None):
         self.root_dir = root_dir
@@ -33,9 +46,33 @@ class MyDataset(Dataset):
         img_after_pad = padding(img_before_pad)
         return img_after_pad, self.images[idx] 
     
+class MyDatasetVideo(Dataset):
+    def __init__(self, root_dir, db_to_process, max_width, max_height, transform=None):
+        self.root_dir = root_dir
+        self.transform = transform
+        self.images = get_first_image_in_each_folder(root_dir) 
+        self.max_width = max_width
+        self.max_height = max_height
+
+    def __len__(self):
+        return len(self.images)
+
+    def __getitem__(self, idx):
+        img_name = os.path.join(self.root_dir, self.images[idx])
+        image = Image.open(img_name)
+        preprocess = transforms.Compose([
+            transforms.Grayscale(num_output_channels=1),
+            transforms.ToTensor(),
+            transforms.Normalize([0.5], [0.5]),
+        ])
+        img_before_pad = preprocess(image)
+        padding = transforms.Pad((0, 0, self.max_width - img_before_pad.shape[-1], self.max_height - img_before_pad.shape[-2]))
+        img_after_pad = padding(img_before_pad)
+        return img_after_pad, self.images[idx] 
     
     
-def find_masks(images_dir, model_name, db_to_process, max_width, max_height, batch_size=4):
+    
+def find_masks(images_dir, model_name, db_to_process, max_width, max_height, batch_size=4, video_format=False, video_folders=None):
     # Load a pre-trained model for classification
     backbone = torchvision.models.squeezenet1_1(pretrained=True).features
     backbone.out_channels = 512
@@ -48,7 +85,10 @@ def find_masks(images_dir, model_name, db_to_process, max_width, max_height, bat
     model.eval()
 
     # Data loader
-    dataset = MyDataset(images_dir, db_to_process, max_width, max_height)
+    if video_format:
+        dataset = MyDatasetVideo(images_dir, db_to_process, max_width, max_height)
+    else:
+        dataset = MyDataset(images_dir, db_to_process, max_width, max_height)
     dataloader = DataLoader(dataset, batch_size=batch_size, num_workers=1)
 
     class1_results = []

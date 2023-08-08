@@ -26,10 +26,10 @@ LB_API_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJjbGc5emFjOTIyM
 PROJECT_ID = 'clgr3eeyn00tr071n6tjgatsu'
 
 # Select Mode (Only one true at a time!)
-only_append_to_database = True
+only_append_to_database = False
 only_retreive_labelbox_data = False
 only_update_val = False
-only_export = False
+only_export = True
 
 # Paths
 zip_input = f'D:/DATA/CASBUSI/zip_files/'
@@ -82,7 +82,7 @@ if __name__ == '__main__':
             
         user_input = input("Process Video Data? (y/n): ")
         if user_input.lower() == "y":
-            ProcessVideoData(images_per_row)
+            ProcessVideoData()
         
         
         # Update val split amount

@@ -85,6 +85,9 @@ def choose_images_to_label(db, case_data):
     # Set label = False for all images with 'RegionCount' > 1
     db.loc[db['RegionCount'] > 1, 'label'] = False
     
+    # Check the aspect ratio of the crop region
+    db['crop_aspect_ratio'] = db['crop_w'] / db['crop_h']
+    
     return db
 
 
