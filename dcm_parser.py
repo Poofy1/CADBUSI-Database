@@ -253,7 +253,7 @@ def Parse_Zip_Files(input, raw_storage_database, data_range):
             parsed_files_list = file.read().splitlines()
 
     # Unzip input data and get every Dicom File
-    #extract_zip_files(input, raw_storage_database)
+    extract_zip_files(input, raw_storage_database)
     dcm_files_list = get_files_by_extension(raw_storage_database, '.dcm')
     print(f'Total Dicom Archive: {len(dcm_files_list)}')
 
