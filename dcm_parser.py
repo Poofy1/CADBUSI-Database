@@ -180,10 +180,6 @@ def parse_single_dcm(dcm, current_index, parsed_database):
     data_dict['DicomHash'] = generate_hash(dcm)
     data_dict['RegionCount'] = region_count
     
-    if data_dict.get('PatientID', '') == '2679':
-        print("Patient ID: ", data_dict.get('PatientID', ''))
-        print(dataset)
-    
     return data_dict
 
 
