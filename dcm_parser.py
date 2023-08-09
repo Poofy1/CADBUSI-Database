@@ -7,8 +7,7 @@ import pandas as pd
 from tqdm import tqdm
 from matplotlib import pyplot as plt
 from highdicom.io import ImageFileReader
-import warnings
-import logging
+import warnings, logging, cv2
 logging.getLogger().setLevel(logging.ERROR)
 warnings.filterwarnings('ignore', category=UserWarning, message='.*Invalid value for VR UI.*')
 env = os.path.dirname(os.path.abspath(__file__))
@@ -25,7 +24,6 @@ def generate_hash(filename):
 
 def extract_single_zip_file(file_name, output_folder):
     if os.path.exists(output_folder):
-        print(f'Skipping {file_name}. Output folder {output_folder} already exists.')
         return
 
     try:
@@ -107,12 +105,14 @@ def parse_video_data(dcm, current_index, parsed_database):
         # Save the first and middle frames
         for i in [0, middle_frame_index]:
             frame = image.read_frame(i, correct_color=False)
-            im = Image.fromarray(frame)
-            im = im.convert("L")  # Convert to grayscale
+            
+            # Convert to grayscale if the frame is not already grayscale
+            if len(frame.shape) == 3:  # if the frame has 3 channels
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)  # Convert to grayscale
             
             image_name = f"{data_dict.get('PatientID', '')}_{data_dict.get('AccessionNumber', '')}_{current_index}_{image_count}.png"
             
-            im.save(f"{parsed_database}/videos/{video_path}/{image_name}")
+            cv2.imwrite(f"{parsed_database}/videos/{video_path}/{image_name}", frame)
             
             image_count += 1
 
@@ -158,21 +158,20 @@ def parse_single_dcm(dcm, current_index, parsed_database):
             data_dict[tag_name] = str(elem.value)
     
     # get image data
-    im = Image.fromarray(dataset.pixel_array)
+    im = dataset.pixel_array
     if data_dict.get('PhotometricInterpretation', '') == 'RGB':
         np_im = np.array(im)
         
         # check if there is any blue pixel
         is_blue = (np_im[:, :, 0] < 50) & (np_im[:, :, 1] < 50) & (np_im[:, :, 2] > 200)
         if np.any(is_blue):
-            im = im.convert("RGB")
+            im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
         else:
-            im = im.convert("L")  # Convert to grayscale
+            im = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)  # Convert to grayscale
             data_dict['PhotometricInterpretation'] = 'MONOCHROME2_OVERRIDE'
-    else:
-        im = im.convert("L")  # Convert to grayscale
+
     image_name = f"{data_dict.get('PatientID', '')}_{data_dict.get('AccessionNumber', '')}_{current_index}.png"
-    im.save(f"{parsed_database}/images/{image_name}")
+    cv2.imwrite(f"{parsed_database}/images/{image_name}", im)
 
     # Add custom data
     data_dict['DataType'] = 'image'
