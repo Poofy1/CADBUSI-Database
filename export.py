@@ -84,7 +84,7 @@ def Crop_Images(df):
                 
                 
                 
-def process_single_video(row, video_folder_path, image_output):
+def process_single_video(row, video_folder_path, output_dir):
     # Get the folder name and crop data
     folder_name = row['ImagesPath']
     crop_y = row['crop_y']
@@ -100,6 +100,10 @@ def process_single_video(row, video_folder_path, image_output):
         # Get a list of all the images in the folder
         all_images = [file for file in os.listdir(folder_path) if file.endswith('.png')]
 
+        # Create a new directory for the video in the output directory
+        video_output_dir = os.path.join(output_dir, folder_name)
+        os.makedirs(video_output_dir, exist_ok=True)
+
         # Iterate over all the images and crop them
         for image_name in all_images:
             image_path = os.path.join(folder_path, image_name)
@@ -111,21 +115,23 @@ def process_single_video(row, video_folder_path, image_output):
                 cropped_image = image[int(crop_y):int(crop_y)+int(crop_h), int(crop_x):int(crop_x)+int(crop_w)]
 
                 # Save the cropped image
-                output_path = os.path.join(image_output, image_name)
+                output_path = os.path.join(video_output_dir, image_name)
                 cv2.imwrite(output_path, cropped_image)
+
 
 def Crop_Videos(df):
     
-    image_output = f"{output_dir}/videos/"
-    os.makedirs(image_output, exist_ok=True)
+    video_output = f"{output_dir}/videos/"
+    os.makedirs(video_output, exist_ok=True)
     
     video_folder_path = f"{env}/database/videos/"
 
     with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-        futures = {executor.submit(process_single_video, row, video_folder_path, image_output): index for index, row in df.iterrows()}
+        futures = {executor.submit(process_single_video, row, video_folder_path, video_output): index for index, row in df.iterrows()}
         with tqdm(total=len(futures)) as pbar:
             for future in as_completed(futures):
                 pbar.update()
+
 
 def merge_and_fillna(df, breast_df):
     # Merge df with breast_df on 'Patient_ID' and 'laterality'/'Breast'
@@ -201,7 +207,8 @@ def Export_Database(trust_threshold):
                           'area',
                           'nipple_dist',
                           'orientation',
-                          'laterality']
+                          'laterality',
+                          'crop_aspect_ratio']
     video_df = video_df[video_columns]
     
     

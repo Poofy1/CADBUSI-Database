@@ -10,7 +10,7 @@ from export import Export_Database
 from ML_processing.inpaint import Inpaint_Dataset
 from ML_processing.orientation_detection import Find_Orientation
 from dcm_parser import Parse_Zip_Files
-from video_processing import ProcessVideoData
+from video_processing import ProcessVideoData, Video_Cleanup
 env = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -26,10 +26,10 @@ LB_API_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJjbGc5emFjOTIyM
 PROJECT_ID = 'clgr3eeyn00tr071n6tjgatsu'
 
 # Select Mode (Only one true at a time!)
-only_append_to_database = True
+only_append_to_database = False
 only_retreive_labelbox_data = False
 only_update_val = False
-only_export = False
+only_export = True
 
 # Paths
 zip_input = f'D:/DATA/CASBUSI/zip_files/'
@@ -83,6 +83,7 @@ if __name__ == '__main__':
         user_input = input("Process Video Data? (y/n): ")
         if user_input.lower() == "y":
             ProcessVideoData()
+            Video_Cleanup()
         
         
         # Update val split amount

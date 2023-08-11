@@ -111,7 +111,19 @@ def ProcessVideoData():
     db_out.to_csv(input_file,index=False)
 
 
-
-
+def Video_Cleanup():
+    
+    print("Video Data Clean Up")
+    
+    input_file = f'{env}/database/VideoData.csv'
+    db = pd.read_csv(input_file)
+    
+    #Replace unknown areas with breast
+    db.loc[(db['area'] == 'unknown') | (db['area'].isna()), 'area'] = 'breast'
+    
+    # Find crop ratio
+    db['crop_aspect_ratio'] = db['crop_w'] / db['crop_h']
+    
+    db.to_csv(f'{env}/database/VideoData2.csv',index=False)
 
 
