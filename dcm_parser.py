@@ -13,6 +13,24 @@ warnings.filterwarnings('ignore', category=UserWarning, message='.*Invalid value
 env = os.path.dirname(os.path.abspath(__file__))
 
 
+biopsy_mapping = {
+    'Pathology Malignant': 'malignant',
+    'Known Biopsy-Proven Malignancy': 'malignant',
+    'Pathology Benign': 'benign',
+    'Probably Benign': 'benign',
+    'Pathology Elevated Risk': 'benign',
+    'Benign': 'benign',
+    'Waiting for Pathology': 'unknown',
+    'Low Suspicion for Malignancy': 'unknown',
+    'Suspicious': 'unknown',
+    'Need Additional Imaging Evaluation': 'unknown',
+    'Post Procedure Mammogram for Marker Placement': 'unknown',
+    'High Suspicion for Malignancy': 'unknown',
+    'Highly Suggestive of Malignancy': 'unknown',
+    'Moderate Suspicion for Malignancy': 'unknown',
+    'Negative': 'unknown',
+}
+
 def generate_hash(filename):
     sha256_hash = hashlib.sha256()
 
@@ -234,6 +252,10 @@ def parse_dcm_files(dcm_files_list, parsed_database):
 # Main Method
 def Parse_Zip_Files(input, raw_storage_database, data_range):
     parsed_database = f'{env}/database/'
+    image_csv_file = f'{parsed_database}ImageData.csv'
+    video_csv_file = f'{parsed_database}VideoData.csv'
+    case_study_csv_file = f'{parsed_database}CaseStudyData.csv' 
+    breast_csv_file = f'{parsed_database}BreastData.csv'
 
     #Create database dir
     os.makedirs(parsed_database, exist_ok = True)
@@ -254,11 +276,13 @@ def Parse_Zip_Files(input, raw_storage_database, data_range):
 
     # Filter out the already parsed files
     dcm_files_list = dcm_files_list[data_range[0]:data_range[1]]
-    dcm_files_list = [file for file in dcm_files_list if file not in parsed_files_list]
+    parsed_files_set = set(parsed_files_list)
+    dcm_files_list = [file for file in dcm_files_list if file not in parsed_files_set]
     
     
 
     if len(dcm_files_list) <= 0:
+        UpdateAnonFile()
         return
     
     # Get DCM Data
@@ -361,24 +385,6 @@ def Parse_Zip_Files(input, raw_storage_database, data_range):
     breast_csv['Has_Benign'] = False
     breast_csv['Has_Unknown'] = False
 
-    biopsy_mapping = {
-        'Pathology Malignant': 'malignant',
-        'Known Biopsy-Proven Malignancy': 'malignant',
-        'Pathology Benign': 'benign',
-        'Probably Benign': 'benign',
-        'Pathology Elevated Risk': 'benign',
-        'Benign': 'benign',
-        'Waiting for Pathology': 'unknown',
-        'Low Suspicion for Malignancy': 'unknown',
-        'Suspicious': 'unknown',
-        'Need Additional Imaging Evaluation': 'unknown',
-        'Post Procedure Mammogram for Marker Placement': 'unknown',
-        'High Suspicion for Malignancy': 'unknown',
-        'Highly Suggestive of Malignancy': 'unknown',
-        'Moderate Suspicion for Malignancy': 'unknown',
-        'Negative': 'unknown',
-    }
-
     for idx, row in csv_df.iterrows():
         if row['Biopsy_Laterality'] is not None:
             for i, laterality in enumerate(row['Biopsy_Laterality']):
@@ -407,19 +413,11 @@ def Parse_Zip_Files(input, raw_storage_database, data_range):
     breast_csv['LesionCount'] = np.where(breast_csv['Breast'] == 'left', breast_csv['left'], breast_csv['right'])
     breast_csv = breast_csv.drop(['left', 'right'], axis=1)
     
-    # Check if CSV files already exist
-    image_csv_file = f'{parsed_database}ImageData.csv'
-    video_csv_file = f'{parsed_database}VideoData.csv'
-    case_study_csv_file = f'{parsed_database}CaseStudyData.csv' 
-    breast_csv_file = f'{parsed_database}BreastData.csv' 
-    
     image_combined_df = image_df
     if os.path.isfile(image_csv_file):
         existing_image_df = pd.read_csv(image_csv_file)
         existing_image_df['Patient_ID'] = existing_image_df['Patient_ID'].astype(str)
         image_df['Patient_ID'] = image_df['Patient_ID'].astype(str)
-        
-        new_ids = image_df['Patient_ID'].unique()
         
         # keep only old IDs that don't exist in new data
         image_df = image_df[~image_df['Patient_ID'].isin(existing_image_df['Patient_ID'].unique())]
@@ -450,4 +448,89 @@ def Parse_Zip_Files(input, raw_storage_database, data_range):
     image_combined_df.to_csv(image_csv_file, index=False)
     video_df.to_csv(video_csv_file, index=False)
     csv_df.to_csv(case_study_csv_file, index=False)
+    breast_csv.to_csv(breast_csv_file, index=False)
+    
+    
+    
+    
+
+
+
+
+
+
+
+
+
+def UpdateAnonFile():
+    
+    print("Updating Data with Anon File")
+    
+    parsed_database = f'{env}/database/'
+    case_study_csv_file = f'{parsed_database}CaseStudyData.csv' 
+    breast_csv_file = f'{parsed_database}BreastData.csv'
+    
+    if not os.path.isfile(case_study_csv_file):
+        return
+    
+    
+    # Case Data
+    existing_case_study_df = pd.read_csv(case_study_csv_file)
+    csv_df = pd.read_csv("D:/DATA/CASBUSI/cases_anon/total_cases_anon.csv")
+    
+    # group the dataframe by Patient_ID and Accession_Number
+    grouped_df = csv_df.groupby(['Patient_ID','Accession_Number'])
+    csv_df = grouped_df.agg({'Biopsy_Accession': list,
+                            'Biopsy_Laterality': list,
+                            'BI-RADS': 'first',
+                            'Study_Laterality': 'first',
+                            'Biopsy': list,
+                            'Path_Desc': list,
+                            'Density_Desc': list,
+                            'Facility': 'first',
+                            'Age': 'first', 
+                            'Race': 'first', 
+                            'Ethnicity': 'first'}).reset_index()
+
+    
+    # Convert 'Patient_ID' to str in both dataframes before merging
+    existing_case_study_df['Patient_ID'] = existing_case_study_df['Patient_ID'].astype(int)
+    csv_df['Patient_ID'] = csv_df['Patient_ID'].astype(int)
+    csv_df = pd.merge(csv_df, existing_case_study_df[['Patient_ID', 'StudyDescription', 'StudyDate', 'PatientSex', 'PatientSize', 'PatientWeight']], on='Patient_ID', how='inner')
+    
+    existing_case_study_df.update(csv_df)
+    existing_case_study_df.to_csv(case_study_csv_file , index=False)
+    
+    # Breast Data
+    breast_csv = pd.read_csv(breast_csv_file)
+    for idx, row in csv_df.iterrows():
+        if row['Biopsy_Laterality'] is not None:
+            for i, laterality in enumerate(row['Biopsy_Laterality']):
+                if isinstance(laterality, str):
+                    matching_rows = (breast_csv['Patient_ID'] == row['Patient_ID']) & \
+                                    (breast_csv['Accession_Number'] == row['Accession_Number']) & \
+                                    (breast_csv['Breast'] == laterality.lower())
+                    if isinstance(row['Biopsy'], list) and len(row['Biopsy']) > i:
+                        biopsy_result = biopsy_mapping.get(row['Biopsy'][i], 'unknown')
+                        if biopsy_result == 'malignant':
+                            breast_csv.loc[matching_rows, 'Has_Malignant'] = True
+                        elif biopsy_result == 'benign':
+                            breast_csv.loc[matching_rows, 'Has_Benign'] = True
+                        elif biopsy_result == 'unknown':
+                            breast_csv.loc[matching_rows, 'Has_Unknown'] = True
+                    if isinstance(row['Path_Desc'], list) and len(row['Path_Desc']) > i:
+                        breast_csv.loc[matching_rows, 'Path_Desc'] = row['Path_Desc'][i]
+                    if isinstance(row['Density_Desc'], list) and len(row['Density_Desc']) > i:
+                        breast_csv.loc[matching_rows, 'Density_Desc'] = row['Density_Desc'][i]
+                        
+    lesion_count = csv_df['Biopsy_Laterality'].apply(lambda x: pd.Series(x).value_counts()).fillna(0)
+    lesion_count['Patient_ID'] = csv_df['Patient_ID']
+    lesion_count['Accession_Number'] = csv_df['Accession_Number']
+    lesion_count = lesion_count.drop(columns=['unknown'], errors='ignore')
+    breast_csv = pd.merge(breast_csv, lesion_count, on=['Patient_ID', 'Accession_Number'], how='left')
+    breast_csv['LesionCount'] = np.where(breast_csv['Breast'] == 'left', breast_csv['left'], breast_csv['right'])
+    breast_csv = breast_csv.drop(['left', 'right'], axis=1)
+    
+    breast_csv = breast_csv.drop(columns=['unknown', 'unknown_x', 'unknown_y'], errors='ignore')
+    breast_csv = breast_csv.drop_duplicates(subset=['Patient_ID', 'Accession_Number', 'Breast'], keep='last')
     breast_csv.to_csv(breast_csv_file, index=False)

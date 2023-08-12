@@ -502,23 +502,3 @@ def Perform_OCR():
     db_out.to_csv(input_file,index=False)
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

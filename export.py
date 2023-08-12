@@ -164,7 +164,14 @@ def Export_Database(trust_threshold):
     case_study_df = pd.read_csv(case_study_csv_file)
     filtered_case_study_df = case_study_df[case_study_df['trustworthiness'] <= trust_threshold]
     # Reformat biopsy
-    filtered_case_study_df['Biopsy'] = filtered_case_study_df['Biopsy'].apply(ast.literal_eval)
+    def safe_literal_eval(val, idx):
+        try:
+            return ast.literal_eval(val)
+        except ValueError:
+            print(f"Error parsing value at index {idx}: {val}")
+            return val  # or some other default value
+
+    filtered_case_study_df['Biopsy'] = filtered_case_study_df.apply(lambda row: safe_literal_eval(row['Biopsy'], row.name), axis=1)
     filtered_case_study_df['Biopsy'] = filtered_case_study_df['Biopsy'].apply(transform_biopsy_list)
     
     
