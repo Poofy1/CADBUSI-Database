@@ -134,6 +134,9 @@ def Crop_Videos(df):
 
 
 def merge_and_fillna(df, breast_df):
+    
+    breast_df = breast_df.drop_duplicates(subset=['Patient_ID', 'Breast'])
+    
     # Merge df with breast_df on 'Patient_ID' and 'laterality'/'Breast'
     df = pd.merge(df, 
                   breast_df[['Patient_ID', 'Breast', 'Has_Malignant', 'Has_Benign', 'Has_Unknown']], 
@@ -146,6 +149,12 @@ def merge_and_fillna(df, breast_df):
     df[['Has_Malignant', 'Has_Benign', 'Has_Unknown']].fillna(0, inplace=True)
     return df
 
+def safe_literal_eval(val, idx):
+        try:
+            return ast.literal_eval(val)
+        except ValueError:
+            print(f"Error parsing value at index {idx}: {val}")
+            return val  # or some other default value
 
 def Export_Database(trust_threshold):
     
@@ -160,25 +169,20 @@ def Export_Database(trust_threshold):
     labeled_csv_file = f'{parsed_database}LabeledData.csv'
     video_csv_file =  f'{parsed_database}VideoData.csv'
 
-    # Read the case study data and filter it
+    # Read data
     case_study_df = pd.read_csv(case_study_csv_file)
+    video_df = pd.read_csv(video_csv_file)
+    image_df = pd.read_csv(image_csv_file)
+    breast_df = pd.read_csv(breast_csv_file)
+    
+    #Trust threshold
     filtered_case_study_df = case_study_df[case_study_df['trustworthiness'] <= trust_threshold]
-    # Reformat biopsy
-    def safe_literal_eval(val, idx):
-        try:
-            return ast.literal_eval(val)
-        except ValueError:
-            print(f"Error parsing value at index {idx}: {val}")
-            return val  # or some other default value
 
+    # Reformat biopsy
     filtered_case_study_df['Biopsy'] = filtered_case_study_df.apply(lambda row: safe_literal_eval(row['Biopsy'], row.name), axis=1)
     filtered_case_study_df['Biopsy'] = filtered_case_study_df['Biopsy'].apply(transform_biopsy_list)
     
     
-    # Read Data Files
-    video_df = pd.read_csv(video_csv_file)
-    image_df = pd.read_csv(image_csv_file)
-    breast_df = pd.read_csv(breast_csv_file)
     try:
         labeled_df = pd.read_csv(labeled_csv_file)
     except FileNotFoundError:
@@ -187,7 +191,9 @@ def Export_Database(trust_threshold):
 
     # Filter the image data based on the filtered case study data and the 'label' column
     image_df = image_df[(image_df['Patient_ID'].isin(filtered_case_study_df['Patient_ID'])) & (image_df['label'] == True)]
-    video_df = video_df[(video_df['Patient_ID'].isin(filtered_case_study_df['Patient_ID'])) & (image_df['label'] == True)]
+    breast_df = breast_df[(breast_df['Patient_ID'].isin(filtered_case_study_df['Patient_ID']))]
+    video_df = video_df[(video_df['Patient_ID'].isin(filtered_case_study_df['Patient_ID']))]
+
     
     # Crop the images for the relevant studies
     Crop_Images(image_df)

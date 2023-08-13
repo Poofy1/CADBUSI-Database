@@ -5,7 +5,7 @@ env = os.path.dirname(os.path.abspath(__file__))
 
 def get_statistics():
     # Read the case study data
-    df = pd.read_csv(f'{env}/database/CaseStudyData.csv')
+    df = pd.read_csv(f'D:\DATA\CASBUSI/backups\database3/CaseStudyData.csv')
 
     total_rows = len(df)
 
