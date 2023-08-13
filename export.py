@@ -224,6 +224,10 @@ def Export_Database(trust_threshold):
                           'crop_aspect_ratio']
     video_df = video_df[video_columns]
     
+    # Round 'crop_aspect_ratio' to 2 decimal places
+    image_df['crop_aspect_ratio'] = image_df['crop_aspect_ratio'].round(2)
+    video_df['crop_aspect_ratio'] = video_df['crop_aspect_ratio'].round(2)
+    
     
     # Convert 'Patient_ID' columns to integers
     image_df['Patient_ID'] = image_df['Patient_ID'].astype(int)

@@ -9,9 +9,9 @@ def check_image_files(csv_file):
         reader = csv.DictReader(file)
         image_names = []
         for row in reader:
-            image_name = row.get('ImageName')
-            if not os.path.isfile(f'{env}/export/images/{image_name}'):
-                print(f"Image file '{image_name}' does not exist or cannot be accessed.")
+            image_name = row.get('ImagesPath')
+            #if not os.path.isfile(f'{env}/export/videos/{image_name}'):
+                #print(f"Image file '{image_name}' does not exist or cannot be accessed.")
             image_names.append(image_name)
 
         duplicate_image_names = [name for name, count in Counter(image_names).items() if count > 1]
@@ -21,5 +21,5 @@ def check_image_files(csv_file):
                 print(f"Image name '{name}' is duplicated.")
 
 # Usage example
-csv_file_path = f'{env}/export/ImageData.csv'
+csv_file_path = f'{env}/export/VideoData.csv'
 check_image_files(csv_file_path)
