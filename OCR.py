@@ -219,26 +219,29 @@ def find_mixed_lateralities( db ):
 
 
 
-def get_darkness(image_folder_path, image_masks):
+def get_darkness(image_folder_path, df):
     
     darknesses = []
     
-    for mask in tqdm(image_masks):
+    for _, row in tqdm(df.iterrows(), total=df.shape[0]):
         
-        image_file, coordinates = mask
+        image_file = row['ImageName']
         
-        image = Image.open(os.path.join(image_folder_path, image_file)).convert('L')
-        image_np = np.array(image)  # Convert image to numpy array
-
         try: 
-            x, y, w, h = coordinates
+            x = row['RegionLocationMinX0']
+            y = row['RegionLocationMinY0']
+            w = row['RegionLocationMaxX1'] - x
+            h = row['RegionLocationMaxY1'] - y
         except:
             darknesses.append((image_file, None))
             continue
         
+        image = Image.open(os.path.join(image_folder_path, image_file)).convert('L')
+        image_np = np.array(image)  # Convert image to numpy array
+
         img_us = image_np[y:y+h, x:x+w]
         img_us_gray, isColor = make_grayscale(img_us)
-        _,img_us_bw = cv2.threshold(img_us_gray, 20, 255, cv2.THRESH_BINARY)
+        _, img_us_bw = cv2.threshold(img_us_gray, 20, 255, cv2.THRESH_BINARY)
         num_dark = np.sum( img_us_bw == 0)
         darknesses.append((image_file, 100*num_dark/(w*h)))  # Append the filename along with its darkness
         
@@ -469,7 +472,7 @@ def Perform_OCR():
     
     
     print("Finding Darkness")
-    darknesses = get_darkness(image_folder_path, image_masks)
+    darknesses = get_darkness(image_folder_path, db_to_process)
     
     # Convert lists of tuples to dictionaries
     has_calipers_dict = {filename: value for filename, value in has_calipers}
