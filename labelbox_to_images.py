@@ -2,6 +2,7 @@ import labelbox, requests, os, re, shutil, time, PIL, glob
 import pandas as pd
 from PIL import Image
 from io import BytesIO
+from tqdm import tqdm
 import numpy as np
 env = os.path.dirname(os.path.abspath(__file__))
 
@@ -46,7 +47,7 @@ def Get_Labels(response):
         joined_labels_df = pd.DataFrame()
 
         # Iterate over each row in df
-        for _, row_data in df.iterrows():
+        for _, row_data in tqdm(df.iterrows(), total=df.shape[0]):
             # Get segmentation data
             row_data = pd.DataFrame([row_data])
             segmentation_df = pd.json_normalize(row_data["Label.objects"]).add_prefix("Label.objects.")
@@ -263,7 +264,7 @@ def Read_Labelbox_Data(LB_API_KEY, PROJECT_ID, original_images):
     client = labelbox.Client(api_key=LB_API_KEY)
     project = client.get_project(PROJECT_ID)
 
-    print("Getting labelbox links (Possible timeout issues)")
+    print("Contacting Labelbox")
     export_url = project.export_labels()
 
     # Download the export file from the provided URL
@@ -273,7 +274,7 @@ def Read_Labelbox_Data(LB_API_KEY, PROJECT_ID, original_images):
     print("Parsing Labelbox Data")
     df = Get_Labels(response)
 
-    print("Locating Images")
+    print("Refrencing Original Images")
     crop_data = pd.read_csv(f'{env}/database/CropData.csv')
     df = Find_Images(df, crop_data, 'doppler_image', 'doppler_image_names')
     df = Find_Images(df, crop_data, 'bad_images', 'bad_image_names')

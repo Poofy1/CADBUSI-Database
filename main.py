@@ -34,6 +34,7 @@ only_export = True
 # Paths
 zip_input = f'D:/DATA/CASBUSI/zip_files/'
 raw_storage_database = f'D:/DATA/CASBUSI/dicoms/'
+export_dir = f'D:/DATA/CASBUSI/exports/export_8_14/'
 
 # Debug Settings 
 data_range = None #[800,1500] # Set to None to use everything
@@ -97,7 +98,7 @@ if __name__ == '__main__':
         
     # Export Database
     if only_export:
-        Export_Database(export_trust_ceiling)
+        Export_Database(export_trust_ceiling, export_dir)
         
         
     if only_retreive_labelbox_data:

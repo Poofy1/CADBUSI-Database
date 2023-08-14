@@ -8,7 +8,6 @@ env = os.path.dirname(os.path.abspath(__file__))
 
 # Paths
 parsed_database = f'{env}/database/'
-output_dir = f'{env}/export/'
 
 biopsy_mapping = {
         'Pathology Malignant': 'malignant',
@@ -64,7 +63,7 @@ def process_single_image(row, image_folder_path, image_output, mask_folder_input
     mask_output_path = os.path.join(mask_folder_output, 'mask_' + row['ImageName'])
     cv2.imwrite(mask_output_path, cropped_mask)
 
-def Crop_Images(df):
+def Crop_Images(df, output_dir):
     
     image_output = f"{output_dir}/images/"
     mask_folder_output = f"{output_dir}/masks/"
@@ -119,7 +118,7 @@ def process_single_video(row, video_folder_path, output_dir):
                 cv2.imwrite(output_path, cropped_image)
 
 
-def Crop_Videos(df):
+def Crop_Videos(df, output_dir):
     
     video_output = f"{output_dir}/videos/"
     os.makedirs(video_output, exist_ok=True)
@@ -156,7 +155,7 @@ def safe_literal_eval(val, idx):
             print(f"Error parsing value at index {idx}: {val}")
             return val  # or some other default value
 
-def Export_Database(trust_threshold):
+def Export_Database(trust_threshold, output_dir):
     
     print("Exporting Data:")
     
@@ -190,14 +189,15 @@ def Export_Database(trust_threshold):
     
 
     # Filter the image data based on the filtered case study data and the 'label' column
-    image_df = image_df[(image_df['Patient_ID'].isin(filtered_case_study_df['Patient_ID'])) & (image_df['label'] == True)]
+    image_df = image_df[image_df['label'] == True]
+    image_df = image_df[(image_df['Patient_ID'].isin(filtered_case_study_df['Patient_ID']))]
     breast_df = breast_df[(breast_df['Patient_ID'].isin(filtered_case_study_df['Patient_ID']))]
     video_df = video_df[(video_df['Patient_ID'].isin(filtered_case_study_df['Patient_ID']))]
 
     
     # Crop the images for the relevant studies
-    Crop_Images(image_df)
-    Crop_Videos(video_df)
+    Crop_Images(image_df, output_dir)
+    Crop_Videos(video_df, output_dir)
     
     # Filter DFs
     image_columns = ['Patient_ID', 
@@ -212,6 +212,7 @@ def Export_Database(trust_threshold):
                           'reparsed_orientation',
                           'label_cat',
                           'Inpainted',
+                          'label',
                           'crop_aspect_ratio']
     image_df = image_df[image_columns]
     video_columns = ['Patient_ID', 

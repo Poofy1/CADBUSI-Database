@@ -185,7 +185,15 @@ def parse_single_dcm(dcm, current_index, parsed_database):
         if np.any(is_blue):
             im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
         else:
-            im = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)  # Convert to grayscale
+            # Convert yellow pixels to white
+            yellow = [255, 255, 0]  # RGB values for yellow
+            white = [255, 255, 255]  # RGB values for white
+            mask = np.all(np_im == yellow, axis=-1)
+            np_im[mask] = white
+            im = np_im
+
+            # Convert to grayscale
+            im = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
             data_dict['PhotometricInterpretation'] = 'MONOCHROME2_OVERRIDE'
 
     image_name = f"{data_dict.get('PatientID', '')}_{data_dict.get('AccessionNumber', '')}_{current_index}.png"
