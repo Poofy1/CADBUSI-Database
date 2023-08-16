@@ -240,6 +240,13 @@ def Export_Database(trust_threshold, output_dir):
     image_df = merge_and_fillna(image_df, breast_df)
     video_df = merge_and_fillna(video_df, breast_df)
     
+    #Find Image Counts (Breast Data)
+    image_counts = image_df.groupby(['Patient_ID', 'laterality']).size().reset_index(name='Image_Count')
+    breast_df = pd.merge(breast_df, image_counts, how='left', left_on=['Patient_ID', 'Breast'], right_on=['Patient_ID', 'laterality'])
+    breast_df = breast_df.drop('laterality', axis=1)
+    breast_df['Image_Count'] = breast_df['Image_Count'].fillna(0).astype(int)
+
+    
     
     # Write the filtered dataframes to CSV files in the output directory
     breast_df.to_csv(os.path.join(output_dir, 'BreastData.csv'), index=False)
