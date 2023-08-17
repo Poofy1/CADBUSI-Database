@@ -15,7 +15,8 @@ class MyDataset(Dataset):
     def __init__(self, root_dir, db_to_process, transform=None):
         self.root_dir = root_dir
         self.transform = transform
-        self.images = sorted([img for img in os.listdir(root_dir) if img in db_to_process['ImageName'].values])
+        image_names = set(db_to_process['ImageName'].values)
+        self.images = sorted([img for img in os.listdir(root_dir) if img in image_names])
 
     def __len__(self):
         return len(self.images)
@@ -65,7 +66,7 @@ def find_calipers(images_dir, model_name, db_to_process, image_size=256, batch_s
         transforms.Normalize([0.5], [0.5]),
     ])
     dataset = MyDataset(images_dir, db_to_process, transform=preprocess)
-    dataloader = DataLoader(dataset, batch_size=batch_size, num_workers=1)
+    dataloader = DataLoader(dataset, batch_size=batch_size, num_workers=4)
 
     results = []
     

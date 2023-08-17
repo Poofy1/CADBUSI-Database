@@ -7,6 +7,8 @@ import pandas as pd
 from tqdm import tqdm
 
 env = os.path.dirname(os.path.abspath(__file__))
+radius = 5
+flags = cv2.INPAINT_TELEA
 
 def Inpaint_Dataset(csv_file_path, input_folder, tile_size=256, overlap=84, dilate_radius=5):    
     print("Inpainting Useful Caliper Images")
@@ -30,10 +32,10 @@ def Inpaint_Dataset(csv_file_path, input_folder, tile_size=256, overlap=84, dila
     
     for index, row in tqdm(processed_data.iterrows(), total=len(processed_data)):
         
-        image_name = row['ImageName']
-        input_image_path = input_folder + image_name 
-        radius = 5
-        flags = cv2.INPAINT_TELEA
+
+        input_image_path = os.path.join(input_folder, row['ImageName'])
+        
+        
 
         original_image = cv2.imread(input_image_path)
 

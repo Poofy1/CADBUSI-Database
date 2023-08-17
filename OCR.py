@@ -214,41 +214,50 @@ def find_mixed_lateralities( db ):
 
 
 
+# DARKNESS
+######################################################
 
 
 
+def process_single_darkness(row, image_folder_path):
+    image_file = row['ImageName']
+    
+    try: 
+        x = row['RegionLocationMinX0']
+        y = row['RegionLocationMinY0']
+        w = row['RegionLocationMaxX1'] - x
+        h = row['RegionLocationMaxY1'] - y
+    except:
+        return (image_file, None)
+    
+    image = Image.open(os.path.join(image_folder_path, image_file)).convert('L')
+    image_np = np.array(image)  # Convert image to numpy array
 
+    img_us = image_np[y:y+h, x:x+w]
+    img_us_gray, isColor = make_grayscale(img_us)
+    _, img_us_bw = cv2.threshold(img_us_gray, 20, 255, cv2.THRESH_BINARY)
+    num_dark = np.sum( img_us_bw == 0)
+    
+    return (image_file, 100*num_dark/(w*h))  # Return the filename along with its darkness
 
 def get_darkness(image_folder_path, df):
-    
     darknesses = []
-    
-    for _, row in tqdm(df.iterrows(), total=df.shape[0]):
-        
-        image_file = row['ImageName']
-        
-        try: 
-            x = row['RegionLocationMinX0']
-            y = row['RegionLocationMinY0']
-            w = row['RegionLocationMaxX1'] - x
-            h = row['RegionLocationMaxY1'] - y
-        except:
-            darknesses.append((image_file, None))
-            continue
-        
-        image = Image.open(os.path.join(image_folder_path, image_file)).convert('L')
-        image_np = np.array(image)  # Convert image to numpy array
-
-        img_us = image_np[y:y+h, x:x+w]
-        img_us_gray, isColor = make_grayscale(img_us)
-        _, img_us_bw = cv2.threshold(img_us_gray, 20, 255, cv2.THRESH_BINARY)
-        num_dark = np.sum( img_us_bw == 0)
-        darknesses.append((image_file, 100*num_dark/(w*h)))  # Append the filename along with its darkness
-        
+    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+        futures = {executor.submit(process_single_darkness, row, image_folder_path): row for _, row in df.iterrows()}
+        with tqdm(total=len(futures)) as pbar:
+            for future in as_completed(futures):
+                result = future.result()
+                if result is not None:
+                    darknesses.append(result)
+                pbar.update()
     return darknesses
 
 
 
+
+
+# OCR
+######################################################
 
 
 def process_image(image_file, description_mask, image_folder_path, reader, kw_list):
@@ -301,14 +310,28 @@ def process_image(image_file, description_mask, image_folder_path, reader, kw_li
 
 
 
+def get_OCR(image_folder_path, description_masks):
+    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+        futures = {executor.submit(process_image, image_file, description_mask, image_folder_path, reader, description_kw): image_file for image_file, description_mask in description_masks}
+        progress = tqdm(total=len(futures), desc='')
 
-def get_image_sizes(image_folder_path, filenames):
-    image_sizes = {}
-    for filename in tqdm(filenames):
-        with Image.open(os.path.join(image_folder_path, filename)) as img:
-            image_sizes[filename] = list(img.size)  # Store image size as a list [width, height]
-    return image_sizes
+        # Initialize dictionary to store descriptions
+        descriptions = {}
 
+        for future in as_completed(futures):
+            result = future.result()  # result is now a list with the filename and the description
+            descriptions[result[0]] = result[1]  # Store description at corresponding image file
+            progress.update()
+
+        progress.close()
+        
+    return descriptions
+
+
+
+
+# ULTRASOUND MASK
+######################################################
 
 
 def find_crop(image, num_top_contours, buffer_size, start_row, end_row, margin):
@@ -418,6 +441,9 @@ def get_ultrasound_region(image_folder_path, db_to_process):
 
 
 
+# MAIN
+######################################################
+
 
 
 # Main method to prefrom operations
@@ -448,28 +474,14 @@ def Perform_OCR():
     print("Finding OCR Masks")
     _, description_masks = find_masks(image_folder_path, 'mask_model', db_to_process, 1920, 1080)
 
-    
-    print("Performing OCR")
-    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-        futures = {executor.submit(process_image, image_file, description_mask, image_folder_path, reader, description_kw): image_file for image_file, description_mask in description_masks}  # description_masks now include the filenames
-        progress = tqdm(total=len(futures), desc='')
-
-        # Initialize dictionary to store descriptions
-        descriptions = {}
-
-        for future in as_completed(futures):
-            result = future.result()  # result is now a list with the filename and the description
-            descriptions[result[0]] = result[1]  # Store description at corresponding image file
-            progress.update()
-
-        progress.close()
+    print("Performing OCR")  
+    descriptions = get_OCR(image_folder_path, description_masks)
 
     print("Finding Image Masks")
     image_masks = get_ultrasound_region(image_folder_path, db_to_process)
     
     print("Finding Calipers")
     has_calipers = find_calipers(image_folder_path, 'caliper_model', db_to_process)
-    
     
     print("Finding Darkness")
     darknesses = get_darkness(image_folder_path, db_to_process)

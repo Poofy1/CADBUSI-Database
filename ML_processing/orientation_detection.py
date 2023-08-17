@@ -17,7 +17,8 @@ class MyDataset(Dataset):
     def __init__(self, root_dir, db_to_process, transform=None):
         self.root_dir = root_dir
         self.transform = transform
-        self.images = sorted([img for img in os.listdir(root_dir) if img in db_to_process['ImageName'].values])
+        image_names_set = set(db_to_process['ImageName'].values)
+        self.images = sorted([img for img in os.listdir(root_dir) if img in image_names_set])
 
     def __len__(self):
         return len(self.images)
@@ -85,7 +86,7 @@ def Find_Orientation(images_dir, model_name, csv_input, image_size=375):
     db_to_process['reparsed_orientation'] = True
     
     dataset = MyDataset(images_dir, db_to_process, transform=preprocess)
-    dataloader = DataLoader(dataset, batch_size=4, num_workers = 1)
+    dataloader = DataLoader(dataset, batch_size=4, num_workers = 3)
 
     results = []
     

@@ -187,9 +187,8 @@ def parse_single_dcm(dcm, current_index, parsed_database):
         else:
             # Convert yellow pixels to white
             yellow = [255, 255, 0]  # RGB values for yellow
-            white = [255, 255, 255]  # RGB values for white
             mask = np.all(np_im == yellow, axis=-1)
-            np_im[mask] = white
+            np_im[mask] = [255, 255, 255]
             im = np_im
 
             # Convert to grayscale
@@ -223,9 +222,6 @@ def parse_dcm_files(dcm_files_list, parsed_database):
     else:
         current_index = 0
 
-    data_list = []
-    lock = Lock()
-
     # Load existing parsed files from csv
     image_csv_file = f'{parsed_database}ImageData.csv'
     if os.path.isfile(image_csv_file):
@@ -234,26 +230,26 @@ def parse_dcm_files(dcm_files_list, parsed_database):
     else:
         existing_files = set()
 
-    # Exclude already parsed files from the dcm_files_list
-    #dcm_files_list = [dcm_file for dcm_file in dcm_files_list if os.path.basename(dcm_file) not in existing_files]
     print(f'New Dicom Files: {len(dcm_files_list)}')
 
     with ThreadPoolExecutor() as executor:
         futures = {executor.submit(parse_single_dcm, dcm, i+current_index, parsed_database): dcm for i, dcm in enumerate(dcm_files_list)}
+        data_list = []
         for future in tqdm(as_completed(futures), total=len(futures), desc=""):
             try:
                 data = future.result()
-                with lock:
-                    data_list.append(data)
-                    # Save index
-                    with open(index_file, "w") as file:
-                        file.write(str(current_index + len(data_list)))
+                data_list.append(data)
             except Exception as exc:
                 print(f'An exception occurred: {exc}')
+
+        # Save index
+        with open(index_file, "w") as file:
+            file.write(str(current_index + len(data_list)))
 
     # Create a DataFrame from the list of dictionaries
     df = pd.DataFrame(data_list)
     return df
+
 
 
 

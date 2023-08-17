@@ -72,7 +72,7 @@ class MyDatasetVideo(Dataset):
     
     
     
-def find_masks(images_dir, model_name, db_to_process, max_width, max_height, batch_size=4, video_format=False, video_folders=None):
+def find_masks(images_dir, model_name, db_to_process, max_width, max_height, batch_size=8, video_format=False, video_folders=None):
     # Load a pre-trained model for classification
     backbone = torchvision.models.squeezenet1_1(pretrained=True).features
     backbone.out_channels = 512
@@ -89,7 +89,7 @@ def find_masks(images_dir, model_name, db_to_process, max_width, max_height, bat
         dataset = MyDatasetVideo(images_dir, db_to_process, max_width, max_height)
     else:
         dataset = MyDataset(images_dir, db_to_process, max_width, max_height)
-    dataloader = DataLoader(dataset, batch_size=batch_size, num_workers=1)
+    dataloader = DataLoader(dataset, batch_size=batch_size, num_workers=2)
 
     class1_results = []
     class2_results = []

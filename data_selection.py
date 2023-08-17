@@ -106,10 +106,10 @@ def find_nearest_images(db, patient_id, image_folder_path):
         if c in image_pairs_checked:
             continue
 
-        x = int(db.loc[c]['RegionLocationMinX0'])
-        y = int(db.loc[c]['RegionLocationMinY0'])
-        w = int(db.loc[c]['RegionLocationMaxX1']) - x
-        h = int(db.loc[c]['RegionLocationMaxY1']) - y
+        x = int(db.at[c, 'RegionLocationMinX0'])
+        y = int(db.at[c, 'RegionLocationMinY0'])
+        w = int(db.at[c, 'RegionLocationMaxX1']) - x
+        h = int(db.at[c, 'RegionLocationMaxY1']) - y
 
         
         img_list = []
@@ -140,16 +140,16 @@ def find_nearest_images(db, patient_id, image_folder_path):
 
         # Save result for the current image
         result[c] = {
-            'image_filename': db.loc[c]['ImageName'],
-            'sister_filename': db.loc[idx[sister_image]]['ImageName'],
+            'image_filename': db.at[c, 'ImageName'],
+            'sister_filename': db.at[idx[sister_image], 'ImageName'],
             'distance': distance
         }
 
         # Save result for the sister image, if not already done
         if idx[sister_image] not in result:
             result[idx[sister_image]] = {
-                'image_filename': db.loc[idx[sister_image]]['ImageName'],
-                'sister_filename': db.loc[c]['ImageName'],
+                'image_filename': db.at[idx[sister_image], 'ImageName'],
+                'sister_filename': db.at[c, 'ImageName'],
                 'distance': distance
             }
 
@@ -166,8 +166,8 @@ def process_patient_id(pid, db_out, image_folder_path):
     result = find_nearest_images(subset, pid, image_folder_path)
     idxs = result.keys()
     for i in idxs:
-        subset.loc[i, 'closest_fn'] = result[i]['sister_filename']
-        subset.loc[i, 'distance'] = result[i]['distance']
+        subset.at[i, 'closest_fn'] = result[i]['sister_filename']
+        subset.at[i, 'distance'] = result[i]['distance']
     return subset
 
 
@@ -178,13 +178,12 @@ def Parse_Data():
     db_out = pd.read_csv(input_file)
     case_data = pd.read_csv(case_file)
     
-
     # Check if 'processed' column exists, if not create it
     if 'processed' not in db_out.columns:
         db_out['processed'] = False
 
     # Remove rows with missing data in crop_x, crop_y, crop_w, crop_h
-    db_out = db_out.dropna(subset=['crop_x', 'crop_y', 'crop_w', 'crop_h'])
+    db_out.dropna(subset=['crop_x', 'crop_y', 'crop_w', 'crop_h'], inplace=True)
 
     # Filter the rows where 'processed' is False
     db_to_process = db_out[db_out['processed'] == False]
