@@ -16,7 +16,7 @@ This program is designed to process Breast Ultrasound data from multiple sources
 
 ### Prerequisites
 
-- Install Python 3.8
+- Python 3.8
 - 6GB Nvidia GPU (Recommended)
 - Install required Python packages with pip:
 
