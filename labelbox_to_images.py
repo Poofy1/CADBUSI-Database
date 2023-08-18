@@ -16,7 +16,7 @@ def get_with_retry(url, max_retries=5):
             if response.status_code == 200:
                 return response
             else:
-                print(f"Failed to download mask image, retrying")
+                print(f"\nFailed to download mask image, retrying {retries}/{max_retries}")
         except requests.exceptions.RequestException as e:
             print(f"Request failed: {e}")
         

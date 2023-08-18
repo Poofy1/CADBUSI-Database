@@ -124,6 +124,6 @@ def Video_Cleanup():
     # Find crop ratio
     db['crop_aspect_ratio'] = db['crop_w'] / db['crop_h']
     
-    db.to_csv(f'{env}/database/VideoData2.csv',index=False)
+    db.to_csv(input_file, index=False)
 
 

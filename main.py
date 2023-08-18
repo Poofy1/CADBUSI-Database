@@ -1,6 +1,5 @@
 import os
 import pandas as pd
-from val_split import PerformVal
 from images_to_labelbox import Crop_and_save_images
 from OCR import Perform_OCR
 from trustworthiness import Find_Trust
@@ -26,18 +25,17 @@ LB_API_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJjbGc5emFjOTIyM
 PROJECT_ID = 'clgr3eeyn00tr071n6tjgatsu'
 
 # Select Mode (Only one true at a time!)
-only_append_to_database = True
+only_append_to_database = False
 only_retreive_labelbox_data = False
-only_update_val = False
-only_export = False
+only_export = True
 
 # Paths
 zip_input = f'D:/DATA/CASBUSI/zip_files/'
 raw_storage_database = f'D:/DATA/CASBUSI/dicoms/'
-export_dir = f'D:/DATA/CASBUSI/exports/export_8_14/'
+export_dir = f'D:/DATA/CASBUSI/exports/export_8_18/'
 
 # Debug Settings 
-data_range = [0,10000] # Set to None to use everything
+data_range = None #[0,10000] # Set to None to use everything
 reseted_processed = False
 
 #############################
@@ -85,20 +83,12 @@ if __name__ == '__main__':
         if user_input.lower() == "y":
             ProcessVideoData()
             Video_Cleanup()
-        
-        
-        # Update val split amount
-        PerformVal(val_split)
 
-
-    # Update val split amount
-    if only_update_val:
-        PerformVal(val_split)
         
         
     # Export Database
     if only_export:
-        Export_Database(export_trust_ceiling, export_dir)
+        Export_Database(export_trust_ceiling, export_dir, val_split)
         
         
     if only_retreive_labelbox_data:

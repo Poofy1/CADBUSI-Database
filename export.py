@@ -1,7 +1,6 @@
-import os, cv2
+import os, cv2, ast
 import pandas as pd
-import ast
-import shutil
+import numpy as np
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 env = os.path.dirname(os.path.abspath(__file__))
@@ -155,7 +154,57 @@ def safe_literal_eval(val, idx):
             print(f"Error parsing value at index {idx}: {val}")
             return val  # or some other default value
 
-def Export_Database(trust_threshold, output_dir):
+
+
+def PerformVal(val_split, df):
+    # Check if the 'valid' column exists, if not, create it
+    if 'valid' not in df.columns:
+        df['valid'] = None  # You can replace None with any default value
+
+    # Get unique anonymized_accession_num values
+    unique_accession_nums = df['Accession_Number'].unique()
+
+    # Shuffle the unique accession numbers
+    np.random.shuffle(unique_accession_nums)
+
+    # Calculate the split index
+    twenty_percent_index = int(len(unique_accession_nums) * val_split)
+
+    # Assign '1' to 20% of the unique accession numbers and '0' to the remaining 80%
+    valid_accession_nums = set(unique_accession_nums[:twenty_percent_index])
+
+    # Assign the 'valid' column values based on the anonymized_accession_num
+    df['valid'] = df['Accession_Number'].apply(lambda x: 1 if x in valid_accession_nums else 0)
+
+    return df
+    
+
+def Fix_CM_Data(df):
+    df['nipple_dist'] = df['nipple_dist'].str.replace('cm', '').str.replace(' ', '')
+
+    # Handle range values
+    df['nipple_dist'] = df['nipple_dist'].apply(lambda x: round(np.mean([int(i) for i in x.split('-')])) if isinstance(x, str) and '-' in x else x)
+
+    # Convert to numeric and handle errors
+    df['nipple_dist'] = pd.to_numeric(df['nipple_dist'], errors='coerce')
+
+    df.loc[df['nipple_dist'] > 25, 'nipple_dist'] = np.nan
+
+    # Replace 0 with NaN
+    df.loc[df['nipple_dist'] == 0, 'nipple_dist'] = np.nan
+
+    # Convert NaN values to -1 and convert to int
+    df['nipple_dist'].fillna(-1, inplace=True)
+
+    # Convert -1 back to NaN
+    df.loc[df['nipple_dist'] == -1, 'nipple_dist'] = np.nan
+    
+    return df
+
+
+
+    
+def Export_Database(trust_threshold, output_dir, val_split):
     
     print("Exporting Data:")
     
@@ -175,11 +224,11 @@ def Export_Database(trust_threshold, output_dir):
     breast_df = pd.read_csv(breast_csv_file)
     
     #Trust threshold
-    filtered_case_study_df = case_study_df[case_study_df['trustworthiness'] <= trust_threshold]
+    case_study_df = case_study_df[case_study_df['trustworthiness'] <= trust_threshold]
 
     # Reformat biopsy
-    filtered_case_study_df['Biopsy'] = filtered_case_study_df.apply(lambda row: safe_literal_eval(row['Biopsy'], row.name), axis=1)
-    filtered_case_study_df['Biopsy'] = filtered_case_study_df['Biopsy'].apply(transform_biopsy_list)
+    case_study_df['Biopsy'] = case_study_df.apply(lambda row: safe_literal_eval(row['Biopsy'], row.name), axis=1)
+    case_study_df['Biopsy'] = case_study_df['Biopsy'].apply(transform_biopsy_list)
     
     
     try:
@@ -190,11 +239,12 @@ def Export_Database(trust_threshold, output_dir):
 
     # Filter the image data based on the filtered case study data and the 'label' column
     image_df = image_df[image_df['label'] == True]
-    image_df = image_df[(image_df['Patient_ID'].isin(filtered_case_study_df['Patient_ID']))]
-    breast_df = breast_df[(breast_df['Patient_ID'].isin(filtered_case_study_df['Patient_ID']))]
-    video_df = video_df[(video_df['Patient_ID'].isin(filtered_case_study_df['Patient_ID']))]
+    image_df = image_df[(image_df['Patient_ID'].isin(case_study_df['Patient_ID']))]
+    image_df = image_df.drop(['label', 'area'], axis=1)
+    breast_df = breast_df[(breast_df['Patient_ID'].isin(case_study_df['Patient_ID']))]
+    video_df = video_df[(video_df['Patient_ID'].isin(case_study_df['Patient_ID']))]
+    video_df = video_df[video_df['laterality'] != 'unknown']
 
-    
     # Crop the images for the relevant studies
     Crop_Images(image_df, output_dir)
     Crop_Videos(video_df, output_dir)
@@ -204,7 +254,6 @@ def Export_Database(trust_threshold, output_dir):
                           'Accession_Number', 
                           'ImageName',
                           'PhotometricInterpretation',
-                          'area',
                           'labeled',
                           'nipple_dist',
                           'orientation',
@@ -212,7 +261,6 @@ def Export_Database(trust_threshold, output_dir):
                           'reparsed_orientation',
                           'label_cat',
                           'Inpainted',
-                          'label',
                           'crop_aspect_ratio']
     image_df = image_df[image_columns]
     video_columns = ['Patient_ID', 
@@ -231,8 +279,10 @@ def Export_Database(trust_threshold, output_dir):
     
     
     # Convert 'Patient_ID' columns to integers
-    image_df['Patient_ID'] = image_df['Patient_ID'].astype(int)
     labeled_df['Patient_ID'] = labeled_df['Patient_ID'].astype(int)
+    image_df = image_df.astype({'Accession_Number': 'int', 'Patient_ID': 'int'})
+    breast_df = breast_df.astype({'Accession_Number': 'int', 'LesionCount': 'int'})
+    
     # Set 'Labeled' to True for rows with a 'Patient_ID' in labeled_df
     image_df.loc[image_df['Patient_ID'].isin(labeled_df['Patient_ID']), 'labeled'] = True
     
@@ -240,17 +290,31 @@ def Export_Database(trust_threshold, output_dir):
     image_df = merge_and_fillna(image_df, breast_df)
     video_df = merge_and_fillna(video_df, breast_df)
     
+    
     #Find Image Counts (Breast Data)
     image_counts = image_df.groupby(['Patient_ID', 'laterality']).size().reset_index(name='Image_Count')
     breast_df = pd.merge(breast_df, image_counts, how='left', left_on=['Patient_ID', 'Breast'], right_on=['Patient_ID', 'laterality'])
-    breast_df = breast_df.drop('laterality', axis=1)
+    breast_df = breast_df.drop(['laterality', 'unknown'], axis=1)
     breast_df['Image_Count'] = breast_df['Image_Count'].fillna(0).astype(int)
+    
+    # Filter out case and breast data that isnt relavent 
+    image_patient_ids = image_df['Patient_ID'].unique()
+    case_study_df = case_study_df[case_study_df['Patient_ID'].isin(image_patient_ids)]
+    breast_df = breast_df[breast_df['Patient_ID'].isin(image_patient_ids)]
+    
+    
+    # Fix cm data
+    image_df = Fix_CM_Data(image_df)
+    video_df = Fix_CM_Data(video_df)
+    
 
+    # Val split for case data
+    case_study_df = PerformVal(val_split, case_study_df)
     
     
     # Write the filtered dataframes to CSV files in the output directory
     breast_df.to_csv(os.path.join(output_dir, 'BreastData.csv'), index=False)
-    filtered_case_study_df.to_csv(os.path.join(output_dir, 'CaseStudyData.csv'), index=False)
+    case_study_df.to_csv(os.path.join(output_dir, 'CaseStudyData.csv'), index=False)
     labeled_df.to_csv(os.path.join(output_dir, 'LabeledData.csv'), index=False)
     video_df.to_csv(os.path.join(output_dir, 'VideoData.csv'), index=False)
     image_df.to_csv(os.path.join(output_dir, 'ImageData.csv'), index=False)
