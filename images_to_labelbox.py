@@ -194,8 +194,7 @@ def Crop_and_save_images(images_per_row):
         existing_data = pd.DataFrame(columns=['Patient_ID', 'group', 'ImageName', 'x', 'y', 'width', 'height', 'us_x0', 'us_y0', 'us_x1', 'us_y1'])
         
     #Skip formated data
-    #labeled_data = pd.read_csv(labeled_data_file) if os.path.isfile(labeled_data_file) else pd.DataFrame(columns=['Patient_ID'])
-    labeled_data = pd.DataFrame(columns=['Patient_ID'])
+    labeled_data = pd.read_csv(labeled_data_file) if os.path.isfile(labeled_data_file) else pd.DataFrame(columns=['Patient_ID'])
 
     # Create a ThreadPoolExecutor
     results = []

@@ -292,7 +292,7 @@ def Read_Labelbox_Data(LB_API_KEY, PROJECT_ID, original_images):
     df = df.reindex(columns=cols)
 
     # List of columns to be dropped
-    columns_to_drop = ['bad_images', 'doppler_image', 'cyst_images', 'normal_images', '==== SECTION 1 ====', '==== SECTION 2 ====', '==== SECTION 5 ====']
+    columns_to_drop = ['bad_images', 'doppler_image', 'cyst_images', 'normal_images', '==== SECTION 1 ====', '==== SECTION 2 ====', '==== SECTION 3 ====', '==== SECTION 4 ====', '==== SECTION 5 ====']
 
     # Check if the columns exist in the DataFrame before dropping them
     columns_to_drop_existing = [col for col in columns_to_drop if col in df.columns]

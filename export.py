@@ -241,9 +241,11 @@ def Export_Database(trust_threshold, output_dir, val_split):
     image_df = image_df[image_df['label'] == True]
     image_df = image_df[(image_df['Patient_ID'].isin(case_study_df['Patient_ID']))]
     image_df = image_df.drop(['label', 'area'], axis=1)
+    image_df = image_df[image_df['laterality'].notna()]
     breast_df = breast_df[(breast_df['Patient_ID'].isin(case_study_df['Patient_ID']))]
     video_df = video_df[(video_df['Patient_ID'].isin(case_study_df['Patient_ID']))]
     video_df = video_df[video_df['laterality'] != 'unknown']
+    video_df = video_df[video_df['laterality'].notna()]
 
     # Crop the images for the relevant studies
     Crop_Images(image_df, output_dir)
