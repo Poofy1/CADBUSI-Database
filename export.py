@@ -1,4 +1,4 @@
-import os, cv2, ast
+import os, cv2, ast, datetime, glob
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
@@ -7,6 +7,7 @@ env = os.path.dirname(os.path.abspath(__file__))
 
 # Paths
 parsed_database = f'{env}/database/'
+labeled_data_dir = f'{env}/labeled_data_archive/'
 
 biopsy_mapping = {
         'Pathology Malignant': 'malignant',
@@ -70,7 +71,7 @@ def Crop_Images(df, output_dir):
     os.makedirs(mask_folder_output, exist_ok=True)
     
     image_folder_path = f"{env}/database/images/"
-    mask_folder_input = f"{env}/database/masks/"
+    mask_folder_input = f"{labeled_data_dir}/masks/"
     
     with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
         futures = {executor.submit(process_single_image, row, image_folder_path, image_output, mask_folder_input, mask_folder_output): index for index, row in df.iterrows()}
@@ -206,6 +207,9 @@ def Fix_CM_Data(df):
     
 def Export_Database(trust_threshold, output_dir, val_split):
     
+    date = datetime.datetime.now().strftime("%m_%d_%Y")
+    output_dir = f'{output_dir}/export_{date}/'
+    
     print("Exporting Data:")
     
     os.makedirs(output_dir, exist_ok = True)
@@ -214,7 +218,6 @@ def Export_Database(trust_threshold, output_dir, val_split):
     image_csv_file = f'{parsed_database}ImageData.csv'
     breast_csv_file = f'{parsed_database}BreastData.csv' 
     case_study_csv_file = f'{parsed_database}CaseStudyData.csv' 
-    labeled_csv_file = f'{parsed_database}LabeledData.csv'
     video_csv_file =  f'{parsed_database}VideoData.csv'
 
     # Read data
@@ -230,10 +233,12 @@ def Export_Database(trust_threshold, output_dir, val_split):
     case_study_df['Biopsy'] = case_study_df.apply(lambda row: safe_literal_eval(row['Biopsy'], row.name), axis=1)
     case_study_df['Biopsy'] = case_study_df['Biopsy'].apply(transform_biopsy_list)
     
-    
-    try:
-        labeled_df = pd.read_csv(labeled_csv_file)
-    except FileNotFoundError:
+
+    if os.path.exists(labeled_data_dir):
+        all_files = glob.glob(f'{labeled_data_dir}/*.csv')
+        all_dfs = (pd.read_csv(f) for f in all_files)
+        labeled_df = pd.concat(all_dfs, ignore_index=True)
+    else:
         labeled_df = pd.DataFrame(columns=['Patient_ID'])
     
 

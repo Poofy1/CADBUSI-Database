@@ -3,8 +3,13 @@ import pandas as pd
 from PIL import Image
 from io import BytesIO
 from tqdm import tqdm
+import datetime, glob
 import numpy as np
 env = os.path.dirname(os.path.abspath(__file__))
+
+output_dir = f'{env}/labeled_data_archive/'
+output_masks_dir = f'{env}/labeled_data_archive/masks/'
+
 
 
 # Need retry method becauyse labelbox servers are unreliable
@@ -34,7 +39,7 @@ def get_with_retry(url, max_retries=5):
 def Get_Labels(response):
 
     # Create Mask Folder
-    os.makedirs(f"{env}/database/temp_labelbox_data/", exist_ok=True)
+    os.makedirs(f"{output_dir}/temp_labelbox_data/", exist_ok=True)
     
     # Ensure we received a valid response
     if response.status_code == 200:
@@ -87,7 +92,7 @@ def Get_Labels(response):
                                 
                         mask_img = Image.open(BytesIO(mask_response.content))
                         mask_path = f"{external_id_digits}_{data_type}.png"
-                        mask_img.save(f"{env}/database/temp_labelbox_data/{mask_path}")
+                        mask_img.save(f"{output_dir}/temp_labelbox_data/{mask_path}")
                         mask_paths.append(mask_path)
             
             # Get Label Data
@@ -170,7 +175,7 @@ def Find_Images(df, crop_data, df_cords_col, df_image_names_col):
 
 def Find_Masks(df, crop_data, df_mask_names_col, df_image_names_col, original_images):
     # Create Mask Folder
-    os.makedirs(f"{env}/database/masks/", exist_ok=True)
+    os.makedirs(output_masks_dir, exist_ok=True)
     
     
     df['Patient_ID'] = df['Patient_ID'].astype(int)
@@ -189,7 +194,7 @@ def Find_Masks(df, crop_data, df_mask_names_col, df_image_names_col, original_im
         
         for mask_name in mask_names:
             if mask_name:
-                mask_img = Image.open(f"{env}/database/temp_labelbox_data/{mask_name}")
+                mask_img = Image.open(f"{output_dir}/temp_labelbox_data/{mask_name}")
                 mask_np = np.array(mask_img)
 
                 # Find all non-zero points in the mask
@@ -225,7 +230,7 @@ def Find_Masks(df, crop_data, df_mask_names_col, df_image_names_col, original_im
                         mask_paths.append(mask_path)
                         
                         original_img.paste(cropped_mask, box)
-                        original_img.save(f"{env}/database/masks/{mask_path}")
+                        original_img.save(f"{output_masks_dir}/{mask_path}")
                         
                         
                         break  # We found an image that the mask belongs to, no need to check other points
@@ -238,7 +243,7 @@ def Find_Masks(df, crop_data, df_mask_names_col, df_image_names_col, original_im
         df.at[i, df_image_names_col] = ', '.join(all_images_for_mask)
 
     #Delete old masks
-    shutil.rmtree(f"{env}/database/temp_labelbox_data/")
+    shutil.rmtree(f"{output_dir}/temp_labelbox_data/")
     
     return df
         
@@ -259,11 +264,25 @@ def move_used_images(df, original_images_dir, used_images_dir):
             shutil.move(image_path, f"{used_images_dir}{os.path.basename(image_path)}")
 
 
+def Get_Previous_Data():
+    # Check if the output directory exists
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir, exist_ok=True)
+        return None
+
+    # Combine all CSV files in output_dir
+    all_files = glob.glob(f'{output_dir}/*.csv')
+    all_dfs = (pd.read_csv(f) for f in all_files)
+    return pd.concat(all_dfs, ignore_index=True)
+
+
 def Read_Labelbox_Data(LB_API_KEY, PROJECT_ID, original_images):
     
     client = labelbox.Client(api_key=LB_API_KEY)
     project = client.get_project(PROJECT_ID)
-
+    
+    previous_df = Get_Previous_Data()
+    
     print("Contacting Labelbox")
     export_url = project.export_labels()
 
@@ -273,6 +292,12 @@ def Read_Labelbox_Data(LB_API_KEY, PROJECT_ID, original_images):
     # Parse Data from labelbox
     print("Parsing Labelbox Data")
     df = Get_Labels(response)
+    
+    # Convert 'Patient_ID' to string in both dataframes
+    if previous_df is not None:
+        previous_df['Patient_ID'] = previous_df['Patient_ID'].astype(str)
+        df['Patient_ID'] = df['Patient_ID'].astype(str)
+        df = df[~df['Patient_ID'].isin(previous_df['Patient_ID'])]
 
     print("Refrencing Original Images")
     crop_data = pd.read_csv(f'{env}/database/CropData.csv')
@@ -301,4 +326,5 @@ def Read_Labelbox_Data(LB_API_KEY, PROJECT_ID, original_images):
     df = df.drop(columns_to_drop_existing, axis=1)
 
     # Write final csv to disk
-    df.to_csv(f'{env}/database/LabeledData.csv', index=False)
+    date = datetime.datetime.now().strftime("%m_%d_%Y")
+    df.to_csv(f'{output_dir}/LabeledData_{date}.csv', index=False)
