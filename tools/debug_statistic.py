@@ -1,7 +1,9 @@
 import pandas as pd
 import os
 
-env = os.path.dirname(os.path.abspath(__file__))
+# Get the directory of env
+current_dir = os.path.dirname(os.path.abspath(__file__))
+env = os.path.dirname(current_dir)
 
 def get_statistics():
     # Read the case study data

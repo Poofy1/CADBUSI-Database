@@ -6,7 +6,9 @@ from cv2 import cv2
 from PIL import Image
 import numpy as np
 
-env = os.path.dirname(os.path.abspath(__file__))
+# Get the directory of env
+current_dir = os.path.dirname(os.path.abspath(__file__))
+env = os.path.dirname(current_dir)
 
 def check_image_files(csv_file):
     with open(csv_file, 'r') as file:
