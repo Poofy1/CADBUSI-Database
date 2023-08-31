@@ -45,7 +45,7 @@ All input data will be controlled from the `main` script, you will need to confi
 - `only_export`: This will export all relevant database and labeled data into the specified output folder (`export_dir`).
 - Only one mode can be `True` at a time.
 
-### Data Input
+### Database Input
 - All input zipped files must be in the `zip_input` folder variable.
 - An additional CSV file is required for extra metadata. The location should be specified in the `anon_location` variable.
 
@@ -64,7 +64,7 @@ All input data will be controlled from the `main` script, you will need to confi
     - This will include a `masks` folder from segmentation.
     - Retrieving data from Labelbox will create a new labeled data entry into the `labeled_data_archive` directory.
   
-### Data Output
+### Database Output
 - Exporting the data will organize and copy all relevant data to the specified directory (`export_dir`).
     - The format will be similar to the original database architecture but will only include the filtered data.
     - Additional `masks` folder.
@@ -91,20 +91,20 @@ python main.py
 
 
 
-## Current Pipeline
+## Current Data Pipeline
 
-1. Get Datamart file of studies to be downloaded
+1. Get the Datamart file of studies to be downloaded.
 2. Manually import Notion files
-    - Download studies as dicom files
-    - Remove pixel level patient info
-    - Number patients starting from previous batch
-    - Save key file in secure location
+    - Download studies as Dicom files.
+    - Remove pixel-level patient info.
+    - Number of patients starting from the previous batch.
+    - Save the key file in a secure location.
 3. (This Software) Data Processing
-    - Parse data into CSV files
-    - Remove bad images
-    - Prepare data for labeling
-4. Upload data to Labelbox and label data
-5. (This Software) Retrieve label and masks from Labelbox
+    - Parse data into CSV files.
+    - Remove bad images.
+    - Prepare data for labeling.
+4. Upload data to Labelbox and label data.
+5. (This Software) Retrieve labels and masks from Labelbox.
 
 
 
