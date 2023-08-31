@@ -254,7 +254,7 @@ def parse_dcm_files(dcm_files_list, parsed_database):
 
 
 # Main Method
-def Parse_Zip_Files(input, raw_storage_database, data_range):
+def Parse_Zip_Files(input, anon_location, raw_storage_database, data_range):
     parsed_database = f'{env}/database/'
     image_csv_file = f'{parsed_database}ImageData.csv'
     video_csv_file = f'{parsed_database}VideoData.csv'
@@ -286,7 +286,7 @@ def Parse_Zip_Files(input, raw_storage_database, data_range):
     
 
     if len(dcm_files_list) <= 0:
-        UpdateAnonFile()
+        UpdateAnonFile(anon_location)
         return
     
     # Get DCM Data
@@ -340,7 +340,7 @@ def Parse_Zip_Files(input, raw_storage_database, data_range):
             file.write('%s\n' % item)
 
     # Find all csv files and combine into df
-    csv_df = pd.read_csv("D:/DATA/CASBUSI/cases_anon/total_cases_anon.csv")
+    csv_df = pd.read_csv(anon_location)
     
     # group the dataframe by Patient_ID and Accession_Number
     grouped_df = csv_df.groupby(['Patient_ID','Accession_Number'])
@@ -466,7 +466,7 @@ def Parse_Zip_Files(input, raw_storage_database, data_range):
 
 
 
-def UpdateAnonFile():
+def UpdateAnonFile(anon_location):
     
     print("Updating Data with Anon File")
     
@@ -480,7 +480,7 @@ def UpdateAnonFile():
     
     # Case Data
     existing_case_study_df = pd.read_csv(case_study_csv_file)
-    csv_df = pd.read_csv("D:/DATA/CASBUSI/cases_anon/total_cases_anon.csv")
+    csv_df = pd.read_csv(anon_location)
     
     # group the dataframe by Patient_ID and Accession_Number
     grouped_df = csv_df.groupby(['Patient_ID','Accession_Number'])

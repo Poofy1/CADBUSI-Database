@@ -32,10 +32,11 @@ only_export = False
 # Paths
 zip_input = f'D:/DATA/CASBUSI/zip_files/'
 raw_storage_database = f'D:/DATA/CASBUSI/dicoms/'
+anon_location = "D:/DATA/CASBUSI/cases_anon/total_cases_anon.csv"
 export_dir = f'D:/DATA/CASBUSI/exports/'
 
 # Debug Settings 
-data_range = [0,100] # Set to None to use everything
+data_range = None #[0,100] # Set to None to use everything
 reseted_processed = False
 
 #############################
@@ -60,7 +61,7 @@ if __name__ == '__main__':
         
         user_input = input("Continue with DCM Parsing step? (y/n): ")
         if user_input.lower() == "y":
-            Parse_Zip_Files(zip_input, raw_storage_database, data_range)
+            Parse_Zip_Files(zip_input, anon_location, raw_storage_database, data_range)
             Find_Trust()
             
         
