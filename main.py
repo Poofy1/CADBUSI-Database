@@ -4,7 +4,7 @@ from images_to_labelbox import Crop_and_save_images
 from OCR import Perform_OCR
 from trustworthiness import Find_Trust
 from data_selection import Parse_Data, Rename_Images
-from labelbox_to_images import Read_Labelbox_Data
+from get_labelbox_data import Read_Labelbox_Data
 from export import Export_Database
 from ML_processing.inpaint import Inpaint_Dataset
 from ML_processing.orientation_detection import Find_Orientation
@@ -25,9 +25,9 @@ LB_API_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJjbGc5emFjOTIyM
 PROJECT_ID = 'clgr3eeyn00tr071n6tjgatsu'
 
 # Select Mode (Only one true at a time!)
-only_append_to_database = False
+only_append_to_database = True
 only_retreive_labelbox_data = False
-only_export = True
+only_export = False
 
 # Paths
 zip_input = f'D:/DATA/CASBUSI/zip_files/'
@@ -35,7 +35,7 @@ raw_storage_database = f'D:/DATA/CASBUSI/dicoms/'
 export_dir = f'D:/DATA/CASBUSI/exports/'
 
 # Debug Settings 
-data_range = None #[0,10000] # Set to None to use everything
+data_range = [0,100] # Set to None to use everything
 reseted_processed = False
 
 #############################

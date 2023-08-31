@@ -1,5 +1,5 @@
 import pandas as pd
-import labelbox, requests, os, glob, sys
+import labelbox, requests, os, glob, sys, shutil
 
 # Get the directory of env
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -9,17 +9,20 @@ env = os.path.dirname(current_dir)
 sys.path.append(env)
 
 # Now you can import your script
-import images_to_labelbox
+import get_labelbox_data
 
-def add_new_columns(input_csv, csv_files):
-    # Read the input CSV
-    input_df = pd.read_csv(input_csv)
-
-    # Get the column names of the input CSV
+def add_new_columns(input_df, csv_files):
+    # Get the column names of the input DataFrame
     input_columns = input_df.columns
+
+    # Convert the 'Patient_ID' column in the input DataFrame to string
+    input_df['Patient_ID'] = input_df['Patient_ID'].astype(str)
 
     for file in csv_files:
         df = pd.read_csv(file)
+
+        # Convert the 'Patient_ID' column in the current DataFrame to string
+        df['Patient_ID'] = df['Patient_ID'].astype(str)
 
         # Get the column names of the current CSV file
         file_columns = df.columns
@@ -29,10 +32,14 @@ def add_new_columns(input_csv, csv_files):
 
         # Merge the input dataframe with the current dataframe based on 'Patient_ID'
         df = pd.merge(df, input_df[list(new_columns) + ['Patient_ID']], on='Patient_ID', how='left')
+        
+        df = get_labelbox_data.Clean_Data(df)
 
         # Save the updated CSV file
         df.to_csv(file, index=False)
         
+    #Delete old masks
+    shutil.rmtree(f"{get_labelbox_data.output_dir}/temp_labelbox_data/")
         
 def Read_Labelbox_Data(LB_API_KEY, PROJECT_ID):
     
@@ -47,7 +54,7 @@ def Read_Labelbox_Data(LB_API_KEY, PROJECT_ID):
 
     # Parse Data from labelbox
     print("Parsing Labelbox Data")
-    return images_to_labelbox.Get_Labels(response)
+    return get_labelbox_data.Get_Labels(response)
 
 
 # Get current Labelbox data

@@ -3,14 +3,13 @@ import os
 from collections import Counter
 import pydicom
 from cv2 import cv2
-from PIL import Image
 import numpy as np
 
 # Get the directory of env
 current_dir = os.path.dirname(os.path.abspath(__file__))
 env = os.path.dirname(current_dir)
 
-def check_image_files(csv_file):
+def check_duplicates(csv_file):
     with open(csv_file, 'r') as file:
         reader = csv.DictReader(file)
         image_names = []
@@ -28,12 +27,12 @@ def check_image_files(csv_file):
 
 # Usage example
 csv_file_path = f'{env}/export/VideoData.csv'
-#check_image_files(csv_file_path)
+#check_duplicates(csv_file_path)
 
 
 
 
-def read_dicom(dicom_file_path):
+def test_color_thresh(dicom_file_path):
 
     # Load the DICOM file
     dicom = pydicom.dcmread(dicom_file_path)
@@ -62,4 +61,4 @@ def read_dicom(dicom_file_path):
 
 
 dicom_file_path = f'D:\DATA\CASBUSI\dicoms/00053_dicoms_anon/00053_dicoms_anon/image_00003723_00003946_b7123309f8c9c9040ec97959dc6c04507119f271.dcm'
-#read_dicom(dicom_file_path)
+#test_color_thresh(dicom_file_path)

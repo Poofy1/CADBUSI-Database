@@ -276,6 +276,22 @@ def Get_Previous_Data():
     return pd.concat(all_dfs, ignore_index=True)
 
 
+def Clean_Data(df):
+    # Reorder Columns
+    ordering = ['Patient_ID', 'mask_names', 'masked_original_names', 'bad_image_names', 'doppler_image_names', 'cyst_image_names', 'normal_image_names']
+    cols = ordering + [col for col in df.columns if col not in ordering]
+    df = df.reindex(columns=cols)
+
+    # List of columns to be dropped
+    columns_to_drop = ['bad_images', 'doppler_image', 'cyst_images', 'normal_images', '==== SECTION 1 ====', '==== SECTION 2 ====', '==== SECTION 3 ====', '==== SECTION 4 ====', '==== SECTION 5 ====']
+
+    # Check if the columns exist in the DataFrame before dropping them
+    columns_to_drop_existing = [col for col in columns_to_drop if col in df.columns]
+
+    # Drop the existing columns
+    return df.drop(columns_to_drop_existing, axis=1)
+
+
 def Read_Labelbox_Data(LB_API_KEY, PROJECT_ID, original_images):
     
     client = labelbox.Client(api_key=LB_API_KEY)
@@ -311,19 +327,7 @@ def Read_Labelbox_Data(LB_API_KEY, PROJECT_ID, original_images):
     used_images_dir = f"{env}/database/used_images/"
     move_used_images(df, labelbox_images, used_images_dir)
 
-    # Reorder Columns
-    ordering = ['Patient_ID', 'mask_names', 'masked_original_names', 'bad_image_names', 'doppler_image_names', 'cyst_image_names', 'normal_image_names']
-    cols = ordering + [col for col in df.columns if col not in ordering]
-    df = df.reindex(columns=cols)
-
-    # List of columns to be dropped
-    columns_to_drop = ['bad_images', 'doppler_image', 'cyst_images', 'normal_images', '==== SECTION 1 ====', '==== SECTION 2 ====', '==== SECTION 3 ====', '==== SECTION 4 ====', '==== SECTION 5 ====']
-
-    # Check if the columns exist in the DataFrame before dropping them
-    columns_to_drop_existing = [col for col in columns_to_drop if col in df.columns]
-
-    # Drop the existing columns
-    df = df.drop(columns_to_drop_existing, axis=1)
+    df = Clean_Data(df)
 
     # Write final csv to disk
     date = datetime.datetime.now().strftime("%m_%d_%Y")
