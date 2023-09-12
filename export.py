@@ -148,12 +148,16 @@ def merge_and_fillna(df, breast_df):
     df[['Has_Malignant', 'Has_Benign', 'Has_Unknown']].fillna(0, inplace=True)
     return df
 
+
 def safe_literal_eval(val, idx):
-        try:
-            return ast.literal_eval(val)
-        except ValueError:
-            print(f"Error parsing value at index {idx}: {val}")
-            return val  # or some other default value
+    val = val.replace("nan,", "'unknown',")
+    val = val.replace("nan]", "'unknown']")
+
+    try:
+        return ast.literal_eval(val)
+    except ValueError:
+        print(f"Error parsing value at index {idx}: {val}")
+        return val  # or some other default value
 
 
 
@@ -253,8 +257,8 @@ def Export_Database(trust_threshold, output_dir, val_split):
     video_df = video_df[video_df['laterality'].notna()]
 
     # Crop the images for the relevant studies
-    Crop_Images(image_df, output_dir)
-    Crop_Videos(video_df, output_dir)
+    #Crop_Images(image_df, output_dir)
+    #Crop_Videos(video_df, output_dir)
     
     # Filter DFs
     image_columns = ['Patient_ID', 
@@ -279,6 +283,7 @@ def Export_Database(trust_threshold, output_dir, val_split):
                           'laterality',
                           'crop_aspect_ratio']
     video_df = video_df[video_columns]
+    case_study_df.drop(['trustworthiness'], axis=1, inplace=True)
     
     # Round 'crop_aspect_ratio' to 2 decimal places
     image_df['crop_aspect_ratio'] = image_df['crop_aspect_ratio'].round(2)
@@ -288,7 +293,7 @@ def Export_Database(trust_threshold, output_dir, val_split):
     # Convert 'Patient_ID' columns to integers
     labeled_df['Patient_ID'] = labeled_df['Patient_ID'].astype(int)
     image_df = image_df.astype({'Accession_Number': 'int', 'Patient_ID': 'int'})
-    breast_df = breast_df.astype({'Accession_Number': 'int', 'LesionCount': 'int'})
+    breast_df = breast_df.fillna(0).astype({'Accession_Number': 'int'})
     
     # Set 'Labeled' to True for rows with a 'Patient_ID' in labeled_df
     image_df.loc[image_df['Patient_ID'].isin(labeled_df['Patient_ID']), 'labeled'] = True
@@ -301,7 +306,7 @@ def Export_Database(trust_threshold, output_dir, val_split):
     #Find Image Counts (Breast Data)
     image_counts = image_df.groupby(['Patient_ID', 'laterality']).size().reset_index(name='Image_Count')
     breast_df = pd.merge(breast_df, image_counts, how='left', left_on=['Patient_ID', 'Breast'], right_on=['Patient_ID', 'laterality'])
-    breast_df = breast_df.drop(['laterality', 'unknown'], axis=1)
+    breast_df = breast_df.drop(['laterality'], axis=1)
     breast_df['Image_Count'] = breast_df['Image_Count'].fillna(0).astype(int)
     
     # Filter out case and breast data that isnt relavent 

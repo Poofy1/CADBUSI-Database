@@ -54,8 +54,8 @@ def choose_images_to_label(db, case_data):
     
     
     ###### REMOVESS BILATERAL DATA
-    bilateral_patient_ids = case_data[case_data['Study_Laterality'] == 'BILATERAL']['Patient_ID'].values
-    db.loc[db['Patient_ID'].isin(bilateral_patient_ids), 'label'] = False
+    #bilateral_patient_ids = case_data[case_data['Study_Laterality'] == 'BILATERAL']['Patient_ID'].values
+    #db.loc[db['Patient_ID'].isin(bilateral_patient_ids), 'label'] = False
     ######
     
     # If 'BILATERAL' is present in 'Study_Laterality', handle it based on 'Biopsy_Laterality'
@@ -87,6 +87,10 @@ def choose_images_to_label(db, case_data):
     
     # Check the aspect ratio of the crop region
     db['crop_aspect_ratio'] = db['crop_w'] / db['crop_h']
+    
+    # label = false where Time_Biop is empty or > 30
+    exclude_patient_ids = case_data[case_data['Time_Biop'].isnull() | (case_data['Time_Biop'] > 30)]['Patient_ID'].unique() 
+    db.loc[db['Patient_ID'].isin(exclude_patient_ids), 'label'] = False
     
     return db
 
