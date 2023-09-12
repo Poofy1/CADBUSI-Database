@@ -139,12 +139,12 @@ def Get_Labels(response):
     else:
         print(f'Failed to download file: {response.status_code}, {response.text}')
 
-
+import ast
 def Find_Images(df, crop_data, df_cords_col, df_image_names_col):
     df['Patient_ID'] = df['Patient_ID'].astype(int)
     crop_data['Patient_ID'] = crop_data['Patient_ID'].astype(int)
             
-    cords = df[df_cords_col].apply(lambda x: np.array(x) if isinstance(x, str) else x)
+    cords = df[df_cords_col].apply(lambda x: ast.literal_eval(x) if isinstance(x, str) else x)
     
     df[df_image_names_col] = ''
 
@@ -291,7 +291,9 @@ def Clean_Data(df):
     # Drop the existing columns
     return df.drop(columns_to_drop_existing, axis=1)
 
-
+    
+    
+    
 def Read_Labelbox_Data(LB_API_KEY, PROJECT_ID, original_images):
     
     client = labelbox.Client(api_key=LB_API_KEY)
@@ -308,27 +310,36 @@ def Read_Labelbox_Data(LB_API_KEY, PROJECT_ID, original_images):
     # Parse Data from labelbox
     print("Parsing Labelbox Data")
     df = Get_Labels(response)
-    
+
     # Convert 'Patient_ID' to string in both dataframes
     if previous_df is not None:
         previous_df['Patient_ID'] = previous_df['Patient_ID'].astype(str)
         df['Patient_ID'] = df['Patient_ID'].astype(str)
-        df = df[~df['Patient_ID'].isin(previous_df['Patient_ID'])]
+    
+    # Get the Patient_IDs that are in the old DataFrame
+    old_patient_ids = set(previous_df['Patient_ID'])
+
+    # Create a new DataFrame that contains only the new data
+    new_data = df[~df['Patient_ID'].isin(old_patient_ids)]
 
     print("Refrencing Original Images")
     crop_data = pd.read_csv(f'{env}/database/CropData.csv')
-    df = Find_Images(df, crop_data, 'doppler_image', 'doppler_image_names')
-    df = Find_Images(df, crop_data, 'bad_images', 'bad_image_names')
-    df = Find_Images(df, crop_data, 'cyst_images', 'cyst_image_names')
-    df = Find_Images(df, crop_data, 'normal_images', 'normal_image_names')
-    df = Find_Masks(df, crop_data, 'mask_names', 'masked_original_names', original_images)
-    
+    new_data = Find_Images(new_data, crop_data, 'doppler_image', 'doppler_image_names')
+    new_data = Find_Images(new_data, crop_data, 'bad_images', 'bad_image_names')
+    new_data = Find_Images(new_data, crop_data, 'cyst_images', 'cyst_image_names')
+    new_data = Find_Images(new_data, crop_data, 'normal_images', 'normal_image_names')
+    new_data = Find_Masks(new_data, crop_data, 'mask_names', 'masked_original_names', original_images)
+
     labelbox_images = f"{env}/database/labelbox_images/"
     used_images_dir = f"{env}/database/used_images/"
-    move_used_images(df, labelbox_images, used_images_dir)
-
+    move_used_images(new_data, labelbox_images, used_images_dir)
+    
+    df = pd.concat([previous_df, new_data])
+    
     df = Clean_Data(df)
 
     # Write final csv to disk
-    date = datetime.datetime.now().strftime("%m_%d_%Y")
-    df.to_csv(f'{output_dir}/LabeledData_{date}.csv', index=False)
+    df.to_csv(f'{output_dir}/LabeledData.csv', index=False)
+    
+    
+    
