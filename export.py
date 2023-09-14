@@ -136,6 +136,7 @@ def merge_and_fillna(df, breast_df):
     
     breast_df = breast_df.drop_duplicates(subset=['Patient_ID', 'Breast'])
     
+    df['laterality'] = df['laterality'].str.upper()
     # Merge df with breast_df on 'Patient_ID' and 'laterality'/'Breast'
     df = pd.merge(df, 
                   breast_df[['Patient_ID', 'Breast', 'Has_Malignant', 'Has_Benign', 'Has_Unknown']], 
@@ -304,6 +305,7 @@ def Export_Database(trust_threshold, output_dir, val_split):
     
     
     #Find Image Counts (Breast Data)
+    image_df['laterality'] = image_df['laterality'].str.upper()
     image_counts = image_df.groupby(['Patient_ID', 'laterality']).size().reset_index(name='Image_Count')
     breast_df = pd.merge(breast_df, image_counts, how='left', left_on=['Patient_ID', 'Breast'], right_on=['Patient_ID', 'laterality'])
     breast_df = breast_df.drop(['laterality'], axis=1)
