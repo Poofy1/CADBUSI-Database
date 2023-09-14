@@ -63,8 +63,8 @@ def choose_images_to_label(db, case_data):
     for idx, row in bilateral_cases.iterrows():
         if row['Biopsy_Laterality'] is not None:
             # Count the number of 'left' and 'right' in 'Biopsy_Laterality'
-            left_count = row['Biopsy_Laterality'].count('left')
-            right_count = row['Biopsy_Laterality'].count('right')
+            left_count = row['Biopsy_Laterality'].lower().count('left')
+            right_count = row['Biopsy_Laterality'].lower().count('right')
             # Remove the images of the other laterality if 'Biopsy_Laterality' contains only 'left' or only 'right'
             if left_count > 0 and right_count == 0:
                 db.loc[(db['Patient_ID'] == row['Patient_ID']) & (db['laterality'] == 'right'), 'label'] = False

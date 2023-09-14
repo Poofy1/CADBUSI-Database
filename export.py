@@ -12,6 +12,7 @@ labeled_data_dir = f'{env}/labeled_data_archive/'
 biopsy_mapping = {
         'Pathology Malignant': 'malignant',
         'Known Biopsy-Proven Malignancy': 'malignant',
+        'Malignant': 'malignant',
         
         'Pathology Benign': 'benign',
         'Probably Benign': 'benign',
@@ -258,8 +259,8 @@ def Export_Database(trust_threshold, output_dir, val_split):
     video_df = video_df[video_df['laterality'].notna()]
 
     # Crop the images for the relevant studies
-    #Crop_Images(image_df, output_dir)
-    #Crop_Videos(video_df, output_dir)
+    Crop_Images(image_df, output_dir)
+    Crop_Videos(video_df, output_dir)
     
     # Filter DFs
     image_columns = ['Patient_ID', 
