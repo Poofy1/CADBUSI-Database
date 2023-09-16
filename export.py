@@ -211,7 +211,7 @@ def Fix_CM_Data(df):
 
 
     
-def Export_Database(trust_threshold, output_dir, val_split):
+def Export_Database(trust_threshold, output_dir, val_split, reparse_images):
     
     date = datetime.datetime.now().strftime("%m_%d_%Y")
     output_dir = f'{output_dir}/export_{date}/'
@@ -258,9 +258,10 @@ def Export_Database(trust_threshold, output_dir, val_split):
     video_df = video_df[video_df['laterality'] != 'unknown']
     video_df = video_df[video_df['laterality'].notna()]
 
-    # Crop the images for the relevant studies
-    Crop_Images(image_df, output_dir)
-    Crop_Videos(video_df, output_dir)
+    if reparse_images:   
+        # Crop the images for the relevant studies
+        Crop_Images(image_df, output_dir)
+        Crop_Videos(video_df, output_dir)
     
     # Filter DFs
     image_columns = ['Patient_ID', 

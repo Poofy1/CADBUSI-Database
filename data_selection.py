@@ -76,7 +76,12 @@ def choose_images_to_label(db, case_data):
     
     
     # Set label = False for all images with 'unknown' laterality
-    db.loc[db['laterality'] == 'unknown', 'label'] = False
+    #db.loc[(db['laterality'] == 'unknown') | (db['laterality'].isna()), 'label'] = False
+    
+    # Find unique Patient_IDs where 'laterality' is 'unknown' or NaN
+    affected_patient_ids = db.loc[(db['laterality'] == 'unknown') | (db['laterality'].isna()), 'Patient_ID'].unique()
+    # Set 'label' to False for all rows with affected Patient_IDs
+    db.loc[db['Patient_ID'].isin(affected_patient_ids), 'label'] = False
     
     # If 'chest' or 'mastectomy' is present in 'StudyDescription', set 'label' to False for all images in that study
     chest_or_mastectomy_studies = case_data[case_data['StudyDescription'].fillna('').str.contains('chest|mastectomy', case=False)]['Patient_ID'].values
@@ -175,7 +180,7 @@ def process_patient_id(pid, db_out, image_folder_path):
     return subset
 
 
-def Parse_Data():
+def Parse_Data(only_labels):
     input_file = f'{env}/database/ImageData.csv'
     case_file = f'{env}/database/CaseStudyData.csv'
     image_folder_path = f"{env}/database/images/"
@@ -189,23 +194,26 @@ def Parse_Data():
     # Remove rows with missing data in crop_x, crop_y, crop_w, crop_h
     db_out.dropna(subset=['crop_x', 'crop_y', 'crop_w', 'crop_h'], inplace=True)
 
-    # Filter the rows where 'processed' is False
-    db_to_process = db_out[db_out['processed'] == False]
+    if only_labels:
+        db_to_process = db_out
+    else:
+        # Filter the rows where 'processed' is False
+        db_to_process = db_out[db_out['processed'] == False]
 
-    print("Finding Similar Images")
-    patient_ids = db_to_process['Patient_ID'].unique()
+        print("Finding Similar Images")
+        patient_ids = db_to_process['Patient_ID'].unique()
 
-    db_to_process['closest_fn']=''
-    db_to_process['distance'] = -1
+        db_to_process['closest_fn']=''
+        db_to_process['distance'] = -1
 
-    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor, tqdm(total=len(patient_ids), desc='') as progress:
-        futures = {executor.submit(process_patient_id, pid, db_to_process, image_folder_path): pid for pid in patient_ids}
+        with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor, tqdm(total=len(patient_ids), desc='') as progress:
+            futures = {executor.submit(process_patient_id, pid, db_to_process, image_folder_path): pid for pid in patient_ids}
 
-        for future in as_completed(futures):
-            result = future.result()
-            if result is not None and not result.empty:
-                db_to_process.update(result)
-            progress.update()
+            for future in as_completed(futures):
+                result = future.result()
+                if result is not None and not result.empty:
+                    db_to_process.update(result)
+                progress.update()
 
     db_to_process = choose_images_to_label(db_to_process, case_data)
     db_to_process = add_labeling_categories(db_to_process)

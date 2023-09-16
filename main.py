@@ -38,6 +38,7 @@ export_dir = f'D:/DATA/CASBUSI/exports/'
 # Debug Settings 
 data_range = None #[0,100] # Set to None to use everything
 reseted_processed = False
+only_determine_labeling = False
 
 #############################
 
@@ -72,7 +73,7 @@ if __name__ == '__main__':
         user_input = input("Continue with Data Cleaning step? (y/n): ")
         if user_input.lower() == "y":
             Find_Orientation(f'{env}/database/images/', 'ori_model', f'{env}/database/ImageData.csv')
-            Parse_Data()
+            Parse_Data(False)
             Inpaint_Dataset(f'{env}/database/ImageData.csv', f'{env}/database/images/')
             Rename_Images()
         
@@ -89,7 +90,7 @@ if __name__ == '__main__':
         
     # Export Database
     if only_export:
-        Export_Database(export_trust_ceiling, export_dir, val_split)
+        Export_Database(export_trust_ceiling, export_dir, val_split, reparse_images = False)
         
         
     if only_retreive_labelbox_data:
@@ -99,4 +100,7 @@ if __name__ == '__main__':
         original_images = f"{env}/database/images/"
 
         Read_Labelbox_Data(LB_API_KEY, PROJECT_ID, original_images)
+        
+    if only_determine_labeling:
+        Parse_Data(True)
         
