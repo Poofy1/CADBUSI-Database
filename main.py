@@ -90,7 +90,7 @@ if __name__ == '__main__':
         
     # Export Database
     if only_export:
-        Export_Database(export_trust_ceiling, export_dir, val_split, reparse_images = False)
+        Export_Database(export_trust_ceiling, export_dir, val_split, reparse_images = True)
         
         
     if only_retreive_labelbox_data:

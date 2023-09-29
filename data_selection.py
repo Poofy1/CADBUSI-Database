@@ -76,12 +76,12 @@ def choose_images_to_label(db, case_data):
     
     
     # Set label = False for all images with 'unknown' laterality
-    #db.loc[(db['laterality'] == 'unknown') | (db['laterality'].isna()), 'label'] = False
+    db.loc[(db['laterality'] == 'unknown') | (db['laterality'].isna()), 'label'] = False
     
     # Find unique Patient_IDs where 'laterality' is 'unknown' or NaN
-    affected_patient_ids = db.loc[(db['laterality'] == 'unknown') | (db['laterality'].isna()), 'Patient_ID'].unique()
     # Set 'label' to False for all rows with affected Patient_IDs
-    db.loc[db['Patient_ID'].isin(affected_patient_ids), 'label'] = False
+    #affected_patient_ids = db.loc[(db['laterality'] == 'unknown') | (db['laterality'].isna()), 'Patient_ID'].unique()
+    #db.loc[db['Patient_ID'].isin(affected_patient_ids), 'label'] = False
     
     # If 'chest' or 'mastectomy' is present in 'StudyDescription', set 'label' to False for all images in that study
     chest_or_mastectomy_studies = case_data[case_data['StudyDescription'].fillna('').str.contains('chest|mastectomy', case=False)]['Patient_ID'].values
