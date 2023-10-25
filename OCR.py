@@ -9,6 +9,7 @@ import easyocr
 from ML_processing.caliper_model import *
 from ML_processing.mask_model import *
 import threading
+import gc
 thread_local = threading.local()
 env = os.path.dirname(os.path.abspath(__file__))
 
@@ -34,16 +35,6 @@ def is_color( img ):
     return len(img.shape) > 2
 
 def make_grayscale( img ):
-    """Returns grayscale version of image stored in numpy array, no change if image is already monochrome
-    
-    Args:
-        img: numpy array that is monchrome (HxW) or color (HxWx3)
-        
-    Returns:
-        img_gray: numpy array, HxW, with UINT8 values from 0 to 255
-        color: boolean that is True if input image was color 
-    """
-    
     color = is_color(img)
     if color:
         img_gray = cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
@@ -227,29 +218,34 @@ def process_single_darkness(row, image_folder_path):
         y = row['RegionLocationMinY0']
         w = row['RegionLocationMaxX1'] - x
         h = row['RegionLocationMaxY1'] - y
-    except:
+    except KeyError:
         return (image_file, None)
-    
-    image = Image.open(os.path.join(image_folder_path, image_file)).convert('L')
-    image_np = np.array(image)  # Convert image to numpy array
 
-    img_us = image_np[y:y+h, x:x+w]
-    img_us_gray, isColor = make_grayscale(img_us)
-    _, img_us_bw = cv2.threshold(img_us_gray, 20, 255, cv2.THRESH_BINARY)
-    num_dark = np.sum( img_us_bw == 0)
+    with Image.open(os.path.join(image_folder_path, image_file)).convert('L') as image:
+        
+        new_size = (800, 600)  # or any other size
+        image = image.resize(new_size)
+        x, y, w, h = int(x * new_size[0] / image.size[0]), int(y * new_size[1] / image.size[1]), int(w * new_size[0] / image.size[0]), int(h * new_size[1] / image.size[1])
+
+        image_np = np.array(image)
+        img_us = image_np[y:y+h, x:x+w]
+        img_us_gray, _ = make_grayscale(img_us)
+        _, img_us_bw = cv2.threshold(img_us_gray, 20, 255, cv2.THRESH_BINARY)
+        num_dark = np.sum(img_us_bw == 0)
     
-    return (image_file, 100*num_dark/(w*h))  # Return the filename along with its darkness
+    return (image_file, 100 * num_dark / (w * h))
 
 def get_darkness(image_folder_path, df):
     darknesses = []
-    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+    with ThreadPoolExecutor(max_workers=os.cpu_count()//2) as executor:  # Reduced number of threads
         futures = {executor.submit(process_single_darkness, row, image_folder_path): row for _, row in df.iterrows()}
-        with tqdm(total=len(futures)) as pbar:
+        with tqdm(total=len(futures), miniters=50) as pbar:  # Update progress bar less frequently
             for future in as_completed(futures):
                 result = future.result()
                 if result is not None:
                     darknesses.append(result)
                 pbar.update()
+
     return darknesses
 
 
@@ -471,6 +467,9 @@ def Perform_OCR():
     db_to_process = db_out[db_out['processed'] != True]
     db_to_process['processed'] = False
     
+    print("Finding Darkness")
+    darknesses = get_darkness(image_folder_path, db_to_process)
+    
     print("Finding OCR Masks")
     _, description_masks = find_masks(image_folder_path, 'mask_model', db_to_process, 1920, 1080)
 
@@ -482,9 +481,6 @@ def Perform_OCR():
     
     print("Finding Calipers")
     has_calipers = find_calipers(image_folder_path, 'caliper_model', db_to_process)
-    
-    print("Finding Darkness")
-    darknesses = get_darkness(image_folder_path, db_to_process)
     
     # Convert lists of tuples to dictionaries
     has_calipers_dict = {filename: value for filename, value in has_calipers}
