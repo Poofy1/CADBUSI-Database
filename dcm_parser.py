@@ -442,7 +442,7 @@ def Parse_Zip_Files(input, anon_location, raw_storage_database, data_range):
     if os.path.isfile(case_study_csv_file):
         existing_case_study_df = pd.read_csv(case_study_csv_file)
         csv_df = pd.concat([existing_case_study_df, csv_df])
-        csv_df = csv_df.sort_values('Patient_ID').drop_duplicates('Patient_ID', keep='last')
+        csv_df = csv_df.sort_values('Accession_Number').drop_duplicates('Accession_Number', keep='last')
         csv_df = csv_df.reset_index(drop=True)
         
     if os.path.isfile(breast_csv_file):

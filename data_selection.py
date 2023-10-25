@@ -278,5 +278,29 @@ def Rename_Images():
     df.to_csv(input_file, index=False)
 
 
-
-
+def Remove_Duplicate_Data():
+    print("Removing Duplicate Data")
+    
+    input_file = f'{env}/database/ImageData.csv'
+    image_folder_path = f"{env}/database/images/"
+    
+    # Read the CSV file
+    df = pd.read_csv(input_file)
+    
+    # Identify rows with duplicate 'DicomHash' values, except for the last occurrence
+    duplicates = df[df.duplicated(subset='DicomHash', keep='last')]
+    
+    # Extract the image names of the duplicate rows
+    duplicate_image_names = duplicates['ImageName'].tolist()
+    
+    # Remove the duplicate rows from the dataframe
+    df.drop_duplicates(subset='DicomHash', keep='last', inplace=True)
+    
+    # Save the cleaned dataframe back to the CSV file (optional)
+    df.to_csv(input_file, index=False)
+    
+    # Delete the duplicate images
+    for image_name in tqdm(duplicate_image_names):
+        image_path = os.path.join(image_folder_path, image_name)
+        if os.path.exists(image_path):
+            os.remove(image_path)
