@@ -250,6 +250,16 @@ def Rename_Images():
     for index, row in tqdm(df.iterrows(), total=len(df)):
         # Get the old image name
         old_image_name = row['ImageName']
+        old_image_path = os.path.join(image_folder_path, old_image_name)
+        
+        # Check if the old image path exists
+        if not os.path.exists(old_image_path):
+            df.drop(index, inplace=True)
+            continue
+        
+        # Check if the old image name is already in the desired format
+        if old_image_name.count('_') == 3:
+            continue
         
         # Extract the relevant information
         patient_id = int(row['Patient_ID'])
@@ -265,18 +275,17 @@ def Rename_Images():
 
         # Generate the new image name
         new_image_name = f"{patient_id}_{accession_number}_{laterality}_{instance_number}.png"
-
-        # Update the instance number in the dictionary
-        instance_dict[key] = instance_number + 1
-        
         new_image_path = os.path.join(image_folder_path, new_image_name)
     
         # If the new image name already exists, skip it
         if os.path.exists(new_image_path):
+            os.remove(old_image_path)
+            df.drop(index, inplace=True)
+            print(f"Image already exists, removing: {old_image_path}")
             continue
 
         # Rename the image file
-        os.rename(os.path.join(image_folder_path, old_image_name), os.path.join(image_folder_path, new_image_name))
+        os.rename(old_image_path, new_image_path)
 
         # Update the image name in the DataFrame
         df.loc[index, 'ImageName'] = new_image_name

@@ -25,9 +25,9 @@ LB_API_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJjbGc5emFjOTIyM
 PROJECT_ID = 'clgr3eeyn00tr071n6tjgatsu'
 
 # Select Mode (Only one true at a time!)
-only_append_to_database = False
+only_append_to_database = True
 only_retreive_labelbox_data = False
-only_export = True
+only_export = False
 
 # Paths
 zip_input = f'D:/DATA/CASBUSI/zip_files/'
