@@ -253,7 +253,8 @@ def Rename_Images():
         
         # Extract the relevant information
         patient_id = int(row['Patient_ID'])
-        accession_number = int(row['Accession_Number'])
+        accession_number = row['Accession_Number']
+        accession_number = '' if pd.isna(accession_number) else int(accession_number)
         laterality = row['laterality']
 
         # Create a unique key for this combination
@@ -267,6 +268,12 @@ def Rename_Images():
 
         # Update the instance number in the dictionary
         instance_dict[key] = instance_number + 1
+        
+        new_image_path = os.path.join(image_folder_path, new_image_name)
+    
+        # If the new image name already exists, skip it
+        if os.path.exists(new_image_path):
+            continue
 
         # Rename the image file
         os.rename(os.path.join(image_folder_path, old_image_name), os.path.join(image_folder_path, new_image_name))
