@@ -179,6 +179,44 @@ def process_patient_id(pid, db_out, image_folder_path):
         subset.at[i, 'distance'] = result[i]['distance']
     return subset
 
+def Remove_Bad_Images():
+    input_file = f'{env}/database/ImageData.csv'
+    
+    # Load the CSV file into a pandas DataFrame
+    df = pd.read_csv(input_file)
+
+    image_folder_path = f"{env}/database/images/"
+    
+    # Prepare a list of indices to drop from the DataFrame
+    drop_indices = []
+    
+    # Iterate over the rows of the dataframe using tqdm for a progress bar
+    for index, row in tqdm(df.iterrows(), total=df.shape[0]):
+        image_name = row['ImageName']
+        image_path = os.path.join(image_folder_path, image_name)
+        
+        # Read the image using OpenCV
+        img = cv2.imread(image_path)
+
+        # If the image is RGB
+        if img is not None and len(img.shape) == 3:
+            b, g, r = cv2.split(img)
+            
+            # Calculate mean values for each channel
+            mean_b = np.mean(b)
+            mean_g = np.mean(g)
+            mean_r = np.mean(r)
+            
+            # Check if average of green channel is significantly higher than the others
+            if mean_g > mean_r + 10 and mean_g > mean_b + 10:
+                print(f'BAD IMAGE: {image_path}')
+                os.remove(image_path)  # Delete the image file
+                drop_indices.append(index)
+
+    # Drop rows from the DataFrame
+    df = df.drop(drop_indices)
+    df.to_csv(input_file, index=False)  # Save the updated DataFrame back to the CSV
+    
 
 def Parse_Data(only_labels):
     input_file = f'{env}/database/ImageData.csv'
@@ -234,7 +272,7 @@ def Parse_Data(only_labels):
     db_out.to_csv(input_file, index=False)
     
     
-
+tqdm.pandas()
 
 def Rename_Images():
     input_file = f'{env}/database/ImageData.csv'
@@ -246,21 +284,18 @@ def Rename_Images():
     # Create a dictionary to keep track of the instance numbers
     instance_dict = {}
 
-    # Iterate over the rows in the DataFrame
-    for index, row in tqdm(df.iterrows(), total=len(df)):
-        # Get the old image name
+    def rename_images(row):
         old_image_name = row['ImageName']
         old_image_path = os.path.join(image_folder_path, old_image_name)
         
         # Check if the old image path exists
         if not os.path.exists(old_image_path):
-            df.drop(index, inplace=True)
-            continue
-        
+            return None
+
         # Check if the old image name is already in the desired format
         if old_image_name.count('_') == 3:
-            continue
-        
+            return old_image_name
+    
         # Extract the relevant information
         patient_id = int(row['Patient_ID'])
         accession_number = row['Accession_Number']
@@ -277,21 +312,25 @@ def Rename_Images():
         new_image_name = f"{patient_id}_{accession_number}_{laterality}_{instance_number}.png"
         new_image_path = os.path.join(image_folder_path, new_image_name)
     
-        # If the new image name already exists, skip it
+        # If the new image name already exists, remove the old image path
         if os.path.exists(new_image_path):
             os.remove(old_image_path)
-            df.drop(index, inplace=True)
-            print(f"Image already exists, removing: {old_image_path}")
-            continue
+            return None
 
         # Rename the image file
         os.rename(old_image_path, new_image_path)
 
-        # Update the image name in the DataFrame
-        df.loc[index, 'ImageName'] = new_image_name
+        # Update the dictionary for the next instance
+        instance_dict[key] = instance_number + 1
+        
+        return new_image_name
+
+    df['ImageName'] = df.progress_apply(rename_images, axis=1)
+    df.dropna(subset=['ImageName'], inplace=True)
 
     # Save the updated DataFrame to the same CSV file
     df.to_csv(input_file, index=False)
+
 
 
 def Remove_Duplicate_Data():

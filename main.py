@@ -3,7 +3,7 @@ import pandas as pd
 from images_to_labelbox import Crop_and_save_images
 from OCR import Perform_OCR
 from trustworthiness import Find_Trust
-from data_selection import Parse_Data, Rename_Images, Remove_Duplicate_Data
+from data_selection import Parse_Data, Rename_Images, Remove_Duplicate_Data, Remove_Bad_Images
 from get_labelbox_data import Read_Labelbox_Data
 from export import Export_Database
 from ML_processing.inpaint import Inpaint_Dataset
@@ -25,9 +25,9 @@ LB_API_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJjbGc5emFjOTIyM
 PROJECT_ID = 'clgr3eeyn00tr071n6tjgatsu'
 
 # Select Mode (Only one true at a time!)
-only_append_to_database = True
+only_append_to_database = False
 only_retreive_labelbox_data = False
-only_export = False
+only_export = True
 
 # Paths
 zip_input = f'D:/DATA/CASBUSI/zip_files/'
@@ -72,12 +72,13 @@ if __name__ == '__main__':
         
         user_input = input("Continue with Data Cleaning step? (y/n): ")
         if user_input.lower() == "y":
-            Remove_Duplicate_Data()
-            Find_Orientation(f'{env}/database/images/', 'ori_model', f'{env}/database/ImageData.csv')
-            Parse_Data(only_labels = False)
-            Inpaint_Dataset(f'{env}/database/ImageData.csv', f'{env}/database/images/')
-            Rename_Images()
-        
+            Remove_Bad_Images()
+            #Remove_Duplicate_Data()
+            #Find_Orientation(f'{env}/database/images/', 'ori_model', f'{env}/database/ImageData.csv')
+            #Parse_Data(only_labels = False)
+            #Inpaint_Dataset(f'{env}/database/ImageData.csv', f'{env}/database/images/')
+            #Rename_Images()
+            
         user_input = input("Continue with Labelbox_Tranform step? (y/n): ")
         if user_input.lower() == "y":
             Crop_and_save_images(images_per_row)
