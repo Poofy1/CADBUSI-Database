@@ -52,6 +52,11 @@ def choose_images_to_label(db, case_data):
     focus_right_studies = case_data[case_data['Study_Laterality'] == 'RIGHT']['Patient_ID'].values
     db.loc[(db['Patient_ID'].isin(focus_right_studies)) & (db['laterality'] == 'left'), 'label'] = False
     
+    # Filter out images based on BI-RADS
+    valid_birads_values = ['0', '1', '2', '3', '4', '4A', '4B', '4C', '5', '6']
+    invalid_birads_patient_ids = case_data[~case_data['BI-RADS'].isin(valid_birads_values)]['Patient_ID'].unique()
+    db.loc[db['Patient_ID'].isin(invalid_birads_patient_ids), 'label'] = False
+
     
     ###### REMOVESS BILATERAL DATA
     #bilateral_patient_ids = case_data[case_data['Study_Laterality'] == 'BILATERAL']['Patient_ID'].values
