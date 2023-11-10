@@ -233,7 +233,7 @@ def Export_Database(trust_threshold, output_dir, val_split, reparse_images):
     breast_df = pd.read_csv(breast_csv_file)
     
     #Trust threshold
-    case_study_df = case_study_df[case_study_df['trustworthiness'] <= trust_threshold]
+    #case_study_df = case_study_df[case_study_df['trustworthiness'] <= trust_threshold]
 
     # Reformat biopsy
     case_study_df['Biopsy'] = case_study_df.apply(lambda row: safe_literal_eval(row['Biopsy'], row.name), axis=1)

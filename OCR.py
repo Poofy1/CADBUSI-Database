@@ -330,7 +330,31 @@ def get_OCR(image_folder_path, description_masks):
 ######################################################
 
 
-def find_crop(image, num_top_contours, buffer_size, start_row, end_row, margin):
+
+
+def find_top_edge_points(largest_contour, vertical_range):
+    # Find the highest y-coordinate in the contour
+    top_y = min(largest_contour[:, 0, 1])
+
+    # Filter points that are within the vertical range from the top y-coordinate
+    top_edge_points = [pt[0] for pt in largest_contour if top_y <= pt[0][1] <= top_y + vertical_range]
+
+    # Find the leftmost and rightmost points from the filtered top edge points
+    top_left = min(top_edge_points, key=lambda x: x[0])
+    top_right = max(top_edge_points, key=lambda x: x[0])
+
+    return top_left, top_right
+
+def process_single_image(image_path):
+    image_name = os.path.basename(image_path)  # Get image name from image path
+    
+    image = cv2.imread(image_path, 0)  # Load grayscale image directly
+
+    # Calculate the start and end row indices for the bottom quarter of the image
+    start_row = int(3 * image.shape[0] / 4)
+    end_row = image.shape[0]
+    margin = 10
+    
     # Remove caliper box
     reader_thread = get_reader()
         
@@ -345,74 +369,28 @@ def find_crop(image, num_top_contours, buffer_size, start_row, end_row, margin):
         
     # Create binary mask of nonzero pixels
     _, binary_mask = cv2.threshold(image, 0, 255, cv2.THRESH_BINARY)
-
-    # Apply morphological closing to fill small holes in the binary mask
-    kernel = np.ones((20,20),np.uint8)
-    closing = cv2.morphologyEx(binary_mask, cv2.MORPH_CLOSE, kernel)
-
-    # Define structural element for erosion and dilation
+    
     kernel = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=np.uint8)
-
-    # Apply erosion and dilation
-    eroded_mask = cv2.erode(closing, kernel, iterations=40)
-    dilated_mask = cv2.dilate(eroded_mask, kernel, iterations=30)
+    eroded_mask = cv2.erode(binary_mask, kernel, iterations=5)
 
     # Find contours and get the largest one
-    contours, _ = cv2.findContours(dilated_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
+    contours, _ = cv2.findContours(eroded_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:  # Check if contours is empty
         return None
     
     largest_contour = max(contours, key=cv2.contourArea)
-
-    # Get the bounding box
-    x, y, w, h = cv2.boundingRect(largest_contour)
-
-    # Find top left and top right points of the trapezoid's top edge
-    # Sort contours by their y coordinate (in ascending order) and select the top few
-    sorted_contours = sorted([(c[0][0], c[0][1]) for c in largest_contour], key=lambda point: point[1])
-
-    upper_points = sorted_contours[:num_top_contours]
-
-    if upper_points:
-        xleft, _ = min(upper_points, key=lambda point: point[0])
-        xright, _ = max(upper_points, key=lambda point: point[0])
-
-        # Adjust x and w values based on new found xleft and xright
-        x = max(x, xleft - buffer_size)
-        w = min(x + w, xright + buffer_size) - x
-
-    return x, y, w, h
-
-
-def process_single_image(image_path):
-        
-    buffer_size = 25  # Define buffer size here
-
-    image = cv2.imread(image_path, 0)  # Load grayscale image directly
-
-    # Calculate the start and end row indices for the bottom quarter of the image
-    start_row = int(3 * image.shape[0] / 4)
-    end_row = image.shape[0]
-    margin = 10
     
-    result = find_crop(image, num_top_contours=2, buffer_size=buffer_size, start_row=start_row, end_row=end_row, margin=margin)
-    if result is None:
-        return None
-    x, y, w, h = result
+    convex_hull = cv2.convexHull(largest_contour)
     
-    # Check aspect ratio
-    if h != 0:
-        aspect_ratio = w / h
-        if aspect_ratio < 0.4:  # Adjust this threshold as needed
-            # If the aspect ratio is too vertical, find the crop again with a larger num_top_contours
-            result = find_crop(image, num_top_contours=12, buffer_size=buffer_size, start_row=start_row, end_row=end_row, margin=margin)
-            if result is None:
-                return None
-            
-    x, y, w, h = result
-    # Store rectangle coordinates and aspect ratio in the image data dictionary
-    image_name = os.path.basename(image_path)  # Get image name from image path
+    # Use the function to find the top edge points
+    top_left, top_right = find_top_edge_points(convex_hull, vertical_range=20)
+
+    # Now you have the top left and top right points, use them to find x, y, w, h
+    x = top_left[0]
+    y = top_left[1]
+    w = top_right[0] - x
+    h = max(convex_hull[:, 0, 1]) - y  # Bottom y-coordinate - top y-coordinate
+
     return (image_name, (x, y, w, h))
 
 

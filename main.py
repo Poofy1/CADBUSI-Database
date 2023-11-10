@@ -72,12 +72,12 @@ if __name__ == '__main__':
         
         user_input = input("Continue with Data Cleaning step? (y/n): ")
         if user_input.lower() == "y":
-            Remove_Bad_Images()
-            #Remove_Duplicate_Data()
-            #Find_Orientation(f'{env}/database/images/', 'ori_model', f'{env}/database/ImageData.csv')
-            #Parse_Data(only_labels = False)
-            #Inpaint_Dataset(f'{env}/database/ImageData.csv', f'{env}/database/images/')
-            #Rename_Images()
+            #Remove_Bad_Images()
+            Remove_Duplicate_Data()
+            Find_Orientation(f'{env}/database/images/', 'ori_model', f'{env}/database/ImageData.csv')
+            Parse_Data(only_labels = False)
+            Inpaint_Dataset(f'{env}/database/ImageData.csv', f'{env}/database/images/')
+            Rename_Images()
             
         user_input = input("Continue with Labelbox_Tranform step? (y/n): ")
         if user_input.lower() == "y":
