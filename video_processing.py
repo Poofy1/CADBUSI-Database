@@ -36,10 +36,10 @@ def get_ultrasound_region(image_folder_path, db_to_process):
     return image_masks_dict
 
 
-def ProcessVideoData():
+def ProcessVideoData(database_path):
     
-    video_folder_path = f"{env}/database/videos/"
-    input_file = f'{env}/database/VideoData.csv'
+    video_folder_path = f"{database_path}/videos/"
+    input_file = f'{database_path}/VideoData.csv'
     db_out = pd.read_csv(input_file)
 
     # Check if any new features are missing in db_out and add them
@@ -111,11 +111,11 @@ def ProcessVideoData():
     db_out.to_csv(input_file,index=False)
 
 
-def Video_Cleanup():
+def Video_Cleanup(database_path):
     
     print("Video Data Clean Up")
     
-    input_file = f'{env}/database/VideoData.csv'
+    input_file = f'{database_path}/VideoData.csv'
     db = pd.read_csv(input_file)
     
     #Replace unknown areas with breast

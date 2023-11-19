@@ -3,8 +3,6 @@ import os
 import numpy as np
 import ast
 
-env = os.path.dirname(os.path.abspath(__file__))
-
 def safe_literal_eval(val):
     try:
         return ast.literal_eval(val)
@@ -16,9 +14,9 @@ def is_nan_list(val):
         return True
     return False
 
-def Find_Trust():
+def Find_Trust(database_path):
     # Read the CSV file
-    csv_file = f'{env}/database/CaseStudyData.csv'
+    csv_file = f'{database_path}/CaseStudyData.csv'
     
     df = pd.read_csv(csv_file)
 

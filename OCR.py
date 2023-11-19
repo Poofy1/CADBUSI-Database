@@ -11,7 +11,6 @@ from ML_processing.mask_model import *
 import threading
 import gc
 thread_local = threading.local()
-env = os.path.dirname(os.path.abspath(__file__))
 
 def get_reader():
     # Check if this thread already has a reader
@@ -421,10 +420,10 @@ def get_ultrasound_region(image_folder_path, db_to_process):
 
 
 # Main method to prefrom operations
-def Perform_OCR():
+def Perform_OCR(database_path):
         
-    image_folder_path = f"{env}/database/images/"
-    input_file = f'{env}/database/ImageData.csv'
+    image_folder_path = f"{database_path}/images/"
+    input_file = f'{database_path}/ImageData.csv'
     db_out = pd.read_csv(input_file)
 
     # Check if any new features are missing in db_out and add them

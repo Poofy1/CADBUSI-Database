@@ -257,21 +257,20 @@ def parse_dcm_files(dcm_files_list, parsed_database):
 
 
 # Main Method
-def Parse_Zip_Files(input, anon_location, raw_storage_database, data_range):
-    parsed_database = f'{env}/database/'
-    image_csv_file = f'{parsed_database}ImageData.csv'
-    video_csv_file = f'{parsed_database}VideoData.csv'
-    case_study_csv_file = f'{parsed_database}CaseStudyData.csv' 
-    breast_csv_file = f'{parsed_database}BreastData.csv'
+def Parse_Zip_Files(database_path, input, anon_location, raw_storage_database, data_range):
+    image_csv_file = f'{database_path}ImageData.csv'
+    video_csv_file = f'{database_path}VideoData.csv'
+    case_study_csv_file = f'{database_path}CaseStudyData.csv' 
+    breast_csv_file = f'{database_path}BreastData.csv'
 
     #Create database dir
-    os.makedirs(parsed_database, exist_ok = True)
-    os.makedirs(f'{parsed_database}/images/', exist_ok = True)
-    os.makedirs(f'{parsed_database}/videos/', exist_ok = True)
+    os.makedirs(database_path, exist_ok = True)
+    os.makedirs(f'{database_path}/images/', exist_ok = True)
+    os.makedirs(f'{database_path}/videos/', exist_ok = True)
     
     # Load the list of already parsed files
     parsed_files_list = []
-    parsed_files_list_file = f"{parsed_database}/ParsedFiles.txt"
+    parsed_files_list_file = f"{database_path}/ParsedFiles.txt"
     if os.path.exists(parsed_files_list_file):
         with open(parsed_files_list_file, 'r') as file:
             parsed_files_list = file.read().splitlines()
@@ -293,7 +292,7 @@ def Parse_Zip_Files(input, anon_location, raw_storage_database, data_range):
         return
     
     # Get DCM Data
-    image_df = parse_dcm_files(dcm_files_list, parsed_database)
+    image_df = parse_dcm_files(dcm_files_list, database_path)
     image_df = image_df.rename(columns={'PatientID': 'Patient_ID'})
     image_df = image_df.rename(columns={'AccessionNumber': 'Accession_Number'})
     

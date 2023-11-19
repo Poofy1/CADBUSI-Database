@@ -223,10 +223,10 @@ def Remove_Bad_Images():
     df.to_csv(input_file, index=False)  # Save the updated DataFrame back to the CSV
     
 
-def Parse_Data(only_labels):
-    input_file = f'{env}/database/ImageData.csv'
-    case_file = f'{env}/database/CaseStudyData.csv'
-    image_folder_path = f"{env}/database/images/"
+def Parse_Data(database_path, only_labels):
+    input_file = f'{database_path}/ImageData.csv'
+    case_file = f'{database_path}/CaseStudyData.csv'
+    image_folder_path = f"{database_path}/images/"
     db_out = pd.read_csv(input_file)
     case_data = pd.read_csv(case_file)
     
@@ -279,9 +279,9 @@ def Parse_Data(only_labels):
     
 tqdm.pandas()
 
-def Rename_Images():
-    input_file = f'{env}/database/ImageData.csv'
-    image_folder_path = f"{env}/database/images/"
+def Rename_Images(database_path):
+    input_file = f'{database_path}/ImageData.csv'
+    image_folder_path = f"{database_path}/images/"
     df = pd.read_csv(input_file)
     
     print("Renaming Images With Laterality")
@@ -338,11 +338,11 @@ def Rename_Images():
 
 
 
-def Remove_Duplicate_Data():
+def Remove_Duplicate_Data(database_path):
     print("Removing Duplicate Data")
     
-    input_file = f'{env}/database/ImageData.csv'
-    image_folder_path = f"{env}/database/images/"
+    input_file = f'{database_path}/ImageData.csv'
+    image_folder_path = f"{database_path}/images/"
     
     # Read the CSV file
     df = pd.read_csv(input_file)
