@@ -137,12 +137,12 @@ def Read_Labelbox_Data(LB_API_KEY, PROJECT_ID, database_path):
     merged_df['Yes Malignancy'] = merged_df['Label'] == 'Yes Malignancy'
     merged_df['No Malignancy'] = merged_df['Label'] == 'No Malignancy'
 
+    # Filter out rows where all three columns are False
+    condition = (merged_df['Reject'] | merged_df['Yes Malignancy'] | merged_df['No Malignancy'])
+    filtered_df = merged_df[condition]
+
     # Select only required columns
-    final_df = merged_df[['Accession_Number', 'ImageName', 'Reject', 'Yes Malignancy', 'No Malignancy']]
-    
+    final_df = filtered_df[['Accession_Number', 'ImageName', 'Reject', 'Yes Malignancy', 'No Malignancy']]
+
+    # Write final csv to disk
     final_df.to_csv(f'{database_path}/InstanceLabels.csv', index=False)
-
-
-    
-    
-    
