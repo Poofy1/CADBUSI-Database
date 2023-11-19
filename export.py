@@ -257,6 +257,19 @@ def Export_Database(trust_threshold, output_dir, val_split, reparse_images):
     video_df = video_df[(video_df['Patient_ID'].isin(case_study_df['Patient_ID']))]
     video_df = video_df[video_df['laterality'] != 'unknown']
     video_df = video_df[video_df['laterality'].notna()]
+    
+    #Remove bad aspect ratios
+    min_aspect_ratio = 0.6
+    max_aspect_ratio = 3.0
+    image_df = image_df[(image_df['crop_aspect_ratio'] >= min_aspect_ratio) & 
+                        (image_df['crop_aspect_ratio'] <= max_aspect_ratio)]
+    
+    
+    # Remove images with crop width or height less than 200 pixels
+    min_dimension = 225
+    image_df = image_df[(image_df['crop_w'] >= min_dimension) & 
+                        (image_df['crop_h'] >= min_dimension)]
+    
 
     if reparse_images:   
         # Crop the images for the relevant studies
