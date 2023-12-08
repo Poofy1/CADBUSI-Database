@@ -6,7 +6,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 env = os.path.dirname(os.path.abspath(__file__))
 
 # Paths
-parsed_database = f'{env}/database/'
 labeled_data_dir = f'{env}/labeled_data_archive/'
 
 biopsy_mapping = {
@@ -210,8 +209,49 @@ def Fix_CM_Data(df):
 
 
 
+
+def format_data(breast_data, image_data, case_data):
+    # Join breast_data and image_data on Accession_Number and Breast/laterality
+    data = pd.merge(breast_data, image_data, left_on=['Accession_Number', 'Breast'], 
+                    right_on=['Accession_Number', 'laterality'], suffixes=('', '_image_data'))
+
+    # Remove columns from image_data that also exist in breast_data
+    for col in breast_data.columns:
+        if col + '_image_data' in data.columns:
+            data.drop(col + '_image_data', axis=1, inplace=True)
     
-def Export_Database(trust_threshold, output_dir, val_split, reparse_images):
+    # Filter out rows where Has_Unknown is False
+    data = data[data['Has_Unknown'] == False]
+
+    # Keep only the specified columns
+    columns_to_keep = ['Patient_ID', 'Accession_Number', 'ImageName', 'Has_Malignant', 'Has_Benign']
+    data = data[columns_to_keep]
+
+    # Group by Accession_Number and aggregate
+    data = data.groupby('Accession_Number').agg({
+        'Patient_ID': 'first',
+        'ImageName': lambda x: list(x),
+        'Has_Malignant': 'first',
+        'Has_Benign': 'first',
+    }).reset_index()
+    
+    # Drop duplicate Patient_IDs in case_data
+    unique_case_data = case_data.drop_duplicates(subset='Patient_ID')
+
+    # Merge with the 'valid' column from unique_case_data on Patient_ID
+    data = pd.merge(data, unique_case_data[['Patient_ID', 'valid']], on='Patient_ID', how='left')
+
+    # Remove the Patient_ID column
+    data.drop('Patient_ID', axis=1, inplace=True)
+
+    # Rename columns
+    data.rename(columns={'Accession_Number': 'ID', 'ImageName': 'Images', 'valid': 'Valid'}, inplace=True)
+
+    return data
+
+
+    
+def Export_Database(output_dir, val_split, parsed_database, reparse_images):
     
     date = datetime.datetime.now().strftime("%m_%d_%Y")
     output_dir = f'{output_dir}/export_{date}/'
@@ -231,9 +271,7 @@ def Export_Database(trust_threshold, output_dir, val_split, reparse_images):
     video_df = pd.read_csv(video_csv_file)
     image_df = pd.read_csv(image_csv_file)
     breast_df = pd.read_csv(breast_csv_file)
-    
-    #Trust threshold
-    #case_study_df = case_study_df[case_study_df['trustworthiness'] <= trust_threshold]
+
 
     # Reformat biopsy
     case_study_df['Biopsy'] = case_study_df.apply(lambda row: safe_literal_eval(row['Biopsy'], row.name), axis=1)
@@ -341,9 +379,14 @@ def Export_Database(trust_threshold, output_dir, val_split, reparse_images):
     case_study_df = PerformVal(val_split, case_study_df)
     
     
+    # Create trainable csv data
+    train_data = format_data(breast_df, image_df, case_study_df)
+    
+    
     # Write the filtered dataframes to CSV files in the output directory
     breast_df.to_csv(os.path.join(output_dir, 'BreastData.csv'), index=False)
     case_study_df.to_csv(os.path.join(output_dir, 'CaseStudyData.csv'), index=False)
     labeled_df.to_csv(os.path.join(output_dir, 'LabeledData.csv'), index=False)
     video_df.to_csv(os.path.join(output_dir, 'VideoData.csv'), index=False)
     image_df.to_csv(os.path.join(output_dir, 'ImageData.csv'), index=False)
+    train_data.to_csv(os.path.join(output_dir, 'TrainData.csv'), index=False)

@@ -24,7 +24,6 @@ config = load_config()
 
 # General Settings
 val_split = .2
-export_trust_ceiling = 3 #inclusive
 
 # Labelbox Settings
 images_per_row = 4
@@ -34,8 +33,8 @@ PROJECT_ID = 'clp39jn0f07ub070meh4fbozh' # Instance Labeling
 
 # Select Mode (Only one true at a time!)
 only_append_to_database = False
-only_retreive_labelbox_data = True
-only_export = False
+only_retreive_labelbox_data = False
+only_export = True
 
 # Paths
 zip_input = f'D:/DATA/CASBUSI/zip_files/'
@@ -102,7 +101,7 @@ if __name__ == '__main__':
         
     # Export Database
     if only_export:
-        Export_Database(export_trust_ceiling, export_dir, val_split, reparse_images = True)
+        Export_Database(export_dir, val_split, database_path, reparse_images = False)
         
         
     if only_retreive_labelbox_data:
