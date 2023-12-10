@@ -174,15 +174,14 @@ def PerformVal(val_split, df):
     np.random.shuffle(unique_accession_nums)
 
     # Calculate the split index
-    twenty_percent_index = int(len(unique_accession_nums) * val_split)
+    split_index = int(len(unique_accession_nums) * val_split)
 
-    # Assign '1' to 20% of the unique accession numbers and '0' to the remaining 80%
-    valid_accession_nums = set(unique_accession_nums[:twenty_percent_index])
-
-    # Assign the 'valid' column values based on the anonymized_accession_num
+    # Assign '1' to a portion of the unique accession numbers and '0' to the remaining
+    valid_accession_nums = set(unique_accession_nums[:split_index])
     df['valid'] = df['Accession_Number'].apply(lambda x: 1 if x in valid_accession_nums else 0)
 
     return df
+
     
 
 def Fix_CM_Data(df):
@@ -210,7 +209,7 @@ def Fix_CM_Data(df):
 
 
 
-def format_data(breast_data, image_data, case_data):
+def format_data(breast_data, image_data, case_data, num_of_tests):
     # Join breast_data and image_data on Accession_Number and Breast/laterality
     data = pd.merge(breast_data, image_data, left_on=['Accession_Number', 'Breast'], 
                     right_on=['Accession_Number', 'laterality'], suffixes=('', '_image_data'))
@@ -246,12 +245,19 @@ def format_data(breast_data, image_data, case_data):
 
     # Rename columns
     data.rename(columns={'Accession_Number': 'ID', 'ImageName': 'Images', 'valid': 'Valid'}, inplace=True)
+    
+    # Randomly select a specified number of rows and change their 'Valid' status to '2'
+    valid_indices = data.index[data['Valid'].isin([0, 1])].tolist()
+    if num_of_tests > 0:
+        selected_indices = np.random.choice(valid_indices, num_of_tests, replace=False)
+        data.loc[selected_indices, 'Valid'] = 2
 
     return data
 
 
+
     
-def Export_Database(output_dir, val_split, parsed_database, reparse_images):
+def Export_Database(output_dir, val_split, parsed_database, reparse_images = True, num_of_tests = 10):
     
     date = datetime.datetime.now().strftime("%m_%d_%Y")
     output_dir = f'{output_dir}/export_{date}/'
@@ -380,7 +386,7 @@ def Export_Database(output_dir, val_split, parsed_database, reparse_images):
     
     
     # Create trainable csv data
-    train_data = format_data(breast_df, image_df, case_study_df)
+    train_data = format_data(breast_df, image_df, case_study_df, num_of_tests)
     
     
     # Write the filtered dataframes to CSV files in the output directory
