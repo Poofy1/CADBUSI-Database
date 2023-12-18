@@ -32,16 +32,16 @@ LB_API_KEY = config['LABELBOX_API_KEY']
 PROJECT_ID = 'clp39jn0f07ub070meh4fbozh' # Instance Labeling
 
 # Select Mode (Only one true at a time!)
-only_append_to_database = False
+only_append_to_database = True
 only_retreive_labelbox_data = False
-only_export = True
+only_export = False
 
 # Paths
 zip_input = f'D:/DATA/CASBUSI/zip_files/'
 raw_storage_database = f'D:/DATA/CASBUSI/dicoms/'
 anon_location = "D:/DATA/CASBUSI/cases_anon/total_cases_anon.csv"
 export_dir = f'D:/DATA/CASBUSI/exports/'
-database_path = f'D:/DATA/CASBUSI/database/'
+database_path = f'F:/Temp_SSD_Data/database_test2/'
 
 # Debug Settings 
 data_range = None #[0,100] # Set to None to use everything

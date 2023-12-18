@@ -23,14 +23,17 @@ def compile_images(csv_file, output_dir, images_per_row=4):
     # Group by 'Accession_Number' and count
     acc_num_counts = df_label_true.groupby('Accession_Number').size()
 
-    # Filter 'failed_cases' for Accession Numbers with 12 or fewer images
-    failed_cases_filtered = failed_cases[failed_cases['Accession_Number'].isin(acc_num_counts[acc_num_counts <= 12].index)]
+    # Filter 'failed_cases' DataFrame for True_Label equal to 1
+    failed_cases_true_label = failed_cases[failed_cases['True_Label'] == 1]
 
-    # Sort 'failed_cases_filtered' by 'Loss' in descending order and select the top 20%
+    # Follow the same logic as before, but use 'failed_cases_true_label'
+    failed_cases_filtered = failed_cases_true_label[failed_cases_true_label['Accession_Number'].isin(acc_num_counts[acc_num_counts <= 12].index)]
+
+    # Sort and select the top 20% as before
     sorted_failed_cases = failed_cases_filtered.sort_values(by='Loss', ascending=False)
     top_20_percent = sorted_failed_cases.head(int(len(sorted_failed_cases) * 0.20))
 
-    # Iterate over each Accession_Number
+    # Iterate over each Accession_Number in the filtered top 20%
     for acc_num in tqdm(top_20_percent['Accession_Number']):
         true_label_images = df_label_true[df_label_true['Accession_Number'] == acc_num]
 

@@ -7,6 +7,7 @@ import pandas as pd
 from tqdm import tqdm
 from matplotlib import pyplot as plt
 from highdicom.io import ImageFileReader
+from skimage.morphology import erosion, square
 import warnings, logging, cv2
 logging.getLogger().setLevel(logging.ERROR)
 warnings.filterwarnings('ignore', category=UserWarning, message='.*Invalid value for VR UI.*')
@@ -145,7 +146,30 @@ def parse_video_data(dcm, current_index, parsed_database):
     data_dict['DicomHash'] = generate_hash(dcm)
     
     return data_dict
+
+ 
+def has_blue_pixels(image, n=100, min_b=200):
+    # Create a mask where blue is dominant
+    channel_max = np.argmax(image, axis=-1)
+    blue_dominant = (channel_max == 2) & (
+        (image[:, :, 2] - image[:, :, 0] >= n) &
+        (image[:, :, 2] - image[:, :, 1] >= n)
+    )
     
+    strong = image[:, :, 2] >= min_b
+    return np.any(blue_dominant & strong)
+
+def has_red_pixels(image, n=100, min_r=200):
+    # Create a mask where red is dominant
+    channel_max = np.argmax(image, axis=-1)
+    red_dominant = (channel_max == 0) & (
+        (image[:, :, 0] - image[:, :, 2] >= n) &
+        (image[:, :, 0] - image[:, :, 1] >= n)
+    )
+    
+    strong = image[:, :, 0] >= min_r
+    return np.any(strong & red_dominant)
+
 
 def parse_single_dcm(dcm, current_index, parsed_database):
     
@@ -181,21 +205,20 @@ def parse_single_dcm(dcm, current_index, parsed_database):
     # get image data
     im = dataset.pixel_array
     if data_dict.get('PhotometricInterpretation', '') == 'RGB':
+        #im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
         np_im = np.array(im)
+
+        
         
         # check if there is any blue pixel
-        is_blue = (np_im[:, :, 0] < 50) & (np_im[:, :, 1] < 50) & (np_im[:, :, 2] > 200)
-        if np.any(is_blue):
-            im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
+        if has_red_pixels(np_im) and has_blue_pixels(np_im):
+            im = cv2.cvtColor(np_im, cv2.COLOR_BGR2RGB)
         else:
-            # Convert yellow pixels to white
+            # Convert yellow pixels to white and convert to grayscale
             yellow = [255, 255, 0]  # RGB values for yellow
             mask = np.all(np_im == yellow, axis=-1)
             np_im[mask] = [255, 255, 255]
-            im = np_im
-
-            # Convert to grayscale
-            im = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
+            im = cv2.cvtColor(np_im, cv2.COLOR_BGR2GRAY)
             data_dict['PhotometricInterpretation'] = 'MONOCHROME2_OVERRIDE'
 
     image_name = f"{data_dict.get('PatientID', '')}_{data_dict.get('AccessionNumber', '')}_{current_index}.png"

@@ -134,15 +134,16 @@ def Read_Labelbox_Data(LB_API_KEY, PROJECT_ID, database_path):
 
     # Step 3: Create Boolean Columns
     merged_df['Reject'] = merged_df['Label'] == 'Reject'
-    merged_df['Yes Malignancy'] = merged_df['Label'] == 'Yes Malignancy'
-    merged_df['No Malignancy'] = merged_df['Label'] == 'No Malignancy'
+    merged_df['Malignancy Present'] = merged_df['Label'] == 'Malignancy Present'
+    merged_df['Malignancy Absent'] = merged_df['Label'] == 'Malignancy Absent'
+    merged_df['Both Benign/Malignancy Present'] = merged_df['Label'] == 'Both Benign/Malignancy Present'
 
     # Filter out rows where all three columns are False
-    condition = (merged_df['Reject'] | merged_df['Yes Malignancy'] | merged_df['No Malignancy'])
+    condition = (merged_df['Reject'] | merged_df['Malignancy Present'] | merged_df['Malignancy Absent'] | merged_df['Both Benign/Malignancy Present'])
     filtered_df = merged_df[condition]
 
     # Select only required columns
-    final_df = filtered_df[['Accession_Number', 'ImageName', 'Reject', 'Yes Malignancy', 'No Malignancy']]
+    final_df = filtered_df[['Accession_Number', 'ImageName', 'Reject', 'Malignancy Present', 'Malignancy Absent', 'Both Benign/Malignancy Present']]
 
     # Write final csv to disk
     final_df.to_csv(f'{database_path}/InstanceLabels.csv', index=False)
