@@ -3,15 +3,18 @@ from PIL import Image, ImageDraw, ImageFont
 import os
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from textwrap import wrap
 env = os.path.dirname(os.path.abspath(__file__))
 
 database_path = f'D:/DATA/CASBUSI/database/'
 
 
-def compile_images(csv_file, output_dir, images_per_row=4):
-    # Load CSV file
+
+def compile_images(csv_file, output_dir, database_path, images_per_row=4):
+    # Load CSV files
     failed_cases = pd.read_csv(csv_file)
     df = pd.read_csv(f"{database_path}/ImageData.csv")
+    case_df = pd.read_csv(f"{database_path}/CaseStudyData.csv")
     image_dir = f"{database_path}/images/"
 
     # Additional setup for tracking image placements
@@ -23,29 +26,30 @@ def compile_images(csv_file, output_dir, images_per_row=4):
     # Group by 'Accession_Number' and count
     acc_num_counts = df_label_true.groupby('Accession_Number').size()
 
-    # Filter 'failed_cases' DataFrame for True_Label equal to 1
-    failed_cases_true_label = failed_cases[failed_cases['True_Label'] == 1]
+    # Filter failed_cases as before
+    failed_cases_filtered = failed_cases[failed_cases['Accession_Number'].isin(acc_num_counts[acc_num_counts <= 12].index)]
 
-    # Follow the same logic as before, but use 'failed_cases_true_label'
-    failed_cases_filtered = failed_cases_true_label[failed_cases_true_label['Accession_Number'].isin(acc_num_counts[acc_num_counts <= 12].index)]
-
-    # Sort and select the top 20% as before
+    # Sort and select the top 20%
     sorted_failed_cases = failed_cases_filtered.sort_values(by='Loss', ascending=False)
     top_20_percent = sorted_failed_cases.head(int(len(sorted_failed_cases) * 0.20))
 
-    # Iterate over each Accession_Number in the filtered top 20%
+    # Merge case_df with failed_cases to get Path_Desc
+    merged_cases = pd.merge(left=failed_cases, right=case_df[['Accession_Number', 'Path_Desc']], on='Accession_Number')
+
     for acc_num in tqdm(top_20_percent['Accession_Number']):
         true_label_images = df_label_true[df_label_true['Accession_Number'] == acc_num]
 
-        # Get prediction and true label for the header
-        case_info = failed_cases[failed_cases['Accession_Number'] == acc_num]
+        # Extract case information, including Path_Desc
+        case_info = merged_cases[merged_cases['Accession_Number'] == acc_num]
         prediction_label = "Malignant" if case_info['Prediction'].iloc[0] > 0.5 else "Benign"
         true_label = "Malignant" if case_info['True_Label'].iloc[0] > 0.5 else "Benign"
-        header_text = f"Prediction: {prediction_label} | True Label: {true_label}"
+        path_desc = case_info['Path_Desc'].iloc[0]
+
+        first_line = f"Prediction: {prediction_label} | True Label: {true_label}"
+        path_desc_lines = wrap(path_desc, width=100)  # Adjust width as needed
 
         # Load images
         loaded_images = [Image.open(os.path.join(image_dir, img_name)) for img_name in true_label_images['ImageName']]
-
 
         # Determine the size of the compiled image
         max_width = max(img.size[0] for img in loaded_images)
@@ -54,25 +58,32 @@ def compile_images(csv_file, output_dir, images_per_row=4):
         panel_width = max_width * images_per_row
         panel_height = max_height * total_rows
 
-        # Adjust panel height to include header
-        header_height = 150 
-        panel_height += header_height
-
         # Create a new blank image
         panel = Image.new('RGB', (panel_width, panel_height))
         draw = ImageDraw.Draw(panel)
-        font = ImageFont.truetype("arialbd.ttf", size=80)
+        font = ImageFont.truetype("arialbd.ttf", size=60)  # Adjust font size if necessary
 
-        # Draw the header
+        # Calculate header height
+        line_height = font.getsize('A')[1]
+        header_height = 50 + line_height * (1 + len(path_desc_lines))  # Include spacing and all lines
+
+        # Adjust panel height to include header
+        panel_height += header_height
+
+        # Redraw the image with the new header height
+        panel = Image.new('RGB', (panel_width, panel_height))
+        draw = ImageDraw.Draw(panel)
+
+        # Draw the first line of the header
         draw.rectangle([0, 0, panel_width, header_height], fill=(0, 0, 0))  # Black bar at the top
+        y_text = 10  # Start a bit down from the top of the header
+        draw.text((10, y_text), first_line, fill=(255, 255, 255), font=font)
+        y_text += line_height + 10  # Add extra spacing
 
-        # Use textbbox for text size
-        text_bbox = draw.textbbox((0, 0), header_text, font=font)
-        text_width = text_bbox[2] - text_bbox[0]
-        text_height = text_bbox[3] - text_bbox[1]
-        text_x = (panel_width - text_width) // 2
-        text_y = (header_height - text_height) // 2
-        draw.text((text_x, text_y), header_text, fill=(255, 255, 255), font=font)
+        # Draw the wrapped Path_Desc starting on a new line
+        for line in path_desc_lines:
+            draw.text((10, y_text), line, fill=(255, 255, 255), font=font)
+            y_text += line_height
 
 
         # Paste images into the panel and add grid coordinates
@@ -103,4 +114,4 @@ def compile_images(csv_file, output_dir, images_per_row=4):
 # Usage
 output_dir = f"{database_path}/LossLabeling/"
 os.makedirs(output_dir, exist_ok=True)
-compile_images(f"{env}/failed_cases.csv", output_dir)
+compile_images(f"{env}/failed_cases.csv", output_dir, database_path)

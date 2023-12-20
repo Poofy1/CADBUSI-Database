@@ -41,7 +41,8 @@ zip_input = f'D:/DATA/CASBUSI/zip_files/'
 raw_storage_database = f'D:/DATA/CASBUSI/dicoms/'
 anon_location = "D:/DATA/CASBUSI/cases_anon/total_cases_anon.csv"
 export_dir = f'D:/DATA/CASBUSI/exports/'
-database_path = f'F:/Temp_SSD_Data/database_test2/'
+#database_path = f'F:/Temp_SSD_Data/database/'
+database_path = f'D:/DATA/CASBUSI/database/'
 
 # Debug Settings 
 data_range = None #[0,100] # Set to None to use everything
