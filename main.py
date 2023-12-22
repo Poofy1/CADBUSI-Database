@@ -32,8 +32,8 @@ LB_API_KEY = config['LABELBOX_API_KEY']
 PROJECT_ID = 'clp39jn0f07ub070meh4fbozh' # Instance Labeling
 
 # Select Mode (Only one true at a time!)
-only_append_to_database = True
-only_retreive_labelbox_data = False
+only_append_to_database = False
+only_retreive_labelbox_data = True
 only_export = False
 
 # Paths

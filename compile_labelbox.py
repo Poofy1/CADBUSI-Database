@@ -55,7 +55,7 @@ def Get_Labels(response):
 
             for column in label_df.columns:
                 normalized_df = pd.json_normalize(label_df[column])
-
+                
                 # List of preferred column names in order
                 preferred_cols = ['answer', 'answers', 'answer.title', 'answer.value']
 
@@ -70,9 +70,7 @@ def Get_Labels(response):
                 for i in range(normalized_df.shape[0]):
                     title = normalized_df.loc[i, 'title']
                     answer = normalized_df.loc[i, answer_column]
-                    if answer_column == 'answers':
-                        # If answer is a list of dictionaries, extract the 'value' from each dictionary
-                        answer = [ans.get('value') for ans in answer]
+
                     data_dict[title] = str(answer)
 
             data_dict['Accession_Number'] = external_id_digits
@@ -109,7 +107,7 @@ def Read_Labelbox_Data(LB_API_KEY, PROJECT_ID, database_path):
     # Download the export file from the provided URL
     response = requests.get(export_url)
 
-    # Parse Data from labelbox
+    # Parsing Labelbox Data
     print("Parsing Labelbox Data")
     instanceLabels = Get_Labels(response)
     instanceLabels['Accession_Number'] = instanceLabels['Accession_Number'].astype(str)
@@ -128,22 +126,34 @@ def Read_Labelbox_Data(LB_API_KEY, PROJECT_ID, database_path):
     # Step 1: Transform instanceLabels to long format
     instanceLabels_long = pd.melt(instanceLabels, id_vars=['Accession_Number'], var_name='Placement', value_name='Label')
     instanceLabels_long['Accession_Number'] = instanceLabels_long['Accession_Number'].astype(str)
+    
+    # Identify Accession Numbers to Reject
+    discard_exam_accessions = instanceLabels_long[
+        (instanceLabels_long['Placement'] == 'Exam Options') & 
+        (instanceLabels_long['Label'] == 'Discard Entire Exam')
+    ]['Accession_Number'].unique()
+
+    # Set 'Reject Image' for all instances with these accession numbers
+    for acc_num in discard_exam_accessions:
+        instanceLabels_long.loc[instanceLabels_long['Accession_Number'] == acc_num, 'Label'] = 'Reject Image'
 
     # Step 2: Merge with loss_refrences
     merged_df = pd.merge(loss_refrences, instanceLabels_long, on=['Accession_Number', 'Placement'], how='left')
 
     # Step 3: Create Boolean Columns
-    merged_df['Reject'] = merged_df['Label'] == 'Reject'
-    merged_df['Malignancy Present'] = merged_df['Label'] == 'Malignancy Present'
-    merged_df['Malignancy Absent'] = merged_df['Label'] == 'Malignancy Absent'
-    merged_df['Both Benign/Malignancy Present'] = merged_df['Label'] == 'Both Benign/Malignancy Present'
+    merged_df['Reject Image'] = merged_df['Label'] == 'Reject Image'
+    merged_df['Only Normal Tissue'] = merged_df['Label'] == 'Only Normal Tissue'
+    merged_df['Cyst Lesion Present'] = merged_df['Label'] == 'Cyst Lesion Present'
+    merged_df['Benign Lesion Present'] = merged_df['Label'] == 'Benign Lesion Present'
+    merged_df['Malignant Lesion Present'] = merged_df['Label'] == 'Malignant Lesion Present'
+    
 
     # Filter out rows where all three columns are False
-    condition = (merged_df['Reject'] | merged_df['Malignancy Present'] | merged_df['Malignancy Absent'] | merged_df['Both Benign/Malignancy Present'])
+    condition = (merged_df['Reject Image'] | merged_df['Only Normal Tissue'] | merged_df['Cyst Lesion Present'] | merged_df['Benign Lesion Present'] | merged_df['Malignant Lesion Present'])
     filtered_df = merged_df[condition]
 
     # Select only required columns
-    final_df = filtered_df[['Accession_Number', 'ImageName', 'Reject', 'Malignancy Present', 'Malignancy Absent', 'Both Benign/Malignancy Present']]
+    final_df = filtered_df[['Accession_Number', 'ImageName', 'Reject Image', 'Only Normal Tissue', 'Cyst Lesion Present', 'Benign Lesion Present', 'Malignant Lesion Present']]
 
     # Write final csv to disk
     final_df.to_csv(f'{database_path}/InstanceLabels.csv', index=False)
