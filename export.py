@@ -63,14 +63,14 @@ def process_single_image(row, image_folder_path, image_output, mask_folder_input
     mask_output_path = os.path.join(mask_folder_output, 'mask_' + row['ImageName'])
     cv2.imwrite(mask_output_path, cropped_mask)
 
-def Crop_Images(df, output_dir):
+def Crop_Images(df, input_dir, output_dir):
     
     image_output = f"{output_dir}/images/"
     mask_folder_output = f"{output_dir}/masks/"
     os.makedirs(image_output, exist_ok=True)
     os.makedirs(mask_folder_output, exist_ok=True)
     
-    image_folder_path = f"{env}/database/images/"
+    image_folder_path = f"{input_dir}/images/"
     mask_folder_input = f"{labeled_data_dir}/masks/"
     
     with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
@@ -118,12 +118,12 @@ def process_single_video(row, video_folder_path, output_dir):
                 cv2.imwrite(output_path, cropped_image)
 
 
-def Crop_Videos(df, output_dir):
+def Crop_Videos(df, input_dir, output_dir):
     
     video_output = f"{output_dir}/videos/"
     os.makedirs(video_output, exist_ok=True)
     
-    video_folder_path = f"{env}/database/videos/"
+    video_folder_path = f"{input_dir}/videos/"
 
     with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
         futures = {executor.submit(process_single_video, row, video_folder_path, video_output): index for index, row in df.iterrows()}
@@ -317,8 +317,8 @@ def Export_Database(output_dir, val_split, parsed_database, reparse_images = Tru
 
     if reparse_images:   
         # Crop the images for the relevant studies
-        Crop_Images(image_df, output_dir)
-        Crop_Videos(video_df, output_dir)
+        Crop_Images(image_df, parsed_database, output_dir)
+        Crop_Videos(video_df, parsed_database, output_dir)
     
     # Filter DFs
     image_columns = ['Patient_ID', 

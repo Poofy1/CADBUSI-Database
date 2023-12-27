@@ -7,6 +7,7 @@ import datetime, glob
 import numpy as np
 env = os.path.dirname(os.path.abspath(__file__))
 
+
 # Need retry method becauyse labelbox servers are unreliable
 def get_with_retry(url, max_retries=5):
     retries = 0
@@ -70,8 +71,25 @@ def Get_Labels(response):
                 for i in range(normalized_df.shape[0]):
                     title = normalized_df.loc[i, 'title']
                     answer = normalized_df.loc[i, answer_column]
+                    
+                    # Remove '_old' from the title if it exists
+                    title = title.replace('_old', '')
+                    
+                    # Check if answer is a list
+                    if isinstance(answer, list):
+                        # Initialize a list for each title if it doesn't already exist
+                        if title not in data_dict:
+                            data_dict[title] = []
 
-                    data_dict[title] = str(answer)
+                        # Append each label to the list associated with the title
+                        for label in answer:
+                            if isinstance(label, dict) and 'title' in label:
+                                value = label['title']
+                                data_dict[title].append(str(value))
+                    else:
+                        # Directly assign the string representation of answer if it's not a list
+                        data_dict[title] = str(answer)
+                                        
 
             data_dict['Accession_Number'] = external_id_digits
 
@@ -111,6 +129,8 @@ def Read_Labelbox_Data(LB_API_KEY, PROJECT_ID, database_path):
     print("Parsing Labelbox Data")
     instanceLabels = Get_Labels(response)
     instanceLabels['Accession_Number'] = instanceLabels['Accession_Number'].astype(str)
+    
+    #instanceLabels.to_csv(f'{database_path}/InstanceLabels2.csv', index=False)
 
     # Get the Accession_Number that are in the old DataFrame
     if not previous_df.empty:
@@ -140,12 +160,19 @@ def Read_Labelbox_Data(LB_API_KEY, PROJECT_ID, database_path):
     # Step 2: Merge with loss_refrences
     merged_df = pd.merge(loss_refrences, instanceLabels_long, on=['Accession_Number', 'Placement'], how='left')
 
-    # Step 3: Create Boolean Columns
-    merged_df['Reject Image'] = merged_df['Label'] == 'Reject Image'
-    merged_df['Only Normal Tissue'] = merged_df['Label'] == 'Only Normal Tissue'
-    merged_df['Cyst Lesion Present'] = merged_df['Label'] == 'Cyst Lesion Present'
-    merged_df['Benign Lesion Present'] = merged_df['Label'] == 'Benign Lesion Present'
-    merged_df['Malignant Lesion Present'] = merged_df['Label'] == 'Malignant Lesion Present'
+    def is_label_present(labels, label_name):
+        # If labels is a string, convert it to a list with one element
+        if isinstance(labels, str):
+            labels = [labels]
+        # If labels is a list, check if label_name is in labels
+        return label_name in labels if isinstance(labels, list) else False
+
+    # Apply the function to create the Boolean columns
+    merged_df['Reject Image'] = merged_df['Label'].apply(lambda labels: is_label_present(labels, 'Reject Image'))
+    merged_df['Only Normal Tissue'] = merged_df['Label'].apply(lambda labels: is_label_present(labels, 'Only Normal Tissue'))
+    merged_df['Cyst Lesion Present'] = merged_df['Label'].apply(lambda labels: is_label_present(labels, 'Cyst Lesion Present'))
+    merged_df['Benign Lesion Present'] = merged_df['Label'].apply(lambda labels: is_label_present(labels, 'Benign Lesion Present'))
+    merged_df['Malignant Lesion Present'] = merged_df['Label'].apply(lambda labels: is_label_present(labels, 'Malignant Lesion Present'))
     
 
     # Filter out rows where all three columns are False

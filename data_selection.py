@@ -184,13 +184,13 @@ def process_patient_id(pid, db_out, image_folder_path):
         subset.at[i, 'distance'] = result[i]['distance']
     return subset
 
-def Remove_Bad_Images():
-    input_file = f'{env}/database/ImageData.csv'
+def Remove_Bad_Images(database_dir):
+    input_file = f'{database_dir}/ImageData.csv'
     
     # Load the CSV file into a pandas DataFrame
     df = pd.read_csv(input_file)
 
-    image_folder_path = f"{env}/database/images/"
+    image_folder_path = f"{database_dir}/images/"
     
     # Prepare a list of indices to drop from the DataFrame
     drop_indices = []

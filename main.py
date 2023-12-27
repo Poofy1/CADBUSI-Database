@@ -81,7 +81,7 @@ if __name__ == '__main__':
         
         user_input = input("Continue with Data Cleaning step? (y/n): ")
         if user_input.lower() == "y":
-            #Remove_Bad_Images()
+            Remove_Bad_Images(database_path)
             Remove_Duplicate_Data(database_path)
             Find_Orientation(f'{database_path}/images/', 'ori_model', f'{database_path}/ImageData.csv')
             Parse_Data(database_path, only_labels = False)
@@ -102,7 +102,7 @@ if __name__ == '__main__':
         
     # Export Database
     if only_export:
-        Export_Database(export_dir, val_split, database_path, reparse_images = False)
+        Export_Database(export_dir, val_split, database_path, reparse_images = True)
         
         
     if only_retreive_labelbox_data:
