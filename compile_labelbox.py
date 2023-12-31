@@ -106,15 +106,17 @@ def Get_Labels(response):
         print(f'Failed to download file: {response.status_code}, {response.text}')
     
     
-def Read_Labelbox_Data(LB_API_KEY, PROJECT_ID, database_path):
+def Read_Labelbox_Data(LB_API_KEY, PROJECT_ID, database_path, labelbox_path):
     
     client = labelbox.Client(api_key=LB_API_KEY)
     project = client.get_project(PROJECT_ID)
     
+    image_df = pd.read_csv(f'{database_path}/ImageData.csv')
+    
     loss_refrences = pd.read_csv(f'{database_path}/LossLabelingReferences.csv')
     loss_refrences['Accession_Number'] = loss_refrences['Accession_Number'].astype(str)
     try:
-        previous_df = pd.read_csv(f'{database_path}/InstanceLabels.csv')
+        previous_df = pd.read_csv(f'{labelbox_path}/InstanceLabels.csv')
         previous_df['Accession_Number'] = previous_df['Accession_Number'].astype(str)
     except FileNotFoundError:
         previous_df = pd.DataFrame(columns=['Accession_Number'])  # Include 'Accession_Number' column
@@ -180,7 +182,10 @@ def Read_Labelbox_Data(LB_API_KEY, PROJECT_ID, database_path):
     filtered_df = merged_df[condition]
 
     # Select only required columns
-    final_df = filtered_df[['Accession_Number', 'ImageName', 'Reject Image', 'Only Normal Tissue', 'Cyst Lesion Present', 'Benign Lesion Present', 'Malignant Lesion Present']]
+    final_df = pd.merge(filtered_df, image_df[['ImageName', 'FileName']], on='ImageName', how='left')
+
+    # Select only required columns, including the new FileName column
+    final_df = final_df[['Accession_Number', 'FileName', 'Reject Image', 'Only Normal Tissue', 'Cyst Lesion Present', 'Benign Lesion Present', 'Malignant Lesion Present']]
 
     # Write final csv to disk
-    final_df.to_csv(f'{database_path}/InstanceLabels.csv', index=False)
+    final_df.to_csv(f'{labelbox_path}/InstanceLabels.csv', index=False)

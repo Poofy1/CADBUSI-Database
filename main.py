@@ -41,6 +41,7 @@ zip_input = f'D:/DATA/CASBUSI/zip_files/'
 raw_storage_database = f'D:/DATA/CASBUSI/dicoms/'
 anon_location = "D:/DATA/CASBUSI/cases_anon/total_cases_anon.csv"
 export_dir = f'D:/DATA/CASBUSI/exports/'
+labelbox_path = f'D:/DATA/CASBUSI/labelbox_data'
 #database_path = f'F:/Temp_SSD_Data/database/'
 database_path = f'D:/DATA/CASBUSI/database/'
 
@@ -114,7 +115,7 @@ if __name__ == '__main__':
 
         Read_Labelbox_Data(LB_API_KEY, PROJECT_ID, original_images)"""
         
-        Read_Labelbox_Data(LB_API_KEY, PROJECT_ID, database_path)
+        Read_Labelbox_Data(LB_API_KEY, PROJECT_ID, database_path, labelbox_path)
         
         
         
