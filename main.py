@@ -33,17 +33,17 @@ PROJECT_ID = 'clp39jn0f07ub070meh4fbozh' # Instance Labeling
 
 # Select Mode (Only one true at a time!)
 only_append_to_database = False
-only_retreive_labelbox_data = True
-only_export = False
+only_retreive_labelbox_data = False
+only_export = True
 
 # Paths
 zip_input = f'D:/DATA/CASBUSI/zip_files/'
 raw_storage_database = f'D:/DATA/CASBUSI/dicoms/'
 anon_location = "D:/DATA/CASBUSI/cases_anon/total_cases_anon.csv"
 export_dir = f'D:/DATA/CASBUSI/exports/'
-labelbox_path = f'D:/DATA/CASBUSI/labelbox_data'
-#database_path = f'F:/Temp_SSD_Data/database/'
-database_path = f'D:/DATA/CASBUSI/database/'
+labelbox_path = f'D:/DATA/CASBUSI/labelbox_data/'
+database_path = f'D:/DATA/CASBUSI/database_1_2_2024/'
+#database_path = f'D:/DATA/CASBUSI/database/'
 
 # Debug Settings 
 data_range = None #[0,100] # Set to None to use everything
@@ -103,7 +103,7 @@ if __name__ == '__main__':
         
     # Export Database
     if only_export:
-        Export_Database(export_dir, val_split, database_path, reparse_images = True)
+        Export_Database(export_dir, val_split, database_path, labelbox_path, reparse_images = False)
         
         
     if only_retreive_labelbox_data:

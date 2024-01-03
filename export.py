@@ -257,7 +257,7 @@ def format_data(breast_data, image_data, case_data, num_of_tests):
 
 
     
-def Export_Database(output_dir, val_split, parsed_database, reparse_images = True, num_of_tests = 10):
+def Export_Database(output_dir, val_split, parsed_database, labelbox_path, reparse_images = True, num_of_tests = 10):
     
     date = datetime.datetime.now().strftime("%m_%d_%Y")
     output_dir = f'{output_dir}/export_{date}/'
@@ -271,13 +271,20 @@ def Export_Database(output_dir, val_split, parsed_database, reparse_images = Tru
     breast_csv_file = f'{parsed_database}BreastData.csv' 
     case_study_csv_file = f'{parsed_database}CaseStudyData.csv' 
     video_csv_file =  f'{parsed_database}VideoData.csv'
+    instance_labels_csv_file = f'{labelbox_path}InstanceLabels.csv'
 
     # Read data
     case_study_df = pd.read_csv(case_study_csv_file)
     video_df = pd.read_csv(video_csv_file)
     image_df = pd.read_csv(image_csv_file)
     breast_df = pd.read_csv(breast_csv_file)
-
+    instance_data = pd.read_csv(instance_labels_csv_file)
+    
+    
+    #Format Instance Data
+    file_to_image_name_map = dict(zip(image_df['FileName'], image_df['ImageName']))
+    instance_data['ImageName'] = instance_data['FileName'].map(file_to_image_name_map)
+    instance_data.drop(columns=['FileName'], inplace=True)
 
     # Reformat biopsy
     case_study_df['Biopsy'] = case_study_df.apply(lambda row: safe_literal_eval(row['Biopsy'], row.name), axis=1)
@@ -324,6 +331,7 @@ def Export_Database(output_dir, val_split, parsed_database, reparse_images = Tru
     image_columns = ['Patient_ID', 
                           'Accession_Number', 
                           'ImageName',
+                          'FileName',
                           'PhotometricInterpretation',
                           'labeled',
                           'nipple_dist',
@@ -337,6 +345,7 @@ def Export_Database(output_dir, val_split, parsed_database, reparse_images = Tru
     video_columns = ['Patient_ID', 
                           'Accession_Number', 
                           'ImagesPath',
+                          'FileName',
                           'area',
                           'nipple_dist',
                           'orientation',
@@ -396,3 +405,4 @@ def Export_Database(output_dir, val_split, parsed_database, reparse_images = Tru
     video_df.to_csv(os.path.join(output_dir, 'VideoData.csv'), index=False)
     image_df.to_csv(os.path.join(output_dir, 'ImageData.csv'), index=False)
     train_data.to_csv(os.path.join(output_dir, 'TrainData.csv'), index=False)
+    instance_data.to_csv(os.path.join(output_dir, 'InstanceData.csv'), index=False)
