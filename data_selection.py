@@ -184,7 +184,7 @@ def process_patient_id(pid, db_out, image_folder_path):
         subset.at[i, 'distance'] = result[i]['distance']
     return subset
 
-def Remove_Bad_Images(database_dir):
+def Remove_Green_Images(database_dir):
     input_file = f'{database_dir}/ImageData.csv'
     
     # Load the CSV file into a pandas DataFrame

@@ -4,7 +4,7 @@ import pandas as pd
 from compile_labelbox import Read_Labelbox_Data
 from OCR import Perform_OCR
 from trustworthiness import Find_Trust
-from data_selection import Parse_Data, Rename_Images, Remove_Duplicate_Data, Remove_Bad_Images
+from data_selection import Parse_Data, Rename_Images, Remove_Duplicate_Data, Remove_Green_Images
 #from get_labelbox_data import Read_Labelbox_Data
 from export import Export_Database
 from ML_processing.inpaint import Inpaint_Dataset
@@ -80,11 +80,14 @@ if __name__ == '__main__':
         if user_input.lower() == "y":
             Perform_OCR(database_path)
         
-        user_input = input("Continue with Data Cleaning step? (y/n): ")
+        user_input = input("Continue with Data Cleaning step (Part 1/2)? (y/n): ")
         if user_input.lower() == "y":
-            Remove_Bad_Images(database_path)
+            Remove_Green_Images(database_path)
             Remove_Duplicate_Data(database_path)
             Find_Orientation(f'{database_path}/images/', 'ori_model', f'{database_path}/ImageData.csv')
+            
+        user_input = input("Continue with Data Cleaning step (Part 2/2)? (y/n): ")
+        if user_input.lower() == "y":
             Parse_Data(database_path, only_labels = False)
             Inpaint_Dataset(f'{database_path}/ImageData.csv', f'{database_path}/images/')
             Rename_Images(database_path)
@@ -107,18 +110,9 @@ if __name__ == '__main__':
         
         
     if only_retreive_labelbox_data:
-        print("(Newly created data in labelbox will take time to update!)")
-        
-        """
-        # Path Config
-        original_images = f"{database_path}/images/"
-
-        Read_Labelbox_Data(LB_API_KEY, PROJECT_ID, original_images)"""
-        
         Read_Labelbox_Data(LB_API_KEY, PROJECT_ID, database_path, labelbox_path)
         
-        
-        
+
     if only_determine_labeling:
         Parse_Data(True)
         

@@ -107,6 +107,7 @@ def Get_Labels(response):
     
     
 def Read_Labelbox_Data(LB_API_KEY, PROJECT_ID, database_path, labelbox_path):
+    print("(Newly created data in labelbox will take time to update!)")
     
     client = labelbox.Client(api_key=LB_API_KEY)
     project = client.get_project(PROJECT_ID)
