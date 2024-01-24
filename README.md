@@ -1,55 +1,57 @@
 # CASBUSI Database
-
 This database manager is designed to process breast ultrasound data from the Mayo Clinic and store it in a structured format, making it easy to manipulate, label, analyze, and prepare for machine learning training.
 
-## Features
-
-- Append new data to the database
-- Edit or replace data within the database
-- Detailed data selection
-- Prepare images for Labelbox labeling
-- Extract data from Labelbox
-- Package export data for machine learning training
-
-## Installation
-
-### Prerequisites
-
+## Requirements
 - Python 3.8
 - 6GB Nvidia GPU (Recommended)
+- At least 4 TB of hard drive space (Recommended)
 - Install required Python packages with pip:
-
 ```
 pip install -r requirements.txt
 ```
 
 
 ## Configuration
+All user parameters will be controlled from a `config.json` file, you will need to configure the following parameters:
 
-### Parameters 
-All input data will be controlled from the `main` script, you will need to configure the following parameters:
+- `ZIPPED_DICOMS`: Directory of the zipped input data from Mayo Clinic.
+- `UNZIPPED_DICOMS`: Directory of the raw unzipped data. 
+- `ANON_FILE`: Location of the additional input `total_cases_anon.csv` file.
+- `DATABASE_DIR`: Final location of the database.
 
-- `export_trust_ceiling`: This is a threshold that will only export the studies that have a high enough trust rating.
-- `val_split`: Set the validation split ratio. A value of 0.2 means 20% of the accession studies will be allocated for validation.
-- `images_per_row`: Determines how many images will be placed in each row in the cropped LabelBox images
-- `LB_API_KEY`: LabelBox API Key
-- `PROJECT_ID`: LabelBox Project ID
-- `zip_input`: This is where you will place the input zip files for new data.
-- `anon_location`: This is where you will place the additional input `total_cases_anon.csv` file.
-- `raw_storage_database`: This is where all the raw data will be stored. This will require a lot of drive space at this location.
-- `export_dir`: This is where all export data will be placed.
+- `LABELBOX_API_KEY`: Label Box API key for uploading and retrieving Label Box data.
+- `PROJECT_ID`: LabelBox project ID.
+- `LABELBOX_LABELS`: Directory of processed labels from Label Box.
 
-### Mode Select
-- `only_append_to_database`: This mode allows you to add new or replace old data within the database.
-- `only_retreive_labelbox_data`: This mode will retrieve and add labeled LabelBox data to the database.
-- `only_export`: This will export all relevant database and labeled data into the specified output folder (`export_dir`).
-- Only one mode can be `True` at a time.
+- `EXPORT_DIR`: Output directory of all processed export data.
+- `VAL_SPLIT`: Validation split ratio for splitting up training data.
 
-### Database Input
-- All input zipped files must be in the `zip_input` folder variable.
-- An additional CSV file is required for extra metadata. The location should be specified in the `anon_location` variable.
+- `DEBUG_DATA_RANGE`: (Default: `null`) Processed a reduced set of dicom files.
+- `RESET_PROCESSED_FEILD`: (Default: `false`) Sets all images as 'unprocessed' withing the `ImageData.csv`.
+- `REPROCESS_DATA_FILTERS`: (Default: `false`) Re-filters what will be included in the final export. 
 
-### Database Architecture
+
+
+## Usage / Modes
+- Within the `main.py` script you must select ONE of the four tasks to complete. Each mode will conduct a specific task.
+
+- `DEVELOP_DATABASE`: This process involves many steps and may take a significant amount of time to complete. In case of errors, checkpoints have been added to incrementally prompt the user which steps they need to process. The steps are as follows:
+    - DCM Parsing: Processes the input dicom files by converting metadata to csv and export the images.
+    - OCR: Reads the test description in the images with OCR and organizes the extracted data.
+    - Data Cleaning (Part 1/2): Finds and removes corrupted images. Removes duplicate data. Uses machine learning to find orientations of unlabeled images.
+    - Data Cleaning (Part 2/2): Filters what data will be used in the final export. Uses machine learning to inpaint calipers out of images. Renames all images to a specific format. 
+    - Process Videos: Performs many of the operations we completed with image data with the video data instead.
+- `DEVELOP_LABELBOX_DATA`: This process will prepare data to be uploaded to Label Box. 
+- `RETREIVE_LABELBOX_DATA`: This process will retrieve and organize Label Box data to a directory.
+- `DEVELOP_EXPORT`: This process will export all relevant database data and labeled data into the specified output directory.
+
+After configuring the `main.py` file, run the script to start the program:
+`python main.py`
+
+
+
+
+## Database Architecture
 - The output database will be held in the `database` folder.
     - Images: `database/images/`
     - Videos: `database/videos/`
@@ -70,27 +72,6 @@ All input data will be controlled from the `main` script, you will need to confi
     - Additional `masks` folder.
     - Format and prepare data for training.
 
-
-## Usage
-
-1. After configuring the `main.py` file, run the script to start the program:
-
-```
-python main.py
-```
-2. While adding new data to the database, the program will ask you if you want to continue at each step of the process. This allows you to skip steps if the process was previously interrupted. The data steps are as follows:
-
-    - `DCM Parsing`: Process the input data files, convert them to csv, and add them to the database accordingly.
-    - `OCR`: Read image text with OCR and organize the data.
-    - `Similar_Images`: Find similar images and determine what images to exclude from training.
-    - `Labelbox_Tranform`: Transform and crop images into clean LabelBox data.
-    - `Perform_Val`: Adds or edits the validation split column to the database.
-
-![CASBUSI WORKFLOW](https://github.com/Poofy1/CASBUSI-Database/assets/70146048/70594e4b-026e-4a0b-b544-7e1edb003ce1)
-
-
-
-
 ## Current Data Pipeline
 
 1. Get the Datamart file of studies to be downloaded.
@@ -107,10 +88,4 @@ python main.py
 5. (This Software) Retrieve labels and masks from Labelbox.
 
 
-
-## License
-
-This program is released under the MIT License. See the [LICENSE](LICENSE) file for more details.
-
-
-
+![CASBUSI WORKFLOW](https://github.com/Poofy1/CASBUSI-Database/assets/70146048/70594e4b-026e-4a0b-b544-7e1edb003ce1)
