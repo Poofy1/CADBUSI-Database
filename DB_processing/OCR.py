@@ -4,13 +4,17 @@ import cv2, os, re
 import numpy as np
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import matplotlib.pyplot as plt
 import easyocr
+import threading
+thread_local = threading.local()
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+sys.path.append(parent_dir)
+
 from ML_processing.caliper_model import *
 from ML_processing.mask_model import *
-import threading
-import gc
-thread_local = threading.local()
+
 
 def get_reader():
     # Check if this thread already has a reader

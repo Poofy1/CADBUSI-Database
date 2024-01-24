@@ -1,16 +1,14 @@
 import os, json
 import pandas as pd
-#from images_to_labelbox import Crop_and_save_images
 from compile_labelbox import Read_Labelbox_Data
-from OCR import Perform_OCR
-from trustworthiness import Find_Trust
-from data_selection import Parse_Data, Rename_Images, Remove_Duplicate_Data, Remove_Green_Images
-#from get_labelbox_data import Read_Labelbox_Data
-from export import Export_Database
+from DB_processing.OCR import Perform_OCR
+from DB_processing.trustworthiness import Find_Trust
+from DB_processing.data_selection import Parse_Data, Rename_Images, Remove_Duplicate_Data, Remove_Green_Images
+from DB_processing.export import Export_Database
+from DB_processing.dcm_parser import Parse_Zip_Files
+from DB_processing.video_processing import ProcessVideoData, Video_Cleanup
 from ML_processing.inpaint import Inpaint_Dataset
 from ML_processing.orientation_detection import Find_Orientation
-from dcm_parser import Parse_Zip_Files
-from video_processing import ProcessVideoData, Video_Cleanup
 env = os.path.dirname(os.path.abspath(__file__))
 
 def load_config():
@@ -18,101 +16,70 @@ def load_config():
         config = json.load(config_file)
         return config
     
-config = load_config()
+CONFIG = load_config()
 
-########### Config ###########
 
-# General Settings
-val_split = .2
-
-# Labelbox Settings
-images_per_row = 4
-LB_API_KEY = config['LABELBOX_API_KEY']
-#PROJECT_ID = 'clgr3eeyn00tr071n6tjgatsu' # Image Annotation
-PROJECT_ID = 'clp39jn0f07ub070meh4fbozh' # Instance Labeling
-
-# Select Mode (Only one true at a time!)
-only_append_to_database = False
-only_retreive_labelbox_data = False
-only_export = True
-
-# Paths
-zip_input = f'D:/DATA/CASBUSI/zip_files/'
-raw_storage_database = f'D:/DATA/CASBUSI/dicoms/'
-anon_location = "D:/DATA/CASBUSI/cases_anon/total_cases_anon.csv"
-export_dir = f'D:/DATA/CASBUSI/exports/'
-labelbox_path = f'D:/DATA/CASBUSI/labelbox_data/'
-database_path = f'D:/DATA/CASBUSI/database_1_2_2024/'
-#database_path = f'D:/DATA/CASBUSI/database/'
-
-# Debug Settings 
-data_range = None #[0,100] # Set to None to use everything
-reseted_processed = False
-only_determine_labeling = False
-
-#############################
-
+# Select Mode (Only one can be true at a time!)
+DEVELOP_DATABASE = False
+DEVELOP_LABELBOX_DATA = False
+RETREIVE_LABELBOX_DATA = False
+DEVELOP_EXPORT = True
 
 
 # Start Opterations
 if __name__ == '__main__':
-    if data_range is None:
-        data_range = [0, 999999999999]
+    if CONFIG["DEBUG_DATA_RANGE"] is None:
+        CONFIG["DEBUG_DATA_RANGE"] = [0, 999999999999]
 
     
-    if reseted_processed:
-        input_file = f'{database_path}/ImageData.csv'
+    if CONFIG["RESET_PROCESSED_FEILD"]:
+        input_file = f'{CONFIG["DATABASE_DIR"]}/ImageData.csv'
         df = pd.read_csv(input_file)
         df['processed'] = False
         df.to_csv(input_file, index=False)
 
 
     # Main Data Appender
-    if only_append_to_database:
+    if DEVELOP_DATABASE:
         
         user_input = input("Continue with DCM Parsing step? (y/n): ")
         if user_input.lower() == "y":
-            Parse_Zip_Files(database_path, zip_input, anon_location, raw_storage_database, data_range)
-            Find_Trust(database_path)
-            
+            Parse_Zip_Files(CONFIG["DATABASE_DIR"], CONFIG["ZIPPED_DICOMS"], CONFIG["ANON_FILE"], CONFIG["UNZIPPED_DICOMS"], CONFIG["DEBUG_DATA_RANGE"])
+            Find_Trust(CONFIG["DATABASE_DIR"])
         
         user_input = input("Continue with OCR step? (y/n): ")
         if user_input.lower() == "y":
-            Perform_OCR(database_path)
+            Perform_OCR(CONFIG["DATABASE_DIR"])
         
         user_input = input("Continue with Data Cleaning step (Part 1/2)? (y/n): ")
         if user_input.lower() == "y":
-            Remove_Green_Images(database_path)
-            Remove_Duplicate_Data(database_path)
-            Find_Orientation(f'{database_path}/images/', 'ori_model', f'{database_path}/ImageData.csv')
+            Remove_Green_Images(CONFIG["DATABASE_DIR"])
+            Remove_Duplicate_Data(CONFIG["DATABASE_DIR"])
+            Find_Orientation(f'{CONFIG["DATABASE_DIR"]}/images/', 'ori_model', f'{CONFIG["DATABASE_DIR"]}/ImageData.csv')
             
         user_input = input("Continue with Data Cleaning step (Part 2/2)? (y/n): ")
         if user_input.lower() == "y":
-            Parse_Data(database_path, only_labels = False)
-            Inpaint_Dataset(f'{database_path}/ImageData.csv', f'{database_path}/images/')
-            Rename_Images(database_path)
-        
-        # Deprecated  
-        """user_input = input("Continue with Labelbox_Tranform step? (y/n): ")
-        if user_input.lower() == "y":
-            Crop_and_save_images(images_per_row)"""
+            Parse_Data(CONFIG["DATABASE_DIR"], only_labels = False)
+            Inpaint_Dataset(f'{CONFIG["DATABASE_DIR"]}/ImageData.csv', f'{CONFIG["DATABASE_DIR"]}/images/')
+            Rename_Images(CONFIG["DATABASE_DIR"])
             
         user_input = input("Process Video Data? (y/n): ")
         if user_input.lower() == "y":
-            ProcessVideoData(database_path)
-            Video_Cleanup(database_path)
+            ProcessVideoData(CONFIG["DATABASE_DIR"])
+            Video_Cleanup(CONFIG["DATABASE_DIR"])
 
         
         
-    # Export Database
-    if only_export:
-        Export_Database(export_dir, val_split, database_path, labelbox_path, reparse_images = False)
+    if DEVELOP_EXPORT:
+        Export_Database(CONFIG["EXPORT_DIR"], CONFIG["VAL_SPLIT"], CONFIG["DATABASE_DIR"], CONFIG["LABELBOX_LABELS"], reparse_images = False)
+    
+    if DEVELOP_LABELBOX_DATA:
+        print("WIP")
         
-        
-    if only_retreive_labelbox_data:
-        Read_Labelbox_Data(LB_API_KEY, PROJECT_ID, database_path, labelbox_path)
+    if RETREIVE_LABELBOX_DATA:
+        Read_Labelbox_Data(CONFIG["LABELBOX_API_KEY"], CONFIG["PROJECT_ID"], CONFIG["DATABASE_DIR"], CONFIG["LABELBOX_LABELS"])
         
 
-    if only_determine_labeling:
-        Parse_Data(True)
+    if CONFIG["REPROCESS_DATA_FILTERS"]:
+        Parse_Data(CONFIG["DATABASE_DIR"], only_labels = True)
         

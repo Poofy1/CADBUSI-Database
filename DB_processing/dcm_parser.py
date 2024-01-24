@@ -1,13 +1,9 @@
 import os, pydicom, zipfile, hashlib
 import numpy as np
-from PIL import Image
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from threading import Lock
 import pandas as pd
 from tqdm import tqdm
-from matplotlib import pyplot as plt
 from highdicom.io import ImageFileReader
-from skimage.morphology import erosion, square
 import warnings, logging, cv2
 logging.getLogger().setLevel(logging.ERROR)
 warnings.filterwarnings('ignore', category=UserWarning, message='.*Invalid value for VR UI.*')

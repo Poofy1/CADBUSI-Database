@@ -219,13 +219,8 @@ def undersample_data():
 
     return resampled_train_df, val_df
 
-def load_model(model, model_path):
-    if os.path.isfile(model_path):
-        model.load_state_dict(torch.load(model_path))
-        print(f"Model loaded from {model_path}")
-    else:
-        print("No previous model found, starting training from scratch.")
-    return model
+
+
 
 if __name__ == "__main__":
     csv_path = f"{env}/dataset/ori_data.csv"

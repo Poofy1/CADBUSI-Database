@@ -114,4 +114,4 @@ def compile_images(csv_file, output_dir, database_path, images_per_row=4):
 # Usage
 output_dir = f"{database_path}/LossLabeling/"
 os.makedirs(output_dir, exist_ok=True)
-compile_images(f"{env}/failed_cases.csv", output_dir, database_path)
+compile_images("D:/DATA/CASBUSI/failed_cases.csv", output_dir, database_path)
