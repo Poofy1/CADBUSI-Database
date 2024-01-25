@@ -50,27 +50,31 @@ After configuring the `main.py` file, run the script to start the program:
 
 
 
+## Data Architecture
+### Database
+- The final database will be held in the specified `DATABASE_DIR` folder with this internal layout:
+    - `/database/images/`: Raw image storage
+        - Any caliper image that qualified to be used in an export has been replaced with an inpainted version of itself.
+    - `/database/videos/`: Contains a separate folder for each video, each one with the first and middle frame of the video. 
+    - `/database/LossLabeling/`: Contains all images for Label Box labeling. (Labeling instance labels)
+    - `/database/LossLabelingReferences.csv`: LabelBox image data structure for retrieving and cross referencing data.
+        - This is database specific! You must build and retrieve labels from Label Box using the same database. 
+    - `/database/CaseStudyData.csv`: Study Based data.
+    - `/database/ImageData.csv`: Image Based data.
+    - `/database/VideoData.csv`: Video Based data.
+    - `/database/IndexCounter.txt`: Index tracker for reading and appending new dicom data to the database.
+    - `/database/ParsedFiles.txt`: List of dicom files that were already processed.
 
-## Database Architecture
-- The output database will be held in the `database` folder.
-    - Images: `database/images/`
-    - Videos: `database/videos/`
-    - LabelBox images: `database/labelbox_images/`
-    - LabelBox image structure data: `database/CropData.csv`
-    - Study Based data: `database/CaseStudyData.csv`
-    - Image Based data: `database/ImageData.csv`
-    - Video Based data: `database/VideoData.csv`
-    - Image Counter Tracker: `database/IndexCounter.txt`
-    - Processed Data Tracker: `database/ParsedFiles.txt`
-- The labeled data will be held in the `labeled_data_archive` folder.
-    - This will include a `masks` folder from segmentation.
-    - Retrieving data from Labelbox will create a new labeled data entry into the `labeled_data_archive` directory.
-  
-### Database Output
-- Exporting the data will organize and copy all relevant data to the specified directory (`export_dir`).
-    - The format will be similar to the original database architecture but will only include the filtered data.
-    - Additional `masks` folder.
-    - Format and prepare data for training.
+### Labeled Data
+- The labeled data will be held in the specified `LABELBOX_LABELS` folder with this internal layout:
+    - `/labelbox_data/InstanceLabels.csv`: Recorded instance labels from Label Box. This data is universal across databases as it includes the dicom `FileName` for each instance.
+
+### Exports
+- Exporting will create a new folder in the specified directory `EXPORT_DIR`.
+    - The format will be similar to the original database architecture but will only include relevant data.
+    - `/export_12_26_2023/TrainData.csv`: This file contains refrences to the data formatted into bags for the [CADBUSI-Training](https://github.com/Poofy1/CADBUSI-Training) project to easily interpret.
+
+
 
 ## Current Data Pipeline
 
