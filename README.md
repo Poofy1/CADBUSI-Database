@@ -26,7 +26,7 @@ All user parameters will be controlled from a `config.json` file, you will need 
 - `EXPORT_DIR`: Output directory of all processed export data.
 - `VAL_SPLIT`: Validation split ratio for splitting up training data.
 
-- `DEBUG_DATA_RANGE`: (Default: `null`) Processed a reduced set of dicom files.
+- `DEBUG_DATA_RANGE`: (Default: `null`) Process a reduced set of dicom files (Ex: [0, 1000]).
 - `RESET_PROCESSED_FEILD`: (Default: `false`) Sets all images as 'unprocessed' withing the `ImageData.csv`.
 - `REPROCESS_DATA_FILTERS`: (Default: `false`) Re-filters what will be included in the final export. 
 
@@ -78,7 +78,8 @@ After configuring the `main.py` file, run the script to start the program:
 
 ## Current Data Pipeline
 
-1. Get the Datamart file of studies to be downloaded.
+
+1. Locate the `total_cases_anon.csv` from [CADBUSI-Anonymize](https://github.com/Poofy1/CADBUSI-Anonymize)
 2. Manually import Notion files
     - Download studies as Dicom files.
     - Remove pixel-level patient info.
