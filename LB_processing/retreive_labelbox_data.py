@@ -1,11 +1,6 @@
-import labelbox, requests, os, re, shutil, time, PIL, glob, ast
+import labelbox, requests, re, time
 import pandas as pd
-from PIL import Image
-from io import BytesIO
 from tqdm import tqdm
-import datetime, glob
-import numpy as np
-env = os.path.dirname(os.path.abspath(__file__))
 
 
 # Need retry method becauyse labelbox servers are unreliable

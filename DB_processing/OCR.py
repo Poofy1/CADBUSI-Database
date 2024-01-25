@@ -1,6 +1,6 @@
 import pandas as pd
 from PIL import Image
-import cv2, os, re
+import cv2, os, re, sys
 import numpy as np
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed

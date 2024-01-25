@@ -1,6 +1,7 @@
 import os, json
 import pandas as pd
-from compile_labelbox import Read_Labelbox_Data
+from LB_processing.create_labelbox_data import Create_Labelbox_Data
+from LB_processing.retreive_labelbox_data import Read_Labelbox_Data
 from DB_processing.OCR import Perform_OCR
 from DB_processing.trustworthiness import Find_Trust
 from DB_processing.data_selection import Parse_Data, Rename_Images, Remove_Duplicate_Data, Remove_Green_Images
@@ -74,10 +75,10 @@ if __name__ == '__main__':
         Export_Database(CONFIG["EXPORT_DIR"], CONFIG["VAL_SPLIT"], CONFIG["DATABASE_DIR"], CONFIG["LABELBOX_LABELS"], reparse_images = False)
     
     if DEVELOP_LABELBOX_DATA:
-        print("WIP")
+        Create_Labelbox_Data("D:/DATA/CASBUSI/failed_cases.csv", CONFIG["DATABASE_DIR"])
         
     if RETREIVE_LABELBOX_DATA:
-        Read_Labelbox_Data(CONFIG["LABELBOX_API_KEY"], CONFIG["PROJECT_ID"], CONFIG["DATABASE_DIR"], CONFIG["LABELBOX_LABELS"])
+        Read_Labelbox_Data("D:/DATA/CASBUSI/failed_cases.csv", CONFIG["DATABASE_DIR"])
         
 
     if CONFIG["REPROCESS_DATA_FILTERS"]:

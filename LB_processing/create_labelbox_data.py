@@ -2,15 +2,13 @@ import pandas as pd
 from PIL import Image, ImageDraw, ImageFont
 import os
 from tqdm import tqdm
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from textwrap import wrap
-env = os.path.dirname(os.path.abspath(__file__))
-
-database_path = f'D:/DATA/CASBUSI/database/'
 
 
-
-def compile_images(csv_file, output_dir, database_path, images_per_row=4):
+def Create_Labelbox_Data(csv_file, database_path, images_per_row=4):
+    output_dir = f"{database_path}/LossLabeling/"
+    os.makedirs(output_dir, exist_ok=True)
+    
     # Load CSV files
     failed_cases = pd.read_csv(csv_file)
     df = pd.read_csv(f"{database_path}/ImageData.csv")
@@ -110,8 +108,3 @@ def compile_images(csv_file, output_dir, database_path, images_per_row=4):
 
     # Save the image placement information to a CSV file
     pd.DataFrame(image_placement_tracker).to_csv(f'{database_path}/LossLabelingReferences.csv', index=False)
-
-# Usage
-output_dir = f"{database_path}/LossLabeling/"
-os.makedirs(output_dir, exist_ok=True)
-compile_images("D:/DATA/CASBUSI/failed_cases.csv", output_dir, database_path)
