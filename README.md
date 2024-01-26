@@ -22,6 +22,7 @@ All user parameters will be controlled from a `config.json` file, you will need 
 - `LABELBOX_API_KEY`: Label Box API key for uploading and retrieving Label Box data.
 - `PROJECT_ID`: LabelBox project ID.
 - `LABELBOX_LABELS`: Directory of processed labels from Label Box.
+- `TARGET_CASES`: Directory of worst performing cases from training. Prepares these cases for instance labeling on Label Box.
 
 - `EXPORT_DIR`: Output directory of all processed export data.
 - `VAL_SPLIT`: Validation split ratio for splitting up training data.

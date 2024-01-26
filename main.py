@@ -75,7 +75,7 @@ if __name__ == '__main__':
         Export_Database(CONFIG["EXPORT_DIR"], CONFIG["VAL_SPLIT"], CONFIG["DATABASE_DIR"], CONFIG["LABELBOX_LABELS"], reparse_images = False)
     
     if DEVELOP_LABELBOX_DATA:
-        Create_Labelbox_Data("D:/DATA/CASBUSI/failed_cases.csv", CONFIG["DATABASE_DIR"])
+        Create_Labelbox_Data(CONFIG["TARGET_CASES"], CONFIG["DATABASE_DIR"])
         
     if RETREIVE_LABELBOX_DATA:
         Read_Labelbox_Data(CONFIG["LABELBOX_API_KEY"], CONFIG["PROJECT_ID"], CONFIG["DATABASE_DIR"], CONFIG["LABELBOX_LABELS"])
