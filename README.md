@@ -76,8 +76,8 @@ After configuring the `main.py` file, run the script to start the program:
 
 
 
-## Current Data Pipeline
-[CADBUSI-Anonymize](https://github.com/Poofy1/CADBUSI-Anonymize)
-[CADBUSI-Database](https://github.com/Poofy1/CADBUSI-Database)
-[CADBUSI-Training](https://github.com/Poofy1/CADBUSI-Training)
+## Data Pipeline
+- [CADBUSI-Anonymize](https://github.com/Poofy1/CADBUSI-Anonymize)
+- [CADBUSI-Database](https://github.com/Poofy1/CADBUSI-Database)
+- [CADBUSI-Training](https://github.com/Poofy1/CADBUSI-Training)
 ![CASBUSI Pipeline](CADBUSI-Pipeline.png)
