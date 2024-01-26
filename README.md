@@ -78,19 +78,4 @@ After configuring the `main.py` file, run the script to start the program:
 
 ## Current Data Pipeline
 
-
-1. Locate the `total_cases_anon.csv` from [CADBUSI-Anonymize](https://github.com/Poofy1/CADBUSI-Anonymize)
-2. Manually import Notion files
-    - Download studies as Dicom files.
-    - Remove pixel-level patient info.
-    - Number of patients starting from the previous batch.
-    - Save the key file in a secure location.
-3. (This Software) Data Processing
-    - Parse data into CSV files.
-    - Remove bad images.
-    - Prepare data for labeling.
-4. Upload data to Labelbox and label data.
-5. (This Software) Retrieve labels and masks from Labelbox.
-
-
-![CASBUSI WORKFLOW](https://github.com/Poofy1/CASBUSI-Database/assets/70146048/70594e4b-026e-4a0b-b544-7e1edb003ce1)
+![CASBUSI Pipeline](CADBUSI-Pipeline.png)
