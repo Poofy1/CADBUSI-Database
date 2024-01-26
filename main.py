@@ -78,7 +78,7 @@ if __name__ == '__main__':
         Create_Labelbox_Data("D:/DATA/CASBUSI/failed_cases.csv", CONFIG["DATABASE_DIR"])
         
     if RETREIVE_LABELBOX_DATA:
-        Read_Labelbox_Data("D:/DATA/CASBUSI/failed_cases.csv", CONFIG["DATABASE_DIR"])
+        Read_Labelbox_Data(CONFIG["LABELBOX_API_KEY"], CONFIG["PROJECT_ID"], CONFIG["DATABASE_DIR"], CONFIG["LABELBOX_LABELS"])
         
 
     if CONFIG["REPROCESS_DATA_FILTERS"]:
