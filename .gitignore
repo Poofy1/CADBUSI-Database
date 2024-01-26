@@ -16,7 +16,7 @@
 .tmp.driveupload/*
 *.ini
 *.zip
-!/CADBUSI-Pipeline.png
+!/pipeline/CADBUSI-Pipeline.png
 
 
 # User-specific files (MonoDevelop/Xamarin Studio)
