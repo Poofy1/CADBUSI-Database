@@ -6,7 +6,7 @@ from DB_processing.OCR import Perform_OCR
 from DB_processing.trustworthiness import Find_Trust
 from DB_processing.data_selection import Parse_Data, Rename_Images, Remove_Duplicate_Data, Remove_Green_Images
 from DB_processing.export import Export_Database
-from DB_processing.dcm_parser import Parse_Zip_Files
+from DB_processing.dcm_parser import Parse_Dicom_Files
 from DB_processing.video_processing import ProcessVideoData, Video_Cleanup
 from ML_processing.inpaint import Inpaint_Dataset
 from ML_processing.orientation_detection import Find_Orientation
@@ -45,7 +45,7 @@ if __name__ == '__main__':
         
         user_input = input("Continue with DCM Parsing step? (y/n): ")
         if user_input.lower() == "y":
-            Parse_Zip_Files(CONFIG["DATABASE_DIR"], CONFIG["ZIPPED_DICOMS"], CONFIG["ANON_FILE"], CONFIG["UNZIPPED_DICOMS"], CONFIG["DEBUG_DATA_RANGE"])
+            Parse_Dicom_Files(CONFIG["DATABASE_DIR"], CONFIG["ANON_FILE"], CONFIG["UNZIPPED_DICOMS"], CONFIG["DEBUG_DATA_RANGE"])
             Find_Trust(CONFIG["DATABASE_DIR"])
         
         user_input = input("Continue with OCR step? (y/n): ")

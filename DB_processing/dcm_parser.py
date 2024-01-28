@@ -40,45 +40,6 @@ def generate_hash(filename):
     return sha256_hash.hexdigest()
 
 
-def extract_single_zip_file(file_name, output_folder):
-    if os.path.exists(output_folder):
-        return
-
-    try:
-        zip_ref = zipfile.ZipFile(file_name)  # create zipfile object
-        zip_ref.extractall(output_folder)  # extract file to dir
-        zip_ref.close()  # close file
-        #os.remove(file_name) # delete zipped file
-    except Exception as e:
-        print(f'Skipping Bad Zip File: {file_name}. Exception: {e}')
-
-def extract_zip_files(input, output):
-    os.makedirs(output, exist_ok=True)
-
-    if len(os.listdir(input)) == 0:
-        print("No zip files found")
-        return
-
-    print("Unzipping Files")
-
-    with ThreadPoolExecutor() as executor:
-        futures = [
-            executor.submit(
-                extract_single_zip_file, 
-                os.path.abspath(input) + "/" + item, 
-                os.path.join(output, os.path.splitext(item)[0])
-            ) 
-            for item in os.listdir(input) 
-            if item.endswith('.zip')
-        ]
-
-        for future in tqdm(as_completed(futures), total=len(futures), desc=""):
-            try:
-                future.result()
-            except Exception as exc:
-                print(f'An exception occurred: {exc}')
-            
-
 
 def get_files_by_extension(directory, extension):
     file_paths = []
@@ -276,7 +237,7 @@ def parse_dcm_files(dcm_files_list, parsed_database):
 
 
 # Main Method
-def Parse_Zip_Files(database_path, input, anon_location, raw_storage_database, data_range):
+def Parse_Dicom_Files(database_path, anon_location, raw_storage_database, data_range):
     image_csv_file = f'{database_path}ImageData.csv'
     video_csv_file = f'{database_path}VideoData.csv'
     case_study_csv_file = f'{database_path}CaseStudyData.csv' 
@@ -295,7 +256,6 @@ def Parse_Zip_Files(database_path, input, anon_location, raw_storage_database, d
             parsed_files_list = file.read().splitlines()
 
     # Unzip input data and get every Dicom File
-    extract_zip_files(input, raw_storage_database)
     dcm_files_list = get_files_by_extension(raw_storage_database, '.dcm')
     print(f'Total Dicom Archive: {len(dcm_files_list)}')
 

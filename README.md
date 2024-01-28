@@ -14,8 +14,7 @@ pip install -r requirements.txt
 ## Configuration
 All user parameters will be controlled from a `config.json` file, you will need to configure the following parameters:
 
-- `ZIPPED_DICOMS`: Directory of the zipped input data from Mayo Clinic.
-- `UNZIPPED_DICOMS`: Directory of the raw unzipped data. 
+- `UNZIPPED_DICOMS`: Directory of the anonymized unzipped dicom data. 
 - `ANON_FILE`: Location of the additional input `total_cases_anon.csv` file.
 - `DATABASE_DIR`: Final location of the database.
 
