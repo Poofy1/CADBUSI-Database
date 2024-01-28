@@ -45,7 +45,7 @@ All user parameters will be controlled from a `config.json` file, you will need 
 - `RETREIVE_LABELBOX_DATA`: This process will retrieve and organize Label Box data to a directory.
 - `DEVELOP_EXPORT`: This process will export all relevant database data and labeled data into the specified output directory.
 
-After configuring the `main.py` file, run the script to start the program:
+After configuring the `main.py` and `config.json` file, run the script to start the program:
 `python main.py`
 
 
