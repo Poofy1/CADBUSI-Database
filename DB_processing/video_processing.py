@@ -1,4 +1,4 @@
-from OCR import *
+from DB_processing.OCR import *
 
 
 def modify_keys(dictionary):

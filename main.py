@@ -23,8 +23,8 @@ CONFIG = load_config()
 # Select Mode (Only one can be true at a time!)
 DEVELOP_DATABASE = False
 DEVELOP_LABELBOX_DATA = False
-RETREIVE_LABELBOX_DATA = False
-DEVELOP_EXPORT = True
+RETREIVE_LABELBOX_DATA = True
+DEVELOP_EXPORT = False
 
 
 # Start Opterations
