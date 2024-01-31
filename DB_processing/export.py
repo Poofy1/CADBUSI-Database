@@ -218,46 +218,58 @@ def format_data(breast_data, image_data, case_data, num_of_tests):
     for col in breast_data.columns:
         if col + '_image_data' in data.columns:
             data.drop(col + '_image_data', axis=1, inplace=True)
-    
+
     # Filter out rows where Has_Unknown is False
     data = data[data['Has_Unknown'] == False]
 
     # Keep only the specified columns
-    columns_to_keep = ['Patient_ID', 'Accession_Number', 'ImageName', 'Has_Malignant', 'Has_Benign']
+    columns_to_keep = ['Patient_ID', 'Accession_Number', 'Breast', 'ImageName', 'Has_Malignant', 'Has_Benign']
     data = data[columns_to_keep]
-
-    # Group by Accession_Number and aggregate
-    data = data.groupby('Accession_Number').agg({
+    
+    #data.to_csv('D:\DATA\CASBUSI\exports\export_01_30_2024/test.csv', index=False)
+    
+    # Group by Accession_Number and Breast, and aggregate
+    data = data.groupby(['Accession_Number', 'Breast']).agg({
         'Patient_ID': 'first',
         'ImageName': lambda x: list(x),
         'Has_Malignant': 'first',
         'Has_Benign': 'first',
     }).reset_index()
     
-    # Drop duplicate Patient_IDs in case_data
+    
+    
+    # Drop duplicates in case_data based on Patient_ID and keep the first occurrence
     unique_case_data = case_data.drop_duplicates(subset='Patient_ID')
 
     # Merge with the 'valid' column from unique_case_data on Patient_ID
     data = pd.merge(data, unique_case_data[['Patient_ID', 'valid']], on='Patient_ID', how='left')
 
+
     # Remove the Patient_ID column
     data.drop('Patient_ID', axis=1, inplace=True)
 
     # Rename columns
-    data.rename(columns={'Accession_Number': 'ID', 'ImageName': 'Images', 'valid': 'Valid'}, inplace=True)
-    
+    data.rename(columns={'ImageName': 'Images', 'valid': 'Valid'}, inplace=True)
+
     # Randomly select a specified number of rows and change their 'Valid' status to '2'
     valid_indices = data.index[data['Valid'].isin([0, 1])].tolist()
     if num_of_tests > 0:
         selected_indices = np.random.choice(valid_indices, num_of_tests, replace=False)
         data.loc[selected_indices, 'Valid'] = 2
 
+    # Add a new column 'ID' that counts up from 0
+    data['ID'] = range(len(data))
+
+    # Make 'ID' the first column
+    columns = ['ID'] + [col for col in data.columns if col != 'ID']
+    data = data[columns]
+
     return data
 
 
 
     
-def Export_Database(output_dir, val_split, parsed_database, labelbox_path, reparse_images = True, num_of_tests = 10):
+def Export_Database(output_dir, val_split, parsed_database, labelbox_path, reparse_images = True, trust_max = 2, num_of_tests = 10):
     
     date = datetime.datetime.now().strftime("%m_%d_%Y")
     output_dir = f'{output_dir}/export_{date}/'
@@ -289,6 +301,10 @@ def Export_Database(output_dir, val_split, parsed_database, labelbox_path, repar
     # Reformat biopsy
     case_study_df['Biopsy'] = case_study_df.apply(lambda row: safe_literal_eval(row['Biopsy'], row.name), axis=1)
     case_study_df['Biopsy'] = case_study_df['Biopsy'].apply(transform_biopsy_list)
+    
+    # Trustworthiness
+    case_study_df = case_study_df[case_study_df['trustworthiness'] <= trust_max]
+    #case_study_df.drop(['trustworthiness'], axis=1, inplace=True)
     
 
     if os.path.exists(labeled_data_dir):
@@ -352,12 +368,11 @@ def Export_Database(output_dir, val_split, parsed_database, labelbox_path, repar
                           'laterality',
                           'crop_aspect_ratio']
     video_df = video_df[video_columns]
-    case_study_df.drop(['trustworthiness'], axis=1, inplace=True)
+    
     
     # Round 'crop_aspect_ratio' to 2 decimal places
     image_df['crop_aspect_ratio'] = image_df['crop_aspect_ratio'].round(2)
     video_df['crop_aspect_ratio'] = video_df['crop_aspect_ratio'].round(2)
-    
     
     # Convert 'Patient_ID' columns to integers
     labeled_df['Patient_ID'] = labeled_df['Patient_ID'].astype(int)

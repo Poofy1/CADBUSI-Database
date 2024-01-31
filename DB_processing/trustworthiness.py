@@ -20,12 +20,13 @@ def Find_Trust(database_path):
     df = pd.read_csv(csv_file)
 
     # Create a new 'trustworthiness' column
-    df['trustworthiness'] = 3  # default to 3
+    df['trustworthiness'] = 1  # default to 1
 
     # Convert string representation of lists to actual lists
     df['Biopsy'] = df['Biopsy'].apply(safe_literal_eval)
     df['Biopsy_Laterality'] = df['Biopsy_Laterality'].apply(safe_literal_eval)
-
+    
+    """
     # Conditions for trustworthiness = 1
     condition1 = ((df['Study_Laterality'].str.lower().isin(["left", "right"])) &
                 (df.apply(lambda row: len(row['Biopsy_Laterality']) == 1 and all(i.lower() == row['Study_Laterality'].lower() for i in row['Biopsy_Laterality']), axis=1)) &
@@ -43,18 +44,20 @@ def Find_Trust(database_path):
     # Set trustworthiness to 2 for duplicates
     df.loc[df['is_duplicate'], 'trustworthiness'] = 2
     # Drop the helper column
-    df.drop(columns=['is_duplicate'], inplace=True)
+    df.drop(columns=['is_duplicate'], inplace=True)"""
 
     # Conditions for trustworthiness = 3
-    condition3 = ((df['BI-RADS'].astype(str).isin(['1', '2'])) & 
+    condition_BIRAD0 = ((df['BI-RADS'].astype(str).isin(['0', '1'])) & 
                   (df['Biopsy'].apply(lambda x: any('Malignant' in i for i in x) if isinstance(x, list) else False)))
+    
+    condition_BIRAD6 = ((df['BI-RADS'].astype(str).isin(['6'])) & 
+                  (df['Biopsy'].apply(lambda x: any('Benign' in i for i in x) if isinstance(x, list) else False)))
 
     # Condition for trustworthiness = 3 when biopsy is [nan]
     condition_nan = df['Biopsy'].apply(is_nan_list)
 
-    df.loc[condition1, 'trustworthiness'] = 1
-    df.loc[condition2, 'trustworthiness'] = 2
-    df.loc[condition3 | condition_nan, 'trustworthiness'] = 3
+
+    df.loc[condition_BIRAD0 | condition_BIRAD6 | condition_nan, 'trustworthiness'] = 3
 
     # Save the DataFrame back to a CSV file
     df.to_csv(csv_file, index=False)

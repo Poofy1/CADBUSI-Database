@@ -23,8 +23,8 @@ CONFIG = load_config()
 # Select Mode (Only one can be true at a time!)
 DEVELOP_DATABASE = False
 DEVELOP_LABELBOX_DATA = False
-RETREIVE_LABELBOX_DATA = True
-DEVELOP_EXPORT = False
+RETREIVE_LABELBOX_DATA = False
+DEVELOP_EXPORT = True
 
 
 # Start Opterations
@@ -72,7 +72,7 @@ if __name__ == '__main__':
         
         
     if DEVELOP_EXPORT:
-        Export_Database(CONFIG["EXPORT_DIR"], CONFIG["VAL_SPLIT"], CONFIG["DATABASE_DIR"], CONFIG["LABELBOX_LABELS"], reparse_images = False)
+        Export_Database(CONFIG["EXPORT_DIR"], CONFIG["VAL_SPLIT"], CONFIG["DATABASE_DIR"], CONFIG["LABELBOX_LABELS"], reparse_images = True)
     
     if DEVELOP_LABELBOX_DATA:
         Create_Labelbox_Data(CONFIG["TARGET_CASES"], CONFIG["DATABASE_DIR"])
