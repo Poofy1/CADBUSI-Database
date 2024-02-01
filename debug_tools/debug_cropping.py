@@ -1,19 +1,23 @@
-from OCR import *
-import cv2, ast
+
+import cv2, sys, csv
 import numpy as np
 import pandas as pd
 import os
 from tqdm import tqdm
 import traceback
-import largestinteriorrectangle as lir
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+sys.path.append(parent_dir)
+
+from DB_processing.OCR import *
+
+current_dir = f'{parent_dir}/debug_tools/'
 
 
-image_df = pd.read_csv(f'{env}/database/ImageData.csv')
-image_folder_path = f"{env}/database/images/"
 
-image_output = f"{env}/debug_output/"
+image_output = f"{current_dir}/debug_output/"
 os.makedirs(image_output, exist_ok=True)
-
 
 
 def safe_process_single_image(image_path):
@@ -22,14 +26,6 @@ def safe_process_single_image(image_path):
     except Exception as e:
         print(f"Error processing {image_path}: {e}")
         traceback.print_exc()  # This will print the stack trace of the exception
-        
-def get_reader():
-    # Check if this thread already has a reader
-    if not hasattr(thread_local, "reader"):
-        # If not, create a new reader and store it in the thread-local storage
-        thread_local.reader = easyocr.Reader(['en'])
-    return thread_local.reader
-
 
 def Show_Crop(image_path, image, contours, x, y, w, h):
     # Check if the image was loaded properly
@@ -124,9 +120,8 @@ def process_single_image(image_path):
     w = top_right[0] - x
     h = max(convex_hull[:, 0, 1]) - y  # Bottom y-coordinate - top y-coordinate
 
-    # Draw the largest interior rectangle on the image
     Show_Crop(image_name, image, [convex_hull], x, y, w, h)
-
+    
     return (image_name, (x, y, w, h))
 
 
@@ -151,9 +146,37 @@ def get_ultrasound_region(image_folder_path, db_to_process):
 
 
 
+def find_crops_extra():
+    image_folder_path = f'{current_dir}/inputs/'
 
+    # Construct image paths for only the new data
+    image_paths = [os.path.join(image_folder_path, file) for file in os.listdir(image_folder_path) if file.lower().endswith('.png')]
+    
+    # Collect image data in list
+    image_data = []
+    
+    # Thread pool and TQDM
+    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+        futures = {executor.submit(process_single_image, image_path): image_path for image_path in image_paths}
+        with tqdm(total=len(futures)) as pbar:
+            for future in as_completed(futures):
+                result = future.result()
+                if result is not None:
+                    image_data.append(result)
+                pbar.update()
 
-image_masks = get_ultrasound_region(image_folder_path, image_df)
+    # Write output to CSV with updated headers and row format
+    with open(f'{current_dir}/crop_data.csv', 'w', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow(['Image Name', 'X', 'Y', 'Width', 'Height'])  # Updated headers
+        for data in image_data:
+            image_name, (x, y, w, h) = data  # Unpacking the data
+            writer.writerow([image_name, x, y, w, h])  # Writing unpacked data
+            
+    return image_data
+
+#image_masks = get_ultrasound_region(image_folder_path, image_df)
+image_masks = find_crops_extra()
 
 
 

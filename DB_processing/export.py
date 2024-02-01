@@ -226,7 +226,7 @@ def format_data(breast_data, image_data, case_data, num_of_tests):
     columns_to_keep = ['Patient_ID', 'Accession_Number', 'Breast', 'ImageName', 'Has_Malignant', 'Has_Benign']
     data = data[columns_to_keep]
     
-    #data.to_csv('D:\DATA\CASBUSI\exports\export_01_30_2024/test.csv', index=False)
+    
     
     # Group by Accession_Number and Breast, and aggregate
     data = data.groupby(['Accession_Number', 'Breast']).agg({
@@ -236,7 +236,7 @@ def format_data(breast_data, image_data, case_data, num_of_tests):
         'Has_Benign': 'first',
     }).reset_index()
     
-    
+    #data.to_csv('D:\DATA\CASBUSI\exports\export_01_30_2024/test.csv', index=False)
     
     # Drop duplicates in case_data based on Patient_ID and keep the first occurrence
     unique_case_data = case_data.drop_duplicates(subset='Patient_ID')
@@ -326,14 +326,14 @@ def Export_Database(output_dir, val_split, parsed_database, labelbox_path, repar
     video_df = video_df[video_df['laterality'].notna()]
     
     #Remove bad aspect ratios
-    min_aspect_ratio = 0.6
-    max_aspect_ratio = 3.0
+    min_aspect_ratio = 0.5
+    max_aspect_ratio = 4.0
     image_df = image_df[(image_df['crop_aspect_ratio'] >= min_aspect_ratio) & 
                         (image_df['crop_aspect_ratio'] <= max_aspect_ratio)]
     
     
     # Remove images with crop width or height less than 200 pixels
-    min_dimension = 225
+    min_dimension = 200
     image_df = image_df[(image_df['crop_w'] >= min_dimension) & 
                         (image_df['crop_h'] >= min_dimension)]
     
