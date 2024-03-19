@@ -297,6 +297,17 @@ def Export_Database(output_dir, val_split, parsed_database, labelbox_path, repar
     file_to_image_name_map = dict(zip(image_df['FileName'], image_df['ImageName']))
     instance_data['ImageName'] = instance_data['FileName'].map(file_to_image_name_map)
     instance_data.drop(columns=['FileName'], inplace=True)
+    if 'Reject Image' in instance_data.columns: # Check if 'Reject Image' column exists
+        # Create a new DataFrame with rejected instances
+        rejected_images = instance_data[instance_data['Reject Image'] == True][['ImageName']]
+        rejected_images['FileName'] = rejected_images['ImageName'].map({v: k for k, v in file_to_image_name_map.items()})
+        
+        # Remove rows where 'Reject Image' is True from instance_data
+        instance_data = instance_data[instance_data['Reject Image'] != True]
+        instance_data.drop(columns=['Reject Image'], inplace=True)
+        
+        # Remove rows from image_df based on rejected_images['FileName']
+        image_df = image_df[~image_df['FileName'].isin(rejected_images['FileName'])]
 
     # Reformat biopsy
     case_study_df['Biopsy'] = case_study_df.apply(lambda row: safe_literal_eval(row['Biopsy'], row.name), axis=1)

@@ -24,7 +24,6 @@ def get_with_retry(url, max_retries=5):
     print(f"Failed to download mask image, status code: {response.status_code}")
     return None
 
-
 # Returns df with all labels in respective columns
 # Also Downloads mask images
 def Get_Labels(response):
@@ -51,6 +50,7 @@ def Get_Labels(response):
 
             for column in label_df.columns:
                 normalized_df = pd.json_normalize(label_df[column])
+                #label_df[column].to_csv(f'{"D:/DATA/CASBUSI/labelbox_data/"}/wtf{column}.csv', index=False)
                 
                 # List of preferred column names in order
                 preferred_cols = ['answer', 'answers', 'answer.title', 'answer.value']
@@ -62,28 +62,15 @@ def Get_Labels(response):
                     print("No preferred column found in normalized_df")
                     continue  # Skip the rest of the loop for this row
 
-                # Create a dictionary for each record with title as key and answer as value
                 for i in range(normalized_df.shape[0]):
-                    title = normalized_df.loc[i, 'title']
+                    title = normalized_df.loc[i, 'title'].replace('_old', '')
                     answer = normalized_df.loc[i, answer_column]
                     
-                    # Remove '_old' from the title if it exists
-                    title = title.replace('_old', '')
-                    
-                    # Check if answer is a list
+                    # Handle multiple answers within a list
                     if isinstance(answer, list):
-                        # Initialize a list for each title if it doesn't already exist
-                        if title not in data_dict:
-                            data_dict[title] = []
-
-                        # Append each label to the list associated with the title
-                        for label in answer:
-                            if isinstance(label, dict) and 'title' in label:
-                                value = label['title']
-                                data_dict[title].append(str(value))
-                    else:
-                        # Directly assign the string representation of answer if it's not a list
-                        data_dict[title] = str(answer)
+                        answer = '; '.join([ans['title'] for ans in answer if 'title' in ans])
+                    
+                    data_dict[title] = answer
                                         
 
             data_dict['Accession_Number'] = external_id_digits
@@ -128,7 +115,7 @@ def Read_Labelbox_Data(LB_API_KEY, PROJECT_ID, database_path, labelbox_path):
     instanceLabels = Get_Labels(response)
     instanceLabels['Accession_Number'] = instanceLabels['Accession_Number'].astype(str)
     
-    #instanceLabels.to_csv(f'{database_path}/InstanceLabels2.csv', index=False)
+    #instanceLabels.to_csv(f'{labelbox_path}/InstanceLabels2.csv', index=False)
 
     # Get the Accession_Number that are in the old DataFrame
     if not previous_df.empty:
@@ -140,6 +127,8 @@ def Read_Labelbox_Data(LB_API_KEY, PROJECT_ID, database_path, labelbox_path):
     new_data = instanceLabels[~instanceLabels['Accession_Number'].isin(old_patient_ids)]
     
     instanceLabels = pd.concat([previous_df, new_data])
+    
+    #instanceLabels.to_csv(f'{labelbox_path}/InstanceLabels3.csv', index=False)
     
     # Step 1: Transform instanceLabels to long format
     instanceLabels_long = pd.melt(instanceLabels, id_vars=['Accession_Number'], var_name='Placement', value_name='Label')
@@ -157,13 +146,17 @@ def Read_Labelbox_Data(LB_API_KEY, PROJECT_ID, database_path, labelbox_path):
 
     # Step 2: Merge with loss_refrences
     merged_df = pd.merge(loss_refrences, instanceLabels_long, on=['Accession_Number', 'Placement'], how='left')
+    
+    #merged_df.to_csv(f'{labelbox_path}/InstanceLabels4.csv', index=False)
 
     def is_label_present(labels, label_name):
-        # If labels is a string, convert it to a list with one element
-        if isinstance(labels, str):
-            labels = [labels]
-        # If labels is a list, check if label_name is in labels
-        return label_name in labels if isinstance(labels, list) else False
+        # Check if labels is NaN or otherwise not a string
+        if pd.isna(labels) or not isinstance(labels, str):
+            return False
+        # Split the labels string into a list if it's a string
+        labels = labels.split('; ')
+        # Check if label_name is in the list of labels
+        return label_name in labels
 
     # Apply the function to create the Boolean columns
     merged_df['Reject Image'] = merged_df['Label'].apply(lambda labels: is_label_present(labels, 'Reject Image'))
@@ -176,9 +169,12 @@ def Read_Labelbox_Data(LB_API_KEY, PROJECT_ID, database_path, labelbox_path):
     # Filter out rows where all three columns are False
     condition = (merged_df['Reject Image'] | merged_df['Only Normal Tissue'] | merged_df['Cyst Lesion Present'] | merged_df['Benign Lesion Present'] | merged_df['Malignant Lesion Present'])
     filtered_df = merged_df[condition]
-
+    
+    #filtered_df.to_csv(f'{labelbox_path}/InstanceLabels5.csv', index=False)
+    
     # Select only required columns
     final_df = pd.merge(filtered_df, image_df[['ImageName', 'FileName']], on='ImageName', how='left')
+
 
     # Select only required columns, including the new FileName column
     final_df = final_df[['Accession_Number', 'FileName', 'Reject Image', 'Only Normal Tissue', 'Cyst Lesion Present', 'Benign Lesion Present', 'Malignant Lesion Present']]

@@ -68,10 +68,12 @@ After configuring the `main.py` and `config.json` file, run the script to start 
 ### Labeled Data
 - The labeled data will be held in the specified `LABELBOX_LABELS` folder with this internal layout:
     - `/labelbox_data/InstanceLabels.csv`: Recorded instance labels from Label Box. This data is universal across databases as it includes the dicom `FileName` for each instance.
+    - If there exists a boolean column named `Reject Image`, this will be used to ignore the specified image when exporting the database. This column will be excluded on export. 
 
 ### Exports
-- Exporting will create a new folder in the specified directory `EXPORT_DIR`.
+- Exporting will create a new folder in the specified directory `EXPORT_DIR`, with todays date on it so that it does not overwrite previous exports.
     - The format will be similar to the original database architecture but will only include relevant data.
+    - If there is labeled instance data inside the `LABELBOX_LABELS` dir then these will be added in the export as well.
     - `/export_12_26_2023/TrainData.csv`: This file contains refrences to the data formatted into bags for the [CADBUSI-Training](https://github.com/Poofy1/CADBUSI-Training) project to easily interpret.
 
 
