@@ -19,30 +19,35 @@ def load_config():
     
 CONFIG = load_config()
 
+# Define the tasks
+TASKS = {
+    1: "Develop Database",
+    2: "Develop Labelbox Data",
+    3: "Retrieve Labelbox Data",
+    4: "Develop Export"
+}
 
-# Select Mode (Only one can be true at a time!)
-DEVELOP_DATABASE = False
-DEVELOP_LABELBOX_DATA = False
-RETREIVE_LABELBOX_DATA = False
-DEVELOP_EXPORT = True
-
-
-# Start Opterations
+# Start Operations
 if __name__ == '__main__':
     if CONFIG["DEBUG_DATA_RANGE"] is None:
         CONFIG["DEBUG_DATA_RANGE"] = [0, 999999999999]
 
-    
     if CONFIG["RESET_PROCESSED_FEILD"]:
         input_file = f'{CONFIG["DATABASE_DIR"]}/ImageData.csv'
         df = pd.read_csv(input_file)
         df['processed'] = False
         df.to_csv(input_file, index=False)
 
+    # Present the user with the list of tasks
+    print("Available Tasks:")
+    for task_num, task_name in TASKS.items():
+        print(f"{task_num}. {task_name}")
 
-    # Main Data Appender
-    if DEVELOP_DATABASE:
-        
+    # Get user input for the task number
+    task_num = int(input("Enter the task number to start: "))
+
+    # Execute the selected task
+    if task_num == 1:  # Develop Database
         user_input = input("Continue with DCM Parsing step? (y/n): ")
         if user_input.lower() == "y":
             Parse_Dicom_Files(CONFIG["DATABASE_DIR"], CONFIG["ANON_FILE"], CONFIG["UNZIPPED_DICOMS"], CONFIG["DEBUG_DATA_RANGE"])
@@ -69,18 +74,14 @@ if __name__ == '__main__':
             ProcessVideoData(CONFIG["DATABASE_DIR"])
             Video_Cleanup(CONFIG["DATABASE_DIR"])
 
-        
-        
-    if DEVELOP_EXPORT:
-        Export_Database(CONFIG["EXPORT_DIR"], CONFIG["VAL_SPLIT"], CONFIG["DATABASE_DIR"], CONFIG["LABELBOX_LABELS"], reparse_images = True)
-    
-    if DEVELOP_LABELBOX_DATA:
+    elif task_num == 2:  # Develop Labelbox Data
         Create_Labelbox_Data(CONFIG["TARGET_CASES"], CONFIG["DATABASE_DIR"])
-        
-    if RETREIVE_LABELBOX_DATA:
+
+    elif task_num == 3:  # Retrieve Labelbox Data
         Read_Labelbox_Data(CONFIG["LABELBOX_API_KEY"], CONFIG["PROJECT_ID"], CONFIG["DATABASE_DIR"], CONFIG["LABELBOX_LABELS"])
-        
+
+    elif task_num == 4:  # Develop Export
+        Export_Database(CONFIG["EXPORT_DIR"], CONFIG["VAL_SPLIT"], CONFIG["DATABASE_DIR"], CONFIG["LABELBOX_LABELS"], reparse_images = True)
 
     if CONFIG["REPROCESS_DATA_FILTERS"]:
         Parse_Data(CONFIG["DATABASE_DIR"], only_labels = True)
-        

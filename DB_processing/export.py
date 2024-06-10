@@ -270,6 +270,7 @@ def format_data(breast_data, image_data, case_data, num_of_tests):
 
     
 def Export_Database(output_dir, val_split, parsed_database, labelbox_path, reparse_images = True, trust_max = 2, num_of_tests = 10):
+    KnownInstancesOnly = True # When true it only exports images taht have a instance label
     
     date = datetime.datetime.now().strftime("%m_%d_%Y")
     output_dir = f'{output_dir}/export_{date}/'
@@ -335,6 +336,10 @@ def Export_Database(output_dir, val_split, parsed_database, labelbox_path, repar
     video_df = video_df[(video_df['Patient_ID'].isin(case_study_df['Patient_ID']))]
     video_df = video_df[video_df['laterality'] != 'unknown']
     video_df = video_df[video_df['laterality'].notna()]
+    
+    if KnownInstancesOnly:
+        # Filter image_df to only include instances present in instance_data
+        image_df = image_df[image_df['ImageName'].isin(instance_data['ImageName'])]
     
     #Remove bad aspect ratios
     min_aspect_ratio = 0.5

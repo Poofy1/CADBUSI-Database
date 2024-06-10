@@ -1,4 +1,4 @@
-import os, pydicom, zipfile, hashlib
+import os, pydicom, zipfile, hashlib, ast
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import pandas as pd
@@ -371,6 +371,8 @@ def Parse_Dicom_Files(database_path, anon_location, raw_storage_database, data_r
     breast_csv['Has_Malignant'] = False
     breast_csv['Has_Benign'] = False
     breast_csv['Has_Unknown'] = False
+    
+    breast_csv.to_csv(f'{env}/breast1.csv', index=False)
 
     for idx, row in csv_df.iterrows():
         if row['Biopsy_Laterality'] is not None:
@@ -385,10 +387,34 @@ def Parse_Dicom_Files(database_path, anon_location, raw_storage_database, data_r
                             breast_csv.loc[matching_rows, 'Has_Benign'] = True
                         elif biopsy_result == 'unknown':
                             breast_csv.loc[matching_rows, 'Has_Unknown'] = True
+                    
                     if isinstance(row['Path_Desc'], list) and len(row['Path_Desc']) > i:
-                        breast_csv.loc[matching_rows, 'Path_Desc'] = row['Path_Desc'][i]
+                        path_desc = row['Path_Desc'][i]
+                        if pd.notna(breast_csv.loc[matching_rows, 'Path_Desc'].iloc[0]):
+                            existing_path_desc = breast_csv.loc[matching_rows, 'Path_Desc'].iloc[0]
+                            try:
+                                path_desc_list = ast.literal_eval(existing_path_desc)
+                                path_desc_list.append(path_desc)
+                                breast_csv.loc[matching_rows, 'Path_Desc'] = str(path_desc_list)
+                            except (ValueError, SyntaxError):
+                                breast_csv.loc[matching_rows, 'Path_Desc'] = str([existing_path_desc, path_desc])
+                        else:
+                            breast_csv.loc[matching_rows, 'Path_Desc'] = str([path_desc])
+                    
                     if isinstance(row['Density_Desc'], list) and len(row['Density_Desc']) > i:
-                        breast_csv.loc[matching_rows, 'Density_Desc'] = row['Density_Desc'][i]
+                        density_desc = row['Density_Desc'][i]
+                        if pd.notna(breast_csv.loc[matching_rows, 'Density_Desc'].iloc[0]):
+                            existing_density_desc = breast_csv.loc[matching_rows, 'Density_Desc'].iloc[0]
+                            try:
+                                density_desc_list = ast.literal_eval(existing_density_desc)
+                                density_desc_list.append(density_desc)
+                                breast_csv.loc[matching_rows, 'Density_Desc'] = str(density_desc_list)
+                            except (ValueError, SyntaxError):
+                                breast_csv.loc[matching_rows, 'Density_Desc'] = str([existing_density_desc, density_desc])
+                        else:
+                            breast_csv.loc[matching_rows, 'Density_Desc'] = str([density_desc])
+    
+    breast_csv.to_csv(f'{env}/breast2.csv', index=False)
     
     # Count lesions
     # Create a DataFrame that records the 'Biopsy_Laterality' for each 'Patient_ID'
@@ -399,6 +425,7 @@ def Parse_Dicom_Files(database_path, anon_location, raw_storage_database, data_r
     lesion_count = lesion_count.rename(columns={'Biopsy_Laterality': 'Breast'})
     # Merge lesion_count with breast_csv
     breast_csv = pd.merge(breast_csv, lesion_count, on=['Patient_ID', 'Breast'], how='left')
+    
     
     image_combined_df = image_df
     if os.path.isfile(image_csv_file):
@@ -429,7 +456,6 @@ def Parse_Dicom_Files(database_path, anon_location, raw_storage_database, data_r
         breast_csv = breast_csv.sort_values(['Patient_ID', 'Accession_Number', 'Breast'])
         breast_csv = breast_csv.drop_duplicates(subset=['Patient_ID', 'Accession_Number', 'Breast'], keep='last')
         breast_csv = breast_csv.reset_index(drop=True)
-
 
     # Export the DataFrames to CSV files
     image_combined_df.to_csv(image_csv_file, index=False)

@@ -33,7 +33,7 @@ All user parameters will be controlled from a `config.json` file, you will need 
 
 
 ## Usage / Modes
-- Within the `main.py` script you must select ONE of the four tasks to complete. Each mode will conduct a specific task.
+- When running `main.py`, you will be presented with 4 modes. Each mode will conduct a specific task.
 
 - `DEVELOP_DATABASE`: This process involves many steps and may take a significant amount of time to complete. In case of errors, checkpoints have been added to incrementally prompt the user which steps they need to process. The steps are as follows:
     - DCM Parsing: Processes the input dicom files by converting metadata to csv and export the images.
@@ -45,7 +45,7 @@ All user parameters will be controlled from a `config.json` file, you will need 
 - `RETREIVE_LABELBOX_DATA`: This process will retrieve and organize Label Box data to a directory.
 - `DEVELOP_EXPORT`: This process will export all relevant database data and labeled data into the specified output directory.
 
-After configuring the `main.py` and `config.json` file, run the script to start the program:
+After configuring the `config.json` file, run the script to start the program:
 `python main.py`
 
 
