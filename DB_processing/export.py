@@ -270,8 +270,11 @@ def format_data(breast_data, image_data, case_data, num_of_tests):
 
     
 def Export_Database(output_dir, val_split, parsed_database, labelbox_path, reparse_images = True, trust_max = 2, num_of_tests = 10):
+    #Debug Tools
     KnownInstancesOnly = False # When true it only exports images that have a instance label
-    
+    OnlyOneLesions = True # Only exports Breast Cases with lesion count of 1
+    use_reject_system = True # True = removes rejects from trianing
+        
     date = datetime.datetime.now().strftime("%m_%d_%Y")
     output_dir = f'{output_dir}/export_{date}/'
     
@@ -294,21 +297,28 @@ def Export_Database(output_dir, val_split, parsed_database, labelbox_path, repar
     instance_data = pd.read_csv(instance_labels_csv_file)
     
     
-    #Format Instance Data
+    ##Format Instance Data
     file_to_image_name_map = dict(zip(image_df['FileName'], image_df['ImageName']))
     instance_data['ImageName'] = instance_data['FileName'].map(file_to_image_name_map)
     instance_data.drop(columns=['FileName'], inplace=True)
-    if 'Reject Image' in instance_data.columns: # Check if 'Reject Image' column exists
-        # Create a new DataFrame with rejected instances
-        rejected_images = instance_data[instance_data['Reject Image'] == True][['ImageName']]
-        rejected_images['FileName'] = rejected_images['ImageName'].map({v: k for k, v in file_to_image_name_map.items()})
+
+    if 'Reject Image' in instance_data.columns:
+        if use_reject_system:
+            # Create a new DataFrame with rejected instances
+            rejected_images = instance_data[instance_data['Reject Image'] == True][['ImageName']]
+            rejected_images['FileName'] = rejected_images['ImageName'].map({v: k for k, v in file_to_image_name_map.items()})
+            
+            # Remove rows where 'Reject Image' is True from instance_data
+            instance_data = instance_data[instance_data['Reject Image'] != True]
+            
+            # Remove rows from image_df based on rejected_images['FileName']
+            image_df = image_df[~image_df['FileName'].isin(rejected_images['FileName'])]
         
-        # Remove rows where 'Reject Image' is True from instance_data
-        instance_data = instance_data[instance_data['Reject Image'] != True]
-        instance_data.drop(columns=['Reject Image'], inplace=True)
-        
-        # Remove rows from image_df based on rejected_images['FileName']
-        image_df = image_df[~image_df['FileName'].isin(rejected_images['FileName'])]
+        # If not using reject system, keep 'Reject Image' as a column
+        if not use_reject_system:
+            instance_data['Reject Image'] = instance_data['Reject Image'].fillna(False)
+        else:
+            instance_data.drop(columns=['Reject Image'], inplace=True)
 
     # Reformat biopsy
     case_study_df['Biopsy'] = case_study_df.apply(lambda row: safe_literal_eval(row['Biopsy'], row.name), axis=1)
@@ -415,7 +425,17 @@ def Export_Database(output_dir, val_split, parsed_database, labelbox_path, repar
     case_study_df = case_study_df[case_study_df['Patient_ID'].isin(image_patient_ids)]
     breast_df = breast_df[breast_df['Patient_ID'].isin(image_patient_ids)]
     
-    
+    if OnlyOneLesions:
+        # Filter breast_df to only include cases with one lesion
+        breast_df = breast_df[breast_df['LesionCount'] == 1]
+        
+        # Filter image_df and video_df based on the filtered breast_df
+        image_df = image_df[image_df['Patient_ID'].isin(breast_df['Patient_ID'])]
+        video_df = video_df[video_df['Patient_ID'].isin(breast_df['Patient_ID'])]
+        
+        # Filter case_study_df based on the filtered breast_df
+        case_study_df = case_study_df[case_study_df['Patient_ID'].isin(breast_df['Patient_ID'])]
+        
     # Fix cm data
     image_df = Fix_CM_Data(image_df)
     video_df = Fix_CM_Data(video_df)

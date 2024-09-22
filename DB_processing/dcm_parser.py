@@ -296,7 +296,7 @@ def Parse_Dicom_Files(database_path, anon_location, raw_storage_database, data_r
                 'DicomHash']]
     
     #Prepare to move data to csv_df
-    temp_df = image_df.drop_duplicates(subset='Patient_ID')
+    temp_df = image_df.drop_duplicates(subset='Accession_Number')
     #Remove useless data
     image_df = image_df[['Patient_ID', 
              'Accession_Number', 
@@ -341,9 +341,10 @@ def Parse_Dicom_Files(database_path, anon_location, raw_storage_database, data_r
 
     
     # Convert 'Patient_ID' to str in both dataframes before merging
-    temp_df['Patient_ID'] = temp_df['Patient_ID'].astype(int)
-    csv_df['Patient_ID'] = csv_df['Patient_ID'].astype(int)
-    csv_df = pd.merge(csv_df, temp_df[['Patient_ID', 'StudyDescription', 'StudyDate', 'PatientSex', 'PatientSize', 'PatientWeight']], on='Patient_ID', how='inner')
+    temp_df[['Patient_ID', 'Accession_Number']] = temp_df[['Patient_ID', 'Accession_Number']].astype(int)
+    csv_df[['Patient_ID', 'Accession_Number']] = csv_df[['Patient_ID', 'Accession_Number']].astype(int)
+    csv_df = pd.merge(csv_df, temp_df[['Patient_ID', 'Accession_Number', 'StudyDescription', 'StudyDate', 'PatientSex', 'PatientSize', 'PatientWeight']], on=['Patient_ID', 'Accession_Number'], how='inner')
+    
     
     # Get count of duplicate rows for each Patient_ID in df
     duplicate_count = image_df.groupby('Patient_ID').size()
@@ -352,6 +353,7 @@ def Parse_Dicom_Files(database_path, anon_location, raw_storage_database, data_r
 
     # Merge duplicate_count with csv_df
     csv_df = pd.merge(csv_df, duplicate_count, on='Patient_ID', how='left')
+    #csv_df.to_csv("D:\DATA\CASBUSI/temp.csv", index=False)
 
         
     # Create Breast level data
@@ -372,10 +374,10 @@ def Parse_Dicom_Files(database_path, anon_location, raw_storage_database, data_r
     breast_csv['Has_Benign'] = False
     breast_csv['Has_Unknown'] = False
     
-    breast_csv.to_csv(f'{env}/breast1.csv', index=False)
+    #breast_csv.to_csv(f'{env}/breast1.csv', index=False)
 
     for idx, row in csv_df.iterrows():
-        if row['Biopsy_Laterality'] is not None:
+        if isinstance(row['Biopsy_Laterality'], str):
             for i, laterality in enumerate(row['Biopsy_Laterality']):
                 if isinstance(laterality, str):
                     matching_rows = (breast_csv['Patient_ID'] == row['Patient_ID']) & (breast_csv['Accession_Number'] == row['Accession_Number']) & (breast_csv['Breast'] == laterality.upper())
@@ -414,7 +416,7 @@ def Parse_Dicom_Files(database_path, anon_location, raw_storage_database, data_r
                         else:
                             breast_csv.loc[matching_rows, 'Density_Desc'] = str([density_desc])
     
-    breast_csv.to_csv(f'{env}/breast2.csv', index=False)
+    #breast_csv.to_csv(f'{env}/breast2.csv', index=False)
     
     # Count lesions
     # Create a DataFrame that records the 'Biopsy_Laterality' for each 'Patient_ID'
