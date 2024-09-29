@@ -2,6 +2,7 @@ import os, pydicom, zipfile, hashlib, ast
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import pandas as pd
+import io
 from tqdm import tqdm
 from highdicom.io import ImageFileReader
 import warnings, logging, cv2
@@ -31,12 +32,36 @@ biopsy_mapping = {
     'Elevated Risk': 'unknown',
 }
 
-def generate_hash(filename):
-    sha256_hash = hashlib.sha256()
 
-    with open(filename,"rb") as f:
-        for byte_block in iter(lambda: f.read(4096),b""):
-            sha256_hash.update(byte_block)
+
+
+ 
+def has_blue_pixels(image, n=100, min_b=200):
+    # Create a mask where blue is dominant
+    channel_max = np.argmax(image, axis=-1)
+    blue_dominant = (channel_max == 2) & (
+        (image[:, :, 2] - image[:, :, 0] >= n) &
+        (image[:, :, 2] - image[:, :, 1] >= n)
+    )
+    
+    strong = image[:, :, 2] >= min_b
+    return np.any(blue_dominant & strong)
+
+def has_red_pixels(image, n=100, min_r=200):
+    # Create a mask where red is dominant
+    channel_max = np.argmax(image, axis=-1)
+    red_dominant = (channel_max == 0) & (
+        (image[:, :, 0] - image[:, :, 2] >= n) &
+        (image[:, :, 0] - image[:, :, 1] >= n)
+    )
+    
+    strong = image[:, :, 0] >= min_r
+    return np.any(strong & red_dominant)
+
+    
+def generate_hash(data):
+    sha256_hash = hashlib.sha256()
+    sha256_hash.update(data)
     return sha256_hash.hexdigest()
 
 
@@ -56,6 +81,11 @@ def parse_video_data(dcm, current_index, parsed_database):
 
     data_dict = {}
     dataset = pydicom.dcmread(dcm, stop_before_pixels=True)
+    
+    # Convert dataset to binary
+    memory_file = io.BytesIO()
+    pydicom.filewriter.write_file(memory_file, dataset)
+    binary_data = memory_file.getvalue()
     
     for elem in dataset:
         if elem.VR == "SQ":  # if sequence
@@ -100,32 +130,10 @@ def parse_video_data(dcm, current_index, parsed_database):
     data_dict['FileName'] = os.path.basename(dcm)
     data_dict['ImagesPath'] = video_path
     #data_dict['SavedFrames'] = image_count
-    data_dict['DicomHash'] = generate_hash(dcm)
+    data_dict['DicomHash'] = generate_hash(binary_data)
     
     return data_dict
 
- 
-def has_blue_pixels(image, n=100, min_b=200):
-    # Create a mask where blue is dominant
-    channel_max = np.argmax(image, axis=-1)
-    blue_dominant = (channel_max == 2) & (
-        (image[:, :, 2] - image[:, :, 0] >= n) &
-        (image[:, :, 2] - image[:, :, 1] >= n)
-    )
-    
-    strong = image[:, :, 2] >= min_b
-    return np.any(blue_dominant & strong)
-
-def has_red_pixels(image, n=100, min_r=200):
-    # Create a mask where red is dominant
-    channel_max = np.argmax(image, axis=-1)
-    red_dominant = (channel_max == 0) & (
-        (image[:, :, 0] - image[:, :, 2] >= n) &
-        (image[:, :, 0] - image[:, :, 1] >= n)
-    )
-    
-    strong = image[:, :, 0] >= min_r
-    return np.any(strong & red_dominant)
 
 
 def parse_single_dcm(dcm, current_index, parsed_database):
@@ -136,7 +144,12 @@ def parse_single_dcm(dcm, current_index, parsed_database):
     
     data_dict = {}
     region_count = 0
-    dataset = pydicom.dcmread(dcm)
+    
+    # Read the DICOM file
+    with open(dcm, 'rb') as f:
+        dcm_data = f.read()
+        
+    dataset = pydicom.dcmread(io.BytesIO(dcm_data))
 
     for elem in dataset:
         # Check if element is a sequence
@@ -185,7 +198,7 @@ def parse_single_dcm(dcm, current_index, parsed_database):
     data_dict['DataType'] = 'image'
     data_dict['FileName'] = os.path.basename(dcm)
     data_dict['ImageName'] = image_name
-    data_dict['DicomHash'] = generate_hash(dcm)
+    data_dict['DicomHash'] = generate_hash(dcm_data)
     data_dict['RegionCount'] = region_count
     
     return data_dict
@@ -272,8 +285,16 @@ def Parse_Dicom_Files(database_path, anon_location, raw_storage_database, data_r
     
     # Get DCM Data
     image_df = parse_dcm_files(dcm_files_list, database_path)
+    #image_df.to_csv(f'{database_path}Debug.csv', index=False)
     image_df = image_df.rename(columns={'PatientID': 'Patient_ID'})
     image_df = image_df.rename(columns={'AccessionNumber': 'Accession_Number'})
+    
+    #Remove missing IDs
+    original_row_count = len(image_df)
+    image_df = image_df.dropna(subset=['Patient_ID']).dropna(subset=['Accession_Number'])
+    new_row_count = len(image_df)
+    removed_rows = original_row_count - new_row_count
+    print(f"Removed {removed_rows} rows with empty values.")
     
     video_df = image_df[image_df['DataType'] == 'video']
     image_df = image_df[image_df['DataType'] == 'image']
@@ -313,7 +334,7 @@ def Parse_Dicom_Files(database_path, anon_location, raw_storage_database, data_r
              'Columns',
              'FileName',
              'DicomHash']]
-
+    
     # Update the list of parsed files and save it
     parsed_files_list.extend(dcm_files_list)
     with open(parsed_files_list_file, 'w') as file:
