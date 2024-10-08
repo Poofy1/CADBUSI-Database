@@ -9,3 +9,4 @@ labelbox==3.46.0
 requests==2.28.2
 torch==1.12.1
 torchvision==0.13.1
+segmentation-models-pytorch

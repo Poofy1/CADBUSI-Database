@@ -215,116 +215,41 @@ def find_mixed_lateralities( db ):
 
 def process_single_darkness(row, image_folder_path):
     image_file = row['ImageName']
-    image_path = os.path.join(image_folder_path, image_file)
     
     try: 
-        x = int(row['RegionLocationMinX0'])
-        y = int(row['RegionLocationMinY0'])
-        w = int(row['RegionLocationMaxX1'] - x)
-        h = int(row['RegionLocationMaxY1'] - y)
+        x = row['RegionLocationMinX0']
+        y = row['RegionLocationMinY0']
+        w = row['RegionLocationMaxX1'] - x
+        h = row['RegionLocationMaxY1'] - y
     except KeyError:
         return (image_file, None)
 
-    image = cv2.imread(image_path, 0)  # 0 flag reads directly in grayscale
-    if image is None:
-        return (image_file, None)
+    with Image.open(os.path.join(image_folder_path, image_file)).convert('L') as image:
+        
+        new_size = (800, 600)  # or any other size
+        image = image.resize(new_size)
+        x, y, w, h = int(x * new_size[0] / image.size[0]), int(y * new_size[1] / image.size[1]), int(w * new_size[0] / image.size[0]), int(h * new_size[1] / image.size[1])
 
-    new_size = (800, 600)
-    image = cv2.resize(image, new_size)
-    x, y, w, h = int(x * new_size[0] / image.shape[1]), int(y * new_size[1] / image.shape[0]), int(w * new_size[0] / image.shape[1]), int(h * new_size[1] / image.shape[0])
-
-    img_us = image[y:y+h, x:x+w]
-    _, img_us_bw = cv2.threshold(img_us, 20, 255, cv2.THRESH_BINARY)
-    num_dark = np.sum(img_us_bw == 0)
+        image_np = np.array(image)
+        img_us = image_np[y:y+h, x:x+w]
+        img_us_gray, _ = make_grayscale(img_us)
+        _, img_us_bw = cv2.threshold(img_us_gray, 20, 255, cv2.THRESH_BINARY)
+        num_dark = np.sum(img_us_bw == 0)
     
     return (image_file, 100 * num_dark / (w * h))
 
 def get_darkness(image_folder_path, df):
     darknesses = []
-    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+    with ThreadPoolExecutor(max_workers=os.cpu_count()//2) as executor:  # Reduced number of threads
         futures = {executor.submit(process_single_darkness, row, image_folder_path): row for _, row in df.iterrows()}
-        for future in tqdm(as_completed(futures), total=len(futures)):
-            result = future.result()
-            if result is not None:
-                darknesses.append(result)
+        with tqdm(total=len(futures), miniters=50) as pbar:  # Update progress bar less frequently
+            for future in as_completed(futures):
+                result = future.result()
+                if result is not None:
+                    darknesses.append(result)
+                pbar.update()
 
     return darknesses
-
-
-
-
-
-# OCR
-######################################################
-
-
-def process_image(image_file, description_mask, image_folder_path, reader, kw_list):
-    reader_thread = get_reader()
-    
-    try:
-        image = Image.open(os.path.join(image_folder_path, image_file)).convert('L')
-    except:
-        return [image_file, None]
-    
-    
-
-    width, height = image.size
-    expand_ratio = 0.025  # Change this to control the crop expansion
-
-    if description_mask:
-        x0, y0, x1, y1 = description_mask
-    else:  # if description_mask is empty, crop upper 2/3 and 1/4 on both sides
-        x0 = width // 8
-        y0 = (2 * height) // 3
-        x1 = width - (width // 8)
-        y1 = height
-
-    # Calculate expanded coordinates, while ensuring they are within image bounds
-    x0_exp = max(0, x0 - int(width * expand_ratio))
-    y0_exp = max(0, y0 - int(height * expand_ratio))
-    x1_exp = min(width, x1 + int(width * expand_ratio))
-    y1_exp = min(height, y1 + int(height * expand_ratio))
-
-    cropped_image = image.crop((x0_exp, y0_exp, x1_exp, y1_exp))
-
-    # Convert the PIL Image to a numpy array
-    cropped_image_np = np.array(cropped_image)
-
-    # Apply blur to help OCR
-    img_focused = cv2.GaussianBlur(cropped_image_np, (3, 3), 0)
-
-    result = reader_thread.readtext(img_focused,paragraph=True)
-
-    #Fix OCR miss read
-    result = [[r[0], 'logiq' if r[1].lower() == 'loc' or r[1].lower() == 'lo' else r[1].lower()] for r in result]
-    result = [ [r[0], r[1].lower()] for r in result]
-    
-    # now loop over the remaining strings and get the total string and the bounding box
-    text = ''
-    for r in result:
-        text = text + r[1] + ' '
-
-    return [image_file, text]
-
-
-
-def get_OCR(image_folder_path, description_masks):
-    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-        futures = {executor.submit(process_image, image_file, description_mask, image_folder_path, reader, description_kw): image_file for image_file, description_mask in description_masks}
-        progress = tqdm(total=len(futures), desc='')
-
-        # Initialize dictionary to store descriptions
-        descriptions = {}
-
-        for future in as_completed(futures):
-            result = future.result()  # result is now a list with the filename and the description
-            descriptions[result[0]] = result[1]  # Store description at corresponding image file
-            progress.update()
-
-        progress.close()
-        
-    return descriptions
-
 
 
 
@@ -414,6 +339,82 @@ def get_ultrasound_region(image_folder_path, db_to_process):
                 pbar.update()
 
     return image_data
+
+
+
+
+# OCR
+######################################################
+
+
+def process_image(image_file, description_mask, image_folder_path, reader, kw_list):
+    reader_thread = get_reader()
+    
+    try:
+        image = Image.open(os.path.join(image_folder_path, image_file)).convert('L')
+    except:
+        return [image_file, None]
+    
+    
+
+    width, height = image.size
+    expand_ratio = 0.025  # Change this to control the crop expansion
+
+    if description_mask:
+        x0, y0, x1, y1 = description_mask
+    else:  # if description_mask is empty, crop upper 2/3 and 1/4 on both sides
+        x0 = width // 8
+        y0 = (2 * height) // 3
+        x1 = width - (width // 8)
+        y1 = height
+
+    # Calculate expanded coordinates, while ensuring they are within image bounds
+    x0_exp = max(0, x0 - int(width * expand_ratio))
+    y0_exp = max(0, y0 - int(height * expand_ratio))
+    x1_exp = min(width, x1 + int(width * expand_ratio))
+    y1_exp = min(height, y1 + int(height * expand_ratio))
+
+    cropped_image = image.crop((x0_exp, y0_exp, x1_exp, y1_exp))
+
+    # Convert the PIL Image to a numpy array
+    cropped_image_np = np.array(cropped_image)
+
+    # Apply blur to help OCR
+    img_focused = cv2.GaussianBlur(cropped_image_np, (3, 3), 0)
+
+    result = reader_thread.readtext(img_focused,paragraph=True)
+
+    #Fix OCR miss read
+    result = [[r[0], 'logiq' if r[1].lower() == 'loc' or r[1].lower() == 'lo' else r[1].lower()] for r in result]
+    result = [ [r[0], r[1].lower()] for r in result]
+    
+    # now loop over the remaining strings and get the total string and the bounding box
+    text = ''
+    for r in result:
+        text = text + r[1] + ' '
+
+    return [image_file, text]
+
+
+
+def get_OCR(image_folder_path, description_masks):
+    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+        futures = {executor.submit(process_image, image_file, description_mask, image_folder_path, reader, description_kw): image_file for image_file, description_mask in description_masks}
+        progress = tqdm(total=len(futures), desc='')
+
+        # Initialize dictionary to store descriptions
+        descriptions = {}
+
+        for future in as_completed(futures):
+            result = future.result()  # result is now a list with the filename and the description
+            descriptions[result[0]] = result[1]  # Store description at corresponding image file
+            progress.update()
+
+        progress.close()
+        
+    return descriptions
+
+
 
 
 
