@@ -13,15 +13,141 @@ from pytorch_msssim import SSIM
 from torchvision import transforms
 import numpy as np
 
+
+
+
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class N2N_Original_Used_UNet(nn.Module):
+    """Custom U-Net architecture from original Noise2Noise Paper (see Appendix, Table 2)."""
+
+    def __init__(self, in_channels=1, out_channels=1):
+        """Initializes U-Net."""
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        super(N2N_Original_Used_UNet, self).__init__()
+
+        # Layers: enc_conv0, enc_conv1, pool1
+        self._block1 = nn.Sequential(
+            nn.Conv2d(in_channels, 48, 3, stride=1, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(48, 48, 3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2))
+
+        # Layers: enc_conv(i), pool(i); i=2..5
+        self._block2 = nn.Sequential(
+            nn.Conv2d(48, 48, 3, stride=1, padding=1),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2))
+
+        # Layers: enc_conv6, upsample5
+        self._block3 = nn.Sequential(
+            nn.Conv2d(48, 48, 3, stride=1, padding=1),
+            nn.ReLU(inplace=True),
+            nn.ConvTranspose2d(48, 48, 3, stride=2, padding=1, output_padding=1))
+        # nn.Upsample(scale_factor=2, mode='nearest'))
+
+        # Layers: dec_conv5a, dec_conv5b, upsample4
+        self._block4 = nn.Sequential(
+            nn.Conv2d(96, 96, 3, stride=1, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(96, 96, 3, stride=1, padding=1),
+            nn.ReLU(inplace=True),
+            nn.ConvTranspose2d(96, 96, 3, stride=2, padding=1, output_padding=1))
+        # nn.Upsample(scale_factor=2, mode='nearest'))
+
+        # Layers: dec_deconv(i)a, dec_deconv(i)b, upsample(i-1); i=4..2
+        self._block5 = nn.Sequential(
+            nn.Conv2d(144, 96, 3, stride=1, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(96, 96, 3, stride=1, padding=1),
+            nn.ReLU(inplace=True),
+            nn.ConvTranspose2d(96, 96, 3, stride=2, padding=1, output_padding=1))
+        # nn.Upsample(scale_factor=2, mode='nearest'))
+
+        # Layers: dec_conv1a, dec_conv1b, dec_conv1c,
+        self._block6 = nn.Sequential(
+            nn.Conv2d(96 + in_channels, 64, 3, stride=1, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(64, 32, 3, stride=1, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(32, out_channels, 3, stride=1, padding=1),
+            nn.LeakyReLU(0.1))
+
+        # Initialize weights
+        self._init_weights()
+
+    def _init_weights(self):
+        """Initializes weights using He et al. (2015)."""
+
+        for m in self.modules():
+            if isinstance(m, nn.ConvTranspose2d) or isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight.data)
+                m.bias.data.zero_()
+
+    def forward(self, x):
+        """Through encoder, then decoder by adding U-skip connections. """
+        # Encoder
+        pool1 = self._block1(x)
+        pool2 = self._block2(pool1)
+        pool3 = self._block2(pool2)
+        pool4 = self._block2(pool3)
+        pool5 = self._block2(pool4)
+        
+        """# Decoder
+        upsample5 = self._block3(pool5)
+        concat5 = torch.cat((upsample5, pool4), dim=1)
+        
+        upsample4 = self._block4(concat5)
+        concat4 = torch.cat((upsample4, pool3), dim=1)
+        
+        upsample3 = self._block5(concat4)
+        concat3 = torch.cat((upsample3, pool2), dim=1)
+        
+        upsample2 = self._block5(concat3)
+        concat2 = torch.cat((upsample2, pool1), dim=1)
+        
+        upsample1 = self._block5(concat2)
+        concat1 = torch.cat((upsample1, x), dim=1)"""
+        
+        # Decoder
+        upsample5 = self._block3(pool5)
+        upsample5 = F.interpolate(upsample5, size=pool4.shape[2:], mode='bilinear', align_corners=False)
+        concat5 = torch.cat((upsample5, pool4), dim=1)
+        
+        upsample4 = self._block4(concat5)
+        upsample4 = F.interpolate(upsample4, size=pool3.shape[2:], mode='bilinear', align_corners=False)
+        concat4 = torch.cat((upsample4, pool3), dim=1)
+        
+        upsample3 = self._block5(concat4)
+        upsample3 = F.interpolate(upsample3, size=pool2.shape[2:], mode='bilinear', align_corners=False)
+        concat3 = torch.cat((upsample3, pool2), dim=1)
+        
+        upsample2 = self._block5(concat3)
+        upsample2 = F.interpolate(upsample2, size=pool1.shape[2:], mode='bilinear', align_corners=False)
+        concat2 = torch.cat((upsample2, pool1), dim=1)
+        
+        upsample1 = self._block5(concat2)
+        upsample1 = F.interpolate(upsample1, size=x.shape[2:], mode='bilinear', align_corners=False)
+        concat1 = torch.cat((upsample1, x), dim=1)
+
+        # Final activation
+        return self._block6(concat1)
+    
+    
+    
 class CaliperDataset(Dataset):
     def __init__(self, csv_file, img_dir, caliper_dir=None, val=False, transform=None):
         self.data = pd.read_csv(csv_file)
         self.img_dir = img_dir
         self.caliper_dir = caliper_dir
         self.transform = transform
-        self.save_dir = None
+        self.save_dir = None #"D:\DATA\CASBUSI\PairExport/test/"
         
         if caliper_dir:
             self.caliper_shapes = [f for f in os.listdir(caliper_dir) if f.endswith('.png')]
@@ -53,23 +179,34 @@ class CaliperDataset(Dataset):
             caliper_name = random.choice(self.caliper_shapes)
             caliper = Image.open(os.path.join(self.caliper_dir, caliper_name)).convert('RGBA')
             
-            # Random position within the inner 75% of the image
-            x = random.randint(x_offset, x_offset + inner_width - caliper.width)
-            y = random.randint(y_offset, y_offset + inner_height - caliper.height)
+            # Randomly scale the caliper (50% to 150% of original size)
+            scale_factor = random.uniform(0.5, 1.5)
+            new_width = int(caliper.width * scale_factor)
+            new_height = int(caliper.height * scale_factor)
             
-            # Convert caliper to numpy array
+            # Resize without antialiasing
+            caliper = caliper.resize((new_width, new_height), Image.NEAREST)
+            
+            # Convert to numpy array and create mask
             caliper_array = np.array(caliper)
-            
-            # Create a mask for non-transparent pixels
-            mask = caliper_array[:, :, 3] > 0
+            mask = caliper_array[:, :, 3] > 128  # Use a threshold to determine solid pixels
             
             # Convert caliper to grayscale
             caliper_gray = np.dot(caliper_array[:, :, :3], [0.2989, 0.5870, 0.1140])
             
-            # Add caliper to the image
-            overlay = img_array[y:y+caliper.height, x:x+caliper.width]
-            overlay[mask] = caliper_gray[mask]
-            img_array[y:y+caliper.height, x:x+caliper.width] = overlay
+            # Ensure the scaled caliper fits within the inner region
+            max_x = max(0, inner_width - new_width)
+            max_y = max(0, inner_height - new_height)
+            
+            if max_x > 0 and max_y > 0:
+                # Random position within the inner 75% of the image
+                x = random.randint(x_offset, x_offset + max_x)
+                y = random.randint(y_offset, y_offset + max_y)
+                
+                # Add caliper to the image
+                overlay = img_array[y:y+new_height, x:x+new_width]
+                overlay[mask] = caliper_gray[mask]
+                img_array[y:y+new_height, x:x+new_width] = overlay
         
         return Image.fromarray(img_array)
 
@@ -84,7 +221,7 @@ class CaliperDataset(Dataset):
         
         
         if self.caliper_dir:
-            num_calipers = random.randint(1, 6)
+            num_calipers = random.randint(1, 14)
             synthetic_caliper_img2 = self.add_calipers(clean_img, num_calipers)
             synthetic_caliper_img = self.add_calipers(clean_img, num_calipers)
         else:
@@ -123,10 +260,6 @@ def collate_fn(batch):
     max_width = max(max(img.shape[2] for img in caliper_images), 
                     max(img.shape[2] for img in original_images))
     
-    # Round up to nearest multiple of 32
-    max_height = ((max_height + 31) // 32) * 32
-    max_width = ((max_width + 31) // 32) * 32
-    
     # Pad images to the maximum size
     padded_caliper = []
     padded_original = []
@@ -149,13 +282,11 @@ def collate_fn(batch):
     
     return stacked_caliper, stacked_original
 
-
-from torchvision.transforms import functional as F
-
 def train_model(csv_file, img_dir, caliper_dir, model_path, num_epochs=50):
     
     # Initialize U-Net model
-    model = Unet(encoder_name="resnet18", encoder_weights="imagenet", in_channels=1, classes=1)
+    #model = Unet(encoder_name="resnet18", encoder_weights="imagenet", in_channels=1, classes=1)
+    model = N2N_Original_Used_UNet(in_channels=1, out_channels=1)
     
     # Check if a saved model exists
     if os.path.exists(model_path):
@@ -321,7 +452,7 @@ if __name__ == "__main__":
     csv_file = os.path.join(data_dir, "PairData.csv")
     img_dir = os.path.join(data_dir, "images")
     caliper_dir = "D:/DATA/CASBUSI/PairExport/unique_caliper_shapes"
-    model_path = os.path.join(data_dir, "caliper_removal_unet_l1loss_N2N_3.pth")
+    model_path = os.path.join(data_dir, "caliper_removal_unet_l1loss_N2N_5.pth")
 
     choice = input("Do you want to (1) train the model or (2) show validation examples? Enter 1 or 2: ")
 
@@ -329,7 +460,8 @@ if __name__ == "__main__":
         train_model(csv_file, img_dir, caliper_dir, model_path)
     elif choice == '2':
         if os.path.exists(model_path):
-            model = Unet(encoder_name="resnet18", encoder_weights="imagenet", in_channels=1, classes=1)
+            #model = Unet(encoder_name="resnet18", encoder_weights="imagenet", in_channels=1, classes=1)
+            model = N2N_Original_Used_UNet(in_channels=1, out_channels=1)
             model.load_state_dict(torch.load(model_path))
             show_validation_examples(model, data_dir, csv_file, img_dir)
         else:
