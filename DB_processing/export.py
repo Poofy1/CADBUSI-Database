@@ -163,23 +163,35 @@ def safe_literal_eval(val, idx):
 
 
 def PerformVal(val_split, df):
-    # Check if the 'valid' column exists, if not, create it
     if 'valid' not in df.columns:
-        df['valid'] = None  # You can replace None with any default value
+        df['valid'] = None
 
-    # Get unique anonymized_accession_num values
-    unique_accession_nums = df['Accession_Number'].unique()
-
-    # Shuffle the unique accession numbers
-    np.random.shuffle(unique_accession_nums)
-
-    # Calculate the split index
-    split_index = int(len(unique_accession_nums) * val_split)
-
-    # Assign '1' to a portion of the unique accession numbers and '0' to the remaining
-    valid_accession_nums = set(unique_accession_nums[:split_index])
-    df['valid'] = df['Accession_Number'].apply(lambda x: 1 if x in valid_accession_nums else 0)
-
+    # Create binary label based on whether 'malignant' is in Biopsy
+    df['is_malignant'] = df['Biopsy'].apply(lambda x: 1 if 'malignant' in x else 0)
+    
+    # Get accession numbers for each class
+    malignant_accessions = df[df['is_malignant'] == 1]['Accession_Number'].unique()
+    benign_accessions = df[df['is_malignant'] == 0]['Accession_Number'].unique()
+    
+    # Determine the size of validation set based on the minority class
+    min_class_size = min(len(malignant_accessions), len(benign_accessions))
+    val_size = int(min_class_size * val_split)
+    
+    # Shuffle and take equal numbers from each class
+    np.random.shuffle(malignant_accessions)
+    np.random.shuffle(benign_accessions)
+    
+    valid_accessions = set(
+        list(malignant_accessions[:val_size]) + 
+        list(benign_accessions[:val_size])
+    )
+    
+    # Assign validation split
+    df['valid'] = df['Accession_Number'].apply(lambda x: 1 if x in valid_accessions else 0)
+    
+    # Clean up temporary column
+    df = df.drop('is_malignant', axis=1)
+    
     return df
 
     
