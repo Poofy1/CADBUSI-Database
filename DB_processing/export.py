@@ -5,6 +5,13 @@ from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 env = os.path.dirname(os.path.abspath(__file__))
 
+
+import sys
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+sys.path.append(parent_dir)
+from storage import *
+
 # Paths
 labeled_data_dir = f'{env}/labeled_data_archive/'
 
@@ -36,8 +43,10 @@ def process_single_image(row, image_folder_path, image_output, mask_folder_input
     image_path = os.path.join(image_folder_path, row['ImageName'])
     mask_path = os.path.join(mask_folder_input, 'mask_' + row['ImageName'])
     
-    image = cv2.imread(image_path)
-    mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)  # Load mask as grayscale
+    image = read_image(image_path)
+    if file_exists(mask_path):
+        mask = read_image(mask_path)
+        mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)  # Convert to grayscale
     
     # Check if the image and mask were loaded properly
     if image is None:
@@ -52,7 +61,7 @@ def process_single_image(row, image_folder_path, image_output, mask_folder_input
     # Crop Image
     cropped_image = image[y:y+h, x:x+w]
     image_output_path = os.path.join(image_output, row['ImageName'])
-    cv2.imwrite(image_output_path, cropped_image)
+    save_data(cropped_image, image_output_path)
     
     
     # Crop Mask
@@ -61,7 +70,7 @@ def process_single_image(row, image_folder_path, image_output, mask_folder_input
     
     cropped_mask = mask[y:y+h, x:x+w]
     mask_output_path = os.path.join(mask_folder_output, 'mask_' + row['ImageName'])
-    cv2.imwrite(mask_output_path, cropped_mask)
+    save_data(cropped_mask, mask_output_path)
 
 def Crop_Images(df, input_dir, output_dir):
     
@@ -302,11 +311,11 @@ def Export_Database(output_dir, val_split, parsed_database, labelbox_path, repar
     instance_labels_csv_file = f'{labelbox_path}InstanceLabels.csv'
 
     # Read data
-    case_study_df = pd.read_csv(case_study_csv_file)
-    video_df = pd.read_csv(video_csv_file)
-    image_df = pd.read_csv(image_csv_file)
-    breast_df = pd.read_csv(breast_csv_file)
-    instance_data = pd.read_csv(instance_labels_csv_file)
+    case_study_df = read_csv(case_study_csv_file)
+    video_df = read_csv(video_csv_file)
+    image_df = read_csv(image_csv_file)
+    breast_df = read_csv(breast_csv_file)
+    instance_data = read_csv(instance_labels_csv_file)
     
     
     ##Format Instance Data
@@ -343,7 +352,7 @@ def Export_Database(output_dir, val_split, parsed_database, labelbox_path, repar
 
     if os.path.exists(labeled_data_dir):
         all_files = glob.glob(f'{labeled_data_dir}/*.csv')
-        all_dfs = (pd.read_csv(f) for f in all_files)
+        all_dfs = (read_csv(f) for f in all_files)
         labeled_df = pd.concat(all_dfs, ignore_index=True)
     else:
         labeled_df = pd.DataFrame(columns=['Patient_ID'])
@@ -462,10 +471,10 @@ def Export_Database(output_dir, val_split, parsed_database, labelbox_path, repar
     
     
     # Write the filtered dataframes to CSV files in the output directory
-    breast_df.to_csv(os.path.join(output_dir, 'BreastData.csv'), index=False)
-    case_study_df.to_csv(os.path.join(output_dir, 'CaseStudyData.csv'), index=False)
-    labeled_df.to_csv(os.path.join(output_dir, 'LabeledData.csv'), index=False)
-    video_df.to_csv(os.path.join(output_dir, 'VideoData.csv'), index=False)
-    image_df.to_csv(os.path.join(output_dir, 'ImageData.csv'), index=False)
-    train_data.to_csv(os.path.join(output_dir, 'TrainData.csv'), index=False)
-    instance_data.to_csv(os.path.join(output_dir, 'InstanceData.csv'), index=False)
+    save_data(breast_df, os.path.join(output_dir, 'BreastData.csv'))
+    save_data(case_study_df, os.path.join(output_dir, 'CaseStudyData.csv'))
+    save_data(labeled_df, os.path.join(output_dir, 'LabeledData.csv'))
+    save_data(video_df, os.path.join(output_dir, 'VideoData.csv'))
+    save_data(image_df, os.path.join(output_dir, 'ImageData.csv'))
+    save_data(train_data, os.path.join(output_dir, 'TrainData.csv'))
+    save_data(instance_data, os.path.join(output_dir, 'InstanceData.csv'))
