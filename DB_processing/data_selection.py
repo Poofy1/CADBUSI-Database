@@ -109,65 +109,62 @@ def choose_images_to_label(db, case_data):
 
 
 def find_nearest_images(db, patient_id, image_folder_path):
-    # Filter to only RGB images
-    subset = db[db['PhotometricInterpretation'] != 'RGB'] 
-    # Get index array 
+    subset = db[db['PhotometricInterpretation'] != 'RGB']
     idx = np.array(fetch_index_for_patient_id(patient_id, subset))
     result = {}
     image_pairs_checked = set()
 
-    for j,c in enumerate(idx):
+    # Precompute cropping coordinates
+    crop_coords = subset[['RegionLocationMinX0', 'RegionLocationMinY0', 'RegionLocationMaxX1', 'RegionLocationMaxY1']].astype(int)
+    crop_coords['w'] = crop_coords['RegionLocationMaxX1'] - crop_coords['RegionLocationMinX0']
+    crop_coords['h'] = crop_coords['RegionLocationMaxY1'] - crop_coords['RegionLocationMinY0']
+
+    # Preload and process all images
+    img_dict = {}
+    for image_id in idx:
+        file_name = subset.loc[image_id, 'ImageName']
+        full_filename = os.path.join(image_folder_path, file_name)
+        img = Image.open(full_filename)
+        img = np.array(img).astype(np.uint8)
+        img_dict[image_id] = img
+
+    for j, c in enumerate(idx):
         if c in image_pairs_checked:
             continue
 
-        x = int(db.at[c, 'RegionLocationMinX0'])
-        y = int(db.at[c, 'RegionLocationMinY0'])
-        w = int(db.at[c, 'RegionLocationMaxX1']) - x
-        h = int(db.at[c, 'RegionLocationMaxY1']) - y
+        x, y, w, h = crop_coords.loc[c, ['RegionLocationMinX0', 'RegionLocationMinY0', 'w', 'h']]
 
-        
         img_list = []
-        for i,image_id in enumerate(idx):
-            
-            file_name = db.loc[image_id]['ImageName']
-            full_filename = os.path.join(image_folder_path, file_name)
-            img = Image.open(full_filename)
-            img = np.array(img).astype(np.uint8)
-            (rows, cols) = img.shape[0:2]
+        for image_id in idx:
+            img = img_dict[image_id]
+            (rows, cols) = img.shape[:2]
             if rows >= y + h and cols >= x + w:
-                img,_ = make_grayscale(img)
-                img = img[y:y+h,x:x+w]
-            else: # fill in all ones for an image that will be distant
-                img = np.full((h,w),255,dtype=np.uint8)
-            img = img.flatten()
-            img_list.append(img)
-        
+                img, _ = make_grayscale(img)
+                img = img[y:y+h, x:x+w]
+            else:
+                img = np.full((h, w), 255, dtype=np.uint8)
+            img_list.append(img.flatten())
+
         img_stack = np.array(img_list, dtype=np.uint8)
-        
-        
         img_stack = np.abs(img_stack - img_stack[j, :])
         img_stack = np.mean(img_stack, axis=1)
         img_stack[j] = 1000
         sister_image = np.argmin(img_stack)
         distance = img_stack[sister_image]
 
-
-        # Save result for the current image
         result[c] = {
-            'image_filename': db.at[c, 'ImageName'],
-            'sister_filename': db.at[idx[sister_image], 'ImageName'],
+            'image_filename': subset.at[c, 'ImageName'],
+            'sister_filename': subset.at[idx[sister_image], 'ImageName'],
             'distance': distance
         }
 
-        # Save result for the sister image, if not already done
         if idx[sister_image] not in result:
             result[idx[sister_image]] = {
-                'image_filename': db.at[idx[sister_image], 'ImageName'],
-                'sister_filename': db.at[c, 'ImageName'],
+                'image_filename': subset.at[idx[sister_image], 'ImageName'],
+                'sister_filename': subset.at[c, 'ImageName'],
                 'distance': distance
             }
 
-        # Add the images to the set of checked pairs
         image_pairs_checked.add(c)
         image_pairs_checked.add(idx[sister_image])
 

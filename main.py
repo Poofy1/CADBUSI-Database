@@ -10,6 +10,7 @@ from DB_processing.dcm_parser import Parse_Dicom_Files
 from DB_processing.video_processing import ProcessVideoData, Video_Cleanup
 from ML_processing.inpaint import Inpaint_Dataset
 from ML_processing.orientation_detection import Find_Orientation
+from storage import *
 env = os.path.dirname(os.path.abspath(__file__))
 
 def load_config():
@@ -29,6 +30,10 @@ TASKS = {
 
 # Start Operations
 if __name__ == '__main__':
+    
+    # Determine storage client
+    StorageClient.get_instance(CONFIG["WINDIR"], CONFIG["BUCKET"])
+    
     if CONFIG["DEBUG_DATA_RANGE"] is None:
         CONFIG["DEBUG_DATA_RANGE"] = [0, 999999999999]
 

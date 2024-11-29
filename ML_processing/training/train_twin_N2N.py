@@ -187,6 +187,28 @@ class CaliperDataset(Dataset):
             # Resize without antialiasing
             caliper = caliper.resize((new_width, new_height), Image.NEAREST)
             
+            # 50% chance to apply rotation and skew
+            if random.random() < 0.5:
+                # Random rotation angle (-45 to 45 degrees)
+                rotation_angle = random.uniform(-45, 45)
+                
+                # Random skew factors (-0.3 to 0.3)
+                skew_factor_x = random.uniform(-0.3, 0.3)
+                skew_factor_y = random.uniform(-0.3, 0.3)
+                
+                # Create an affine transform matrix for skewing
+                skew_matrix = [1, skew_factor_x, 0,
+                            skew_factor_y, 1, 0]
+                
+                # Apply transformations: rotate and skew
+                caliper = caliper.rotate(rotation_angle, expand=True, resample=Image.NEAREST)
+                caliper = caliper.transform(
+                    caliper.size, 
+                    Image.AFFINE, 
+                    skew_matrix,
+                    resample=Image.NEAREST
+                )
+                
             # Convert to numpy array and create mask
             caliper_array = np.array(caliper)
             mask = caliper_array[:, :, 3] > 128  # Use a threshold to determine solid pixels
@@ -194,9 +216,12 @@ class CaliperDataset(Dataset):
             # Convert caliper to grayscale
             caliper_gray = np.dot(caliper_array[:, :, :3], [0.2989, 0.5870, 0.1140])
             
-            # Ensure the scaled caliper fits within the inner region
-            max_x = max(0, inner_width - new_width)
-            max_y = max(0, inner_height - new_height)
+            # Get the dimensions after all transformations
+            final_width, final_height = caliper.size
+            
+            # Ensure the transformed caliper fits within the inner region
+            max_x = max(0, inner_width - final_width)
+            max_y = max(0, inner_height - final_height)
             
             if max_x > 0 and max_y > 0:
                 # Random position within the inner 75% of the image
@@ -204,9 +229,13 @@ class CaliperDataset(Dataset):
                 y = random.randint(y_offset, y_offset + max_y)
                 
                 # Add caliper to the image
-                overlay = img_array[y:y+new_height, x:x+new_width]
-                overlay[mask] = caliper_gray[mask]
-                img_array[y:y+new_height, x:x+new_width] = overlay
+                try:
+                    overlay = img_array[y:y+final_height, x:x+final_width]
+                    if mask.shape == overlay.shape:
+                        overlay[mask] = caliper_gray[mask]
+                        img_array[y:y+final_height, x:x+final_width] = overlay
+                except ValueError:
+                    continue  # Skip if dimensions don't match
         
         return Image.fromarray(img_array)
 
@@ -420,7 +449,7 @@ def show_validation_examples(model, data_dir, csv_file, img_dir, num_examples=5)
     model.eval()
 
     # Create results directory
-    results_dir = os.path.join(data_dir, "results")
+    results_dir = os.path.join(data_dir, "results2")
     os.makedirs(results_dir, exist_ok=True)
     
     with torch.no_grad():
@@ -452,7 +481,7 @@ if __name__ == "__main__":
     csv_file = os.path.join(data_dir, "PairData.csv")
     img_dir = os.path.join(data_dir, "images")
     caliper_dir = "D:/DATA/CASBUSI/PairExport/unique_caliper_shapes"
-    model_path = os.path.join(data_dir, "caliper_removal_unet_l1loss_N2N_5.pth")
+    model_path = os.path.join(data_dir, "caliper_removal_unet_l1loss_N2N_6.pth")
 
     choice = input("Do you want to (1) train the model or (2) show validation examples? Enter 1 or 2: ")
 
