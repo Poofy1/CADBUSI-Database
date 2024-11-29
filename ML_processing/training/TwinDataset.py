@@ -1,5 +1,7 @@
-from OCR import *
-from data_selection import find_nearest_images
+import sys
+sys.path.append('..')
+from DB_processing.OCR import *
+from DB_processing.data_selection import find_nearest_images
 
 def process_patient_id(pid, db_out, image_folder_path):
     subset = db_out[db_out['Patient_ID'] == pid].copy()
