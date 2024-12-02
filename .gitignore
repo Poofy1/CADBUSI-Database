@@ -17,6 +17,7 @@
 *.ini
 *.zip
 !/pipeline/CADBUSI-Pipeline.png
+!/requirements.txt
 
 
 # User-specific files (MonoDevelop/Xamarin Studio)

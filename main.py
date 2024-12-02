@@ -1,3 +1,6 @@
+import ssl
+ssl._create_default_https_context = ssl._create_unverified_context
+
 import os, json
 import pandas as pd
 from LB_processing.create_labelbox_data import Create_Labelbox_Data
@@ -10,8 +13,9 @@ from DB_processing.dcm_parser import Parse_Dicom_Files
 from DB_processing.video_processing import ProcessVideoData, Video_Cleanup
 from ML_processing.inpaint import Inpaint_Dataset
 from ML_processing.orientation_detection import Find_Orientation
-from storage import *
 env = os.path.dirname(os.path.abspath(__file__))
+from storage_adapter import * 
+
 
 def load_config():
     with open(f'{env}/config.json', 'r') as config_file:

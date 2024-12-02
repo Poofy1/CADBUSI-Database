@@ -10,7 +10,7 @@ import sys
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
-from storage import *
+from storage_adapter import *
 
 # Paths
 labeled_data_dir = f'{env}/labeled_data_archive/'
