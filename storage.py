@@ -30,9 +30,13 @@ def read_image(path):
     storage = StorageClient.get_instance()
     
     if storage.is_gcp:
-        blob = storage._bucket.blob(path.replace('//', '/').rstrip('/'))
-        nparr = np.frombuffer(blob.download_as_bytes(), np.uint8)
-        return cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        try:
+            blob = storage._bucket.blob(path.replace('//', '/').rstrip('/'))
+            nparr = np.frombuffer(blob.download_as_bytes(), np.uint8)
+            return cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        except Exception as e:
+            print(f"Error reading image {path}: {str(e)}")
+            return None
     else:
         full_path = os.path.join(storage.windir, path)
         return cv2.imread(full_path)
@@ -83,3 +87,13 @@ def file_exists(path):
     else:
         full_path = os.path.join(storage.windir, path)
         return os.path.exists(full_path)
+    
+    
+    
+def make_dirs(path):
+    storage = StorageClient.get_instance()
+    
+    # Only create directories for local storage
+    if not storage.is_gcp:
+        full_path = os.path.join(storage.windir, path)
+        os.makedirs(full_path, exist_ok=True)

@@ -40,53 +40,98 @@ def transform_biopsy_list(biopsy_list):
     return [biopsy_mapping.get(biopsy, 'unknown') for biopsy in biopsy_list]
 
 def process_single_image(row, image_folder_path, image_output, mask_folder_input, mask_folder_output):
-    image_path = os.path.join(image_folder_path, row['ImageName'])
-    mask_path = os.path.join(mask_folder_input, 'mask_' + row['ImageName'])
-    
-    image = read_image(image_path)
-    if file_exists(mask_path):
-        mask = read_image(mask_path)
-        mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)  # Convert to grayscale
-    
-    # Check if the image and mask were loaded properly
-    if image is None:
-        return
-    
-    # Get box coordinates
-    x = int(row['crop_x'])
-    y = int(row['crop_y'])
-    w = int(row['crop_w'])
-    h = int(row['crop_h'])
-    
-    # Crop Image
-    cropped_image = image[y:y+h, x:x+w]
-    image_output_path = os.path.join(image_output, row['ImageName'])
-    save_data(cropped_image, image_output_path)
-    
-    
-    # Crop Mask
-    if mask is None:
-        return
-    
-    cropped_mask = mask[y:y+h, x:x+w]
-    mask_output_path = os.path.join(mask_folder_output, 'mask_' + row['ImageName'])
-    save_data(cropped_mask, mask_output_path)
+    try:
+        image_name = row['ImageName']
+        image_path = os.path.join(image_folder_path, image_name)
+        mask_path = os.path.join(mask_folder_input, 'mask_' + image_name)
+        
+        if not file_exists(image_path):
+            return f"Error: Image file not found - {image_path}"
+            
+        image = read_image(image_path)
+        if image is None:
+            return f"Error: Failed to read image - {image_path}"
+            
+        mask = None
+        if file_exists(mask_path):
+            mask = read_image(mask_path)
+            if mask is None:
+                return f"Warning: Failed to read mask - {mask_path}"
+            mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+        
+        try:
+            x = int(row['crop_x'])
+            y = int(row['crop_y'])
+            w = int(row['crop_w'])
+            h = int(row['crop_h'])
+        except (ValueError, KeyError) as e:
+            return f"Error: Invalid crop coordinates for {image_name} - {str(e)}"
+            
+        if x < 0 or y < 0 or w <= 0 or h <= 0 or \
+           x + w > image.shape[1] or y + h > image.shape[0]:
+            return f"Error: Invalid crop dimensions for {image_name} - x:{x} y:{y} w:{w} h:{h} image_size:{image.shape}"
+        
+        try:
+            cropped_image = image[y:y+h, x:x+w]
+            image_output_path = os.path.join(image_output, image_name)
+            save_data(cropped_image, image_output_path)
+        except Exception as e:
+            return f"Error: Failed to crop/save image {image_name} - {str(e)}"
+        
+        if mask is not None:
+            try:
+                cropped_mask = mask[y:y+h, x:x+w]
+                mask_output_path = os.path.join(mask_folder_output, 'mask_' + image_name)
+                save_data(cropped_mask, mask_output_path)
+            except Exception as e:
+                return f"Error: Failed to crop/save mask {image_name} - {str(e)}"
+        
+        return "Success"
+        
+    except Exception as e:
+        return f"Error: Unexpected error processing {row.get('ImageName', 'unknown')} - {str(e)}"
 
 def Crop_Images(df, input_dir, output_dir):
-    
     image_output = f"{output_dir}/images/"
     mask_folder_output = f"{output_dir}/masks/"
-    os.makedirs(image_output, exist_ok=True)
-    os.makedirs(mask_folder_output, exist_ok=True)
+    make_dirs(image_output)
+    make_dirs(mask_folder_output)
     
     image_folder_path = f"{input_dir}/images/"
     mask_folder_input = f"{labeled_data_dir}/masks/"
     
+    results = {'success': 0, 'failed': 0}
+    failed_images = []
+    
     with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-        futures = {executor.submit(process_single_image, row, image_folder_path, image_output, mask_folder_input, mask_folder_output): index for index, row in df.iterrows()}
+        futures = {
+            executor.submit(
+                process_single_image, 
+                row, 
+                image_folder_path, 
+                image_output, 
+                mask_folder_input, 
+                mask_folder_output
+            ): index for index, row in df.iterrows()
+        }
+        
         with tqdm(total=len(futures)) as pbar:
             for future in as_completed(futures):
+                result = future.result()
+                if result == "Success":
+                    results['success'] += 1
+                else:
+                    results['failed'] += 1
+                    failed_images.append(result)
                 pbar.update()
+    
+    # Only print errors and final statistics
+    if failed_images:
+        print("\nFailed images and errors:")
+        for error in failed_images:
+            print(error)
+            
+    print(f"\nProcessing Complete: Success={results['success']}, Failed={results['failed']}")
                 
                 
                 
@@ -110,7 +155,7 @@ def process_single_video(row, video_folder_path, output_dir):
 
         # Create a new directory for the video in the output directory
         video_output_dir = os.path.join(output_dir, folder_name)
-        os.makedirs(video_output_dir, exist_ok=True)
+        make_dirs(video_output_dir)
 
         # Iterate over all the images and crop them
         for image_name in all_images:
@@ -130,7 +175,7 @@ def process_single_video(row, video_folder_path, output_dir):
 def Crop_Videos(df, input_dir, output_dir):
     
     video_output = f"{output_dir}/videos/"
-    os.makedirs(video_output, exist_ok=True)
+    make_dirs(video_output)
     
     video_folder_path = f"{input_dir}/videos/"
 
@@ -301,7 +346,7 @@ def Export_Database(output_dir, val_split, parsed_database, labelbox_path, repar
     
     print("Exporting Data:")
     
-    os.makedirs(output_dir, exist_ok = True)
+    make_dirs(output_dir, exist_ok = True)
     
     #Dirs
     image_csv_file = f'{parsed_database}ImageData.csv'
