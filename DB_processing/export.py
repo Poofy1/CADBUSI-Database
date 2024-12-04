@@ -341,12 +341,12 @@ def Export_Database(output_dir, val_split, parsed_database, labelbox_path, repar
     OnlyOneLesions = True # Only exports Breast Cases with lesion count of 1
     use_reject_system = True # True = removes rejects from trianing
         
-    date = datetime.datetime.now().strftime("%m_%d_%Y")
+    date = datetime.datetime.now().strftime("%m_%d_%Y_%H_%M_%S")
     output_dir = f'{output_dir}/export_{date}/'
     
     print("Exporting Data:")
     
-    make_dirs(output_dir, exist_ok = True)
+    make_dirs(output_dir)
     
     #Dirs
     image_csv_file = f'{parsed_database}ImageData.csv'
