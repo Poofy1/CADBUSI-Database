@@ -1,25 +1,6 @@
-import requests, random, time, torch, os
+import random, torch, os
 from PIL import Image
 
-# Need retry method becauyse labelbox servers are unreliable
-def get_with_retry(url, max_retries=5):
-    retries = 0
-    while retries < max_retries:
-        try:
-            response = requests.get(url)
-            if response.status_code == 200:
-                return response
-            else:
-                print(f"Failed to download mask image, status code: {response.status_code}")
-        except requests.exceptions.RequestException as e:
-            print(f"Request failed: {e}")
-        
-        # Sleep for a bit before retrying
-        time.sleep(2 * retries)
-        retries += 1
-    
-    # If we've exhausted all retries, return None
-    return None
 
 
 
