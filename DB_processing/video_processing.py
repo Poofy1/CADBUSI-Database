@@ -40,7 +40,7 @@ def ProcessVideoData(database_path):
     
     video_folder_path = f"{database_path}/videos/"
     input_file = f'{database_path}/VideoData.csv'
-    db_out = pd.read_csv(input_file)
+    db_out = read_csv(input_file)
 
     # Check if any new features are missing in db_out and add them
     new_features = ['crop_x', 'crop_y', 'crop_w', 'crop_h', 'description', 'area', 'laterality', 'orientation', 'clock_pos', 'nipple_dist']
@@ -108,7 +108,7 @@ def ProcessVideoData(database_path):
         db_to_process[column] = temp_df[column]
 
     db_out.update(db_to_process, overwrite=True)
-    db_out.to_csv(input_file,index=False)
+    save_data(db_out, input_file)
 
 
 def Video_Cleanup(database_path):
@@ -116,7 +116,7 @@ def Video_Cleanup(database_path):
     print("Video Data Clean Up")
     
     input_file = f'{database_path}/VideoData.csv'
-    db = pd.read_csv(input_file)
+    db = read_csv(input_file)
     
     #Replace unknown areas with breast
     db.loc[(db['area'] == 'unknown') | (db['area'].isna()), 'area'] = 'breast'
@@ -124,6 +124,6 @@ def Video_Cleanup(database_path):
     # Find crop ratio
     db['crop_aspect_ratio'] = db['crop_w'] / db['crop_h']
     
-    db.to_csv(input_file, index=False)
+    save_data(db, input_file)
 
 

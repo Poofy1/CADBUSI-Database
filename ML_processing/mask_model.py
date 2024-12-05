@@ -6,19 +6,29 @@ import torchvision
 from torchvision.models.detection import FasterRCNN
 from torchvision.models.detection.rpn import AnchorGenerator
 from torch.utils.data import Dataset, DataLoader
+from storage_adapter import *
 env = os.path.dirname(os.path.abspath(__file__))
 device = torch.device("cuda")
 
 def get_first_image_in_each_folder(video_folder_path):
     first_images = []
 
-    # Walk through the directory
-    for root, dirs, files in os.walk(video_folder_path):
-        # Sort the files and get the first image file
-        image_files = sorted([file for file in files if file.endswith('.png')])
-        if image_files:
-            first_image_file = image_files[0]
-            first_images.append(os.path.join(root, first_image_file))
+    # Get all PNG files in the directory
+    image_files = get_files_by_extension(video_folder_path, '.png')
+
+    # Sort the files and group them by directory
+    grouped_files = {}
+    for file_path in image_files:
+        directory = os.path.dirname(file_path)
+        if directory not in grouped_files:
+            grouped_files[directory] = []
+        grouped_files[directory].append(file_path)
+
+    # Get the first image from each directory
+    for directory in grouped_files:
+        if grouped_files[directory]:
+            first_image = sorted(grouped_files[directory])[0]
+            first_images.append(first_image)
 
     return first_images
 
@@ -59,7 +69,7 @@ class MyDatasetVideo(Dataset):
 
     def __getitem__(self, idx):
         img_name = os.path.join(self.root_dir, self.images[idx])
-        image = Image.open(img_name)
+        image = read_image(img_name, use_pil=True)
         preprocess = transforms.Compose([
             transforms.Grayscale(num_output_channels=1),
             transforms.ToTensor(),

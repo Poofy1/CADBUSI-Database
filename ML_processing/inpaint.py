@@ -4,6 +4,7 @@ from tqdm import tqdm
 import numpy as np
 import torch
 from PIL import Image
+from storage_adapter import *
 
 # Get the directory of the current script
 env = os.path.dirname(os.path.abspath(__file__))
@@ -57,7 +58,7 @@ def Inpaint_Dataset(csv_file_path, input_folder, tile_size=256, overlap=84, dila
     print("Inpainting Useful Caliper Images")
     
     # Load the CSV file
-    data = pd.read_csv(csv_file_path)
+    data = read_csv(csv_file_path)
     
     # Add 'Inpainted' column if not present in the CSV
     if 'Inpainted' not in data.columns:
@@ -80,7 +81,7 @@ def Inpaint_Dataset(csv_file_path, input_folder, tile_size=256, overlap=84, dila
         
         
 
-        original_image = cv2.imread(input_image_path)
+        original_image = read_image(input_image_path)
 
         height, width, _ = original_image.shape
         final_image = original_image.copy()
@@ -111,13 +112,13 @@ def Inpaint_Dataset(csv_file_path, input_folder, tile_size=256, overlap=84, dila
 
         #Replace image
         os.remove(input_image_path)
-        cv2.imwrite(input_image_path, final_image)
+        save_data(final_image, input_image_path)
 
         # Find the index of this row in the original DataFrame and update 'Inpainted'
         original_index = data[data['ImageName'] == row['ImageName']].index[0]
         data.loc[original_index, 'Inpainted'] = True
 
     # Save the updated DataFrame back to the CSV file
-    data.to_csv(csv_file_path, index=False)
+    save_data(data, csv_file_path)
 
 

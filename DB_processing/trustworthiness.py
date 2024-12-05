@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import ast
+from storage_adapter import *
 
 def safe_literal_eval(val):
     try:
@@ -17,7 +18,7 @@ def Find_Trust(database_path):
     # Read the CSV file
     csv_file = f'{database_path}/CaseStudyData.csv'
     
-    df = pd.read_csv(csv_file)
+    df = read_csv(csv_file)
 
     # Create a new 'trustworthiness' column
     df['trustworthiness'] = 1  # default to 1
@@ -60,4 +61,4 @@ def Find_Trust(database_path):
     df.loc[condition_BIRAD0 | condition_BIRAD6 | condition_nan, 'trustworthiness'] = 3
 
     # Save the DataFrame back to a CSV file
-    df.to_csv(csv_file, index=False)
+    save_data(df, csv_file)

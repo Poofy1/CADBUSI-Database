@@ -160,7 +160,7 @@ def process_single_video(row, video_folder_path, output_dir):
         # Iterate over all the images and crop them
         for image_name in all_images:
             image_path = os.path.join(folder_path, image_name)
-            image = cv2.imread(image_path)
+            image = read_image(image_path)
 
             # Check if the image was loaded properly
             if image is not None:
@@ -169,7 +169,7 @@ def process_single_video(row, video_folder_path, output_dir):
 
                 # Save the cropped image
                 output_path = os.path.join(video_output_dir, image_name)
-                cv2.imwrite(output_path, cropped_image)
+                save_data(cropped_image, output_path)
 
 
 def Crop_Videos(df, input_dir, output_dir):

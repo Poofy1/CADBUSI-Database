@@ -9,6 +9,7 @@ from torch.utils.data import DataLoader
 from torchvision.datasets import ImageFolder
 import torch.nn as nn
 from torch.utils.data import Dataset
+from storage_adapter import *
 warnings.filterwarnings('ignore')
 env = os.path.dirname(os.path.abspath(__file__))
 device = torch.device("cuda")
@@ -25,7 +26,7 @@ class MyDataset(Dataset):
 
     def __getitem__(self, idx):
         img_name = os.path.join(self.root_dir, self.images[idx])
-        image = Image.open(img_name)
+        image = read_image(img_name, use_pil=True)
         if self.transform:
             image = self.transform(image)
         return image, self.images[idx]  
@@ -70,7 +71,7 @@ def Find_Orientation(images_dir, model_name, csv_input, image_size=375):
         transforms.ToTensor(),
         transforms.Normalize([0.5], [0.5]),
     ])
-    db_out = pd.read_csv(csv_input)
+    db_out = read_csv(csv_input)
     if 'reparsed_orientation' not in db_out.columns:
         db_out['reparsed_orientation'] = False
     else:
@@ -121,4 +122,4 @@ def Find_Orientation(images_dir, model_name, csv_input, image_size=375):
 
     db_out.update(db_to_process, overwrite=True)
 
-    db_out.to_csv(csv_input, index=False)
+    save_data(db_out, csv_input)

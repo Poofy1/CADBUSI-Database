@@ -6,6 +6,7 @@ from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import easyocr
 import threading
+from storage_adapter import *
 thread_local = threading.local()
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -208,54 +209,11 @@ def find_mixed_lateralities( db ):
 
 
 
-# DARKNESS
-######################################################
-
-
-
-def process_single_darkness(row, image_folder_path):
-    image_file = row['ImageName']
-    
-    try: 
-        x = row['RegionLocationMinX0']
-        y = row['RegionLocationMinY0']
-        w = row['RegionLocationMaxX1'] - x
-        h = row['RegionLocationMaxY1'] - y
-    except KeyError:
-        return (image_file, None)
-
-    with Image.open(os.path.join(image_folder_path, image_file)).convert('L') as image:
-        
-        new_size = (800, 600)  # or any other size
-        image = image.resize(new_size)
-        x, y, w, h = int(x * new_size[0] / image.size[0]), int(y * new_size[1] / image.size[1]), int(w * new_size[0] / image.size[0]), int(h * new_size[1] / image.size[1])
-
-        image_np = np.array(image)
-        img_us = image_np[y:y+h, x:x+w]
-        img_us_gray, _ = make_grayscale(img_us)
-        _, img_us_bw = cv2.threshold(img_us_gray, 20, 255, cv2.THRESH_BINARY)
-        num_dark = np.sum(img_us_bw == 0)
-    
-    return (image_file, 100 * num_dark / (w * h))
-
-def get_darkness(image_folder_path, df):
-    darknesses = []
-    with ThreadPoolExecutor(max_workers=os.cpu_count()//2) as executor:  # Reduced number of threads
-        futures = {executor.submit(process_single_darkness, row, image_folder_path): row for _, row in df.iterrows()}
-        with tqdm(total=len(futures), miniters=50) as pbar:  # Update progress bar less frequently
-            for future in as_completed(futures):
-                result = future.result()
-                if result is not None:
-                    darknesses.append(result)
-                pbar.update()
-
-    return darknesses
 
 
 
 # ULTRASOUND MASK
 ######################################################
-
 
 
 
@@ -272,86 +230,124 @@ def find_top_edge_points(largest_contour, vertical_range):
 
     return top_left, top_right
 
-def process_single_image(image_path):
-    image_name = os.path.basename(image_path)  # Get image name from image path
-    
-    image = cv2.imread(image_path, 0)  # Load grayscale image directly
-
-    # Calculate the start and end row indices for the bottom quarter of the image
+def process_crop_region(image):
     start_row = int(3 * image.shape[0] / 4)
     end_row = image.shape[0]
     margin = 10
     
-    # Remove caliper box
     reader_thread = get_reader()
-        
     output = reader_thread.readtext(image[start_row:end_row, :])
+    
     for detection in output:
         top_left = tuple(map(int, detection[0][0]))
         bottom_right = tuple(map(int, detection[0][2]))
         top_left = (0, max(0, top_left[1] + start_row - margin))
         bottom_right = (image.shape[1], min(image.shape[0], bottom_right[1] + start_row + margin))
         cv2.rectangle(image, top_left, bottom_right, (0, 0, 0), -1)
-        
-        
-    # Create binary mask of nonzero pixels
-    _, binary_mask = cv2.threshold(image, 0, 255, cv2.THRESH_BINARY)
     
+    _, binary_mask = cv2.threshold(image, 0, 255, cv2.THRESH_BINARY)
     kernel = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=np.uint8)
     eroded_mask = cv2.erode(binary_mask, kernel, iterations=5)
 
-    # Find contours and get the largest one
     contours, _ = cv2.findContours(eroded_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not contours:  # Check if contours is empty
-        return None
+    if not contours:
+        return None, None
     
     largest_contour = max(contours, key=cv2.contourArea)
-    
     convex_hull = cv2.convexHull(largest_contour)
-    
-    # Use the function to find the top edge points
     top_left, top_right = find_top_edge_points(convex_hull, vertical_range=20)
 
-    # Now you have the top left and top right points, use them to find x, y, w, h
     x = top_left[0]
     y = top_left[1]
     w = top_right[0] - x
-    h = max(convex_hull[:, 0, 1]) - y  # Bottom y-coordinate - top y-coordinate
-
-    return (image_name, (x, y, w, h))
-
-
-def get_ultrasound_region(image_folder_path, db_to_process):
-    # Construct image paths for only the new data
-    image_paths = [os.path.join(image_folder_path, filename) for filename in db_to_process['ImageName']]
-
-    # Collect image data in list
-    image_data = []
+    h = max(convex_hull[:, 0, 1]) - y
     
-    # Thread pool and TQDM
-    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-        futures = {executor.submit(process_single_image, image_path): image_path for image_path in image_paths}
-        with tqdm(total=len(futures)) as pbar:
+    return (x, y, w, h)
+
+# DARKNESS
+######################################################
+
+
+def process_darkness(image, row):
+    try:
+        region_x = row['RegionLocationMinX0']
+        region_y = row['RegionLocationMinY0']
+        region_w = row['RegionLocationMaxX1'] - region_x
+        region_h = row['RegionLocationMaxY1'] - region_y
+    except KeyError:
+        return None
+
+    # Convert to PIL Image for consistent resizing
+    pil_image = Image.fromarray(image)
+    new_size = (800, 600)
+    pil_image = pil_image.resize(new_size)
+    
+    # Calculate scaled coordinates
+    scaled_x = int(region_x * new_size[0] / pil_image.size[0])
+    scaled_y = int(region_y * new_size[1] / pil_image.size[1])
+    scaled_w = int(region_w * new_size[0] / pil_image.size[0])
+    scaled_h = int(region_h * new_size[1] / pil_image.size[1])
+
+    # Convert back to numpy for darkness calculation
+    image_np = np.array(pil_image)
+    img_us = image_np[scaled_y:scaled_y+scaled_h, scaled_x:scaled_x+scaled_w]
+    img_us_gray, _ = make_grayscale(img_us)
+    _, img_us_bw = cv2.threshold(img_us_gray, 20, 255, cv2.THRESH_BINARY)
+    darkness = 100 * np.sum(img_us_bw == 0) / (scaled_w * scaled_h)
+    
+    return darkness
+
+######################################################
+
+def process_single_image_combined(row, image_folder_path):
+    image_name = row['ImageName']
+    image_path = os.path.join(image_folder_path, image_name)
+    
+    # Read image and convert to grayscale
+    image = read_image(image_path)
+    if image is None:
+        return None, None
+        
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    # Process ultrasound region
+    x, y, w, h = process_crop_region(image)
+    
+    # Process darkness
+    darkness = process_darkness(image, row)
+
+    return (image_name, (x, y, w, h)), (image_name, darkness)
+
+def process_images_combined(image_folder_path, db_to_process):
+    image_masks = []
+    darknesses = []
+    
+    with ThreadPoolExecutor(max_workers=os.cpu_count()//2) as executor:
+        futures = {executor.submit(process_single_image_combined, row, image_folder_path): row 
+                  for _, row in db_to_process.iterrows()}
+        
+        with tqdm(total=len(futures), miniters=50) as pbar:
             for future in as_completed(futures):
                 result = future.result()
                 if result is not None:
-                    image_data.append(result)
+                    mask_result, darkness_result = result
+                    if mask_result is not None:
+                        image_masks.append(mask_result)
+                    if darkness_result is not None:
+                        darknesses.append(darkness_result)
                 pbar.update()
 
-    return image_data
-
-
-
+    return image_masks, darknesses
 
 # OCR
 ######################################################
 
 
-def process_image(image_file, description_mask, image_folder_path, reader, kw_list):
+def ocr_image(image_file, description_mask, image_folder_path, reader, kw_list):
     reader_thread = get_reader()
     
     try:
-        image = Image.open(os.path.join(image_folder_path, image_file)).convert('L')
+        image = read_image(os.path.join(image_folder_path, image_file), use_pil=True).convert('L')
     except:
         return [image_file, None]
     
@@ -396,10 +392,9 @@ def process_image(image_file, description_mask, image_folder_path, reader, kw_li
     return [image_file, text]
 
 
-
 def get_OCR(image_folder_path, description_masks):
     with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-        futures = {executor.submit(process_image, image_file, description_mask, image_folder_path, reader, description_kw): image_file for image_file, description_mask in description_masks}
+        futures = {executor.submit(ocr_image, image_file, description_mask, image_folder_path, reader, description_kw): image_file for image_file, description_mask in description_masks}
         progress = tqdm(total=len(futures), desc='')
 
         # Initialize dictionary to store descriptions
@@ -428,7 +423,7 @@ def Perform_OCR(database_path):
         
     image_folder_path = f"{database_path}/images/"
     input_file = f'{database_path}/ImageData.csv'
-    db_out = pd.read_csv(input_file)
+    db_out = read_csv(input_file)
 
     # Check if any new features are missing in db_out and add them
     new_features = ['labeled', 'crop_x', 'crop_y', 'crop_w', 'crop_h', 'description', 'has_calipers', 'darkness', 'area', 'laterality', 'orientation', 'clock_pos', 'nipple_dist']
@@ -448,17 +443,15 @@ def Perform_OCR(database_path):
     db_to_process = db_out[db_out['processed'] != True]
     db_to_process['processed'] = False
     
-    print("Finding Darkness")
-    darknesses = get_darkness(image_folder_path, db_to_process)
     
     print("Finding OCR Masks")
     _, description_masks = find_masks(image_folder_path, 'mask_model', db_to_process, 1920, 1080)
+    
+    print("Finding Darkness and Image Masks")
+    image_masks, darknesses = process_images_combined(image_folder_path, db_to_process)
 
     print("Performing OCR")  
     descriptions = get_OCR(image_folder_path, description_masks)
-
-    print("Finding Image Masks")
-    image_masks = get_ultrasound_region(image_folder_path, db_to_process)
     
     print("Finding Calipers")
     has_calipers = find_calipers(image_folder_path, 'caliper_model', db_to_process)
@@ -491,6 +484,6 @@ def Perform_OCR(database_path):
         db_to_process[column] = temp_df[column]
         
     db_out.update(db_to_process, overwrite=True)
-    db_out.to_csv(input_file,index=False)
+    save_data(db_out, input_file)
 
 

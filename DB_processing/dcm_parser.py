@@ -6,6 +6,7 @@ import io
 from tqdm import tqdm
 from highdicom.io import ImageFileReader
 import warnings, logging, cv2
+from storage_adapter import *
 logging.getLogger().setLevel(logging.ERROR)
 warnings.filterwarnings('ignore', category=UserWarning, message='.*Invalid value for VR UI.*')
 env = os.path.dirname(os.path.abspath(__file__))
@@ -65,18 +66,6 @@ def generate_hash(data):
     return sha256_hash.hexdigest()
 
 
-
-def get_files_by_extension(directory, extension):
-    file_paths = []
-
-    for root, dirs, files in os.walk(directory):
-        for file in files:
-            if file.endswith(extension):
-                file_paths.append(os.path.join(root, file))
-
-    return file_paths
-
-
 def parse_video_data(dcm, current_index, parsed_database):
 
     data_dict = {}
@@ -102,7 +91,7 @@ def parse_video_data(dcm, current_index, parsed_database):
     
     #create video folder
     video_path = f"{data_dict.get('PatientID', '')}_{data_dict.get('AccessionNumber', '')}_{current_index}"
-    os.makedirs(f"{parsed_database}/videos/{video_path}/", exist_ok = True)
+    make_dirs(f"{parsed_database}/videos/{video_path}/")
     
     #get image frames
     image_count = 0
@@ -121,7 +110,7 @@ def parse_video_data(dcm, current_index, parsed_database):
             
             image_name = f"{data_dict.get('PatientID', '')}_{data_dict.get('AccessionNumber', '')}_{current_index}_{image_count}.png"
             
-            cv2.imwrite(f"{parsed_database}/videos/{video_path}/{image_name}", frame)
+            save_data(frame, f"{parsed_database}/videos/{video_path}/{image_name}")
             
             image_count += 1
 
@@ -146,9 +135,7 @@ def parse_single_dcm(dcm, current_index, parsed_database):
     region_count = 0
     
     # Read the DICOM file
-    with open(dcm, 'rb') as f:
-        dcm_data = f.read()
-        
+    dcm_data = read_binary(dcm)
     dataset = pydicom.dcmread(io.BytesIO(dcm_data))
 
     for elem in dataset:
@@ -192,7 +179,7 @@ def parse_single_dcm(dcm, current_index, parsed_database):
             data_dict['PhotometricInterpretation'] = 'MONOCHROME2_OVERRIDE'
 
     image_name = f"{data_dict.get('PatientID', '')}_{data_dict.get('AccessionNumber', '')}_{current_index}.png"
-    cv2.imwrite(f"{parsed_database}/images/{image_name}", im)
+    save_data(im, f"{parsed_database}/images/{image_name}")
 
     # Add custom data
     data_dict['DataType'] = 'image'
@@ -207,24 +194,17 @@ def parse_single_dcm(dcm, current_index, parsed_database):
 
 
 
-def parse_dcm_files(dcm_files_list, parsed_database):
+def parse_files(dcm_files_list, parsed_database):
     print("Parsing DCM Data")
 
     # Load the current index from a file
     index_file = os.path.join(parsed_database, "IndexCounter.txt")
-    if os.path.isfile(index_file):
-        with open(index_file, "r") as file:
-            current_index = int(file.read())
+    if file_exists(index_file):
+        content = read_txt(index_file)
+        if content:
+            current_index = int(content)
     else:
         current_index = 0
-
-    # Load existing parsed files from csv
-    image_csv_file = f'{parsed_database}ImageData.csv'
-    if os.path.isfile(image_csv_file):
-        existing_df = pd.read_csv(image_csv_file)
-        existing_files = set(existing_df['FileName'].values)
-    else:
-        existing_files = set()
 
     print(f'New Dicom Files: {len(dcm_files_list)}')
 
@@ -239,8 +219,8 @@ def parse_dcm_files(dcm_files_list, parsed_database):
                 print(f'An exception occurred: {exc}')
 
         # Save index
-        with open(index_file, "w") as file:
-            file.write(str(current_index + len(data_list)))
+        new_index = str(current_index + len(data_list))
+        save_data(new_index, index_file)
 
     # Create a DataFrame from the list of dictionaries
     df = pd.DataFrame(data_list)
@@ -257,18 +237,19 @@ def Parse_Dicom_Files(database_path, anon_location, raw_storage_database, data_r
     breast_csv_file = f'{database_path}BreastData.csv'
 
     #Create database dir
-    os.makedirs(database_path, exist_ok = True)
-    os.makedirs(f'{database_path}/images/', exist_ok = True)
-    os.makedirs(f'{database_path}/videos/', exist_ok = True)
+    make_dirs(database_path)
+    make_dirs(f'{database_path}/images/')
+    make_dirs(f'{database_path}/videos/')
     
     # Load the list of already parsed files
     parsed_files_list = []
     parsed_files_list_file = f"{database_path}/ParsedFiles.txt"
-    if os.path.exists(parsed_files_list_file):
-        with open(parsed_files_list_file, 'r') as file:
-            parsed_files_list = file.read().splitlines()
+    if file_exists(parsed_files_list_file):
+        content = read_txt(parsed_files_list_file)
+        if content:
+            parsed_files_list = content.splitlines()
 
-    # Unzip input data and get every Dicom File
+    # Get every Dicom File
     dcm_files_list = get_files_by_extension(raw_storage_database, '.dcm')
     print(f'Total Dicom Archive: {len(dcm_files_list)}')
 
@@ -280,11 +261,11 @@ def Parse_Dicom_Files(database_path, anon_location, raw_storage_database, data_r
     
 
     if len(dcm_files_list) <= 0:
-        UpdateAnonFile(anon_location)
+        UpdateAnonFile(anon_location) # Not Tested
         return
     
     # Get DCM Data
-    image_df = parse_dcm_files(dcm_files_list, database_path)
+    image_df = parse_files(dcm_files_list, database_path)
     #image_df.to_csv(f'{database_path}Debug.csv', index=False)
     image_df = image_df.rename(columns={'PatientID': 'Patient_ID'})
     image_df = image_df.rename(columns={'AccessionNumber': 'Accession_Number'})
@@ -337,12 +318,11 @@ def Parse_Dicom_Files(database_path, anon_location, raw_storage_database, data_r
     
     # Update the list of parsed files and save it
     parsed_files_list.extend(dcm_files_list)
-    with open(parsed_files_list_file, 'w') as file:
-        for item in parsed_files_list:
-            file.write('%s\n' % item)
+    content = '\n'.join(parsed_files_list)  # Convert list to string with newlines
+    save_data(content, parsed_files_list_file)
 
     # Find all csv files and combine into df
-    csv_df = pd.read_csv(anon_location)
+    csv_df = read_csv(anon_location)
     
     # group the dataframe by Patient_ID and Accession_Number
     csv_df = csv_df.sort_values('Patient_ID')
@@ -481,10 +461,10 @@ def Parse_Dicom_Files(database_path, anon_location, raw_storage_database, data_r
         breast_csv = breast_csv.reset_index(drop=True)
 
     # Export the DataFrames to CSV files
-    image_combined_df.to_csv(image_csv_file, index=False)
-    video_df.to_csv(video_csv_file, index=False)
-    csv_df.to_csv(case_study_csv_file, index=False)
-    breast_csv.to_csv(breast_csv_file, index=False)
+    save_data(image_combined_df, image_csv_file)
+    save_data(video_df, video_csv_file)
+    save_data(csv_df, case_study_csv_file)
+    save_data(breast_csv, breast_csv_file)
     
     
     
@@ -506,13 +486,13 @@ def UpdateAnonFile(anon_location):
     case_study_csv_file = f'{parsed_database}CaseStudyData.csv' 
     breast_csv_file = f'{parsed_database}BreastData.csv'
     
-    if not os.path.isfile(case_study_csv_file):
+    if not file_exists(case_study_csv_file):
         return
     
     
     # Case Data
-    existing_case_study_df = pd.read_csv(case_study_csv_file)
-    csv_df = pd.read_csv(anon_location)
+    existing_case_study_df = read_csv(case_study_csv_file)
+    csv_df = read_csv(anon_location)
     
     # group the dataframe by Patient_ID and Accession_Number
     csv_df = csv_df.sort_values('Patient_ID')
@@ -610,5 +590,5 @@ def UpdateAnonFile(anon_location):
     
     existing_case_study_df = existing_case_study_df.drop_duplicates(subset=['Patient_ID', 'Accession_Number'], keep='last')
     
-    breast_csv.to_csv(breast_csv_file, index=False)
-    existing_case_study_df.to_csv(case_study_csv_file , index=False)
+    save_data(breast_csv, breast_csv_file)
+    save_data(existing_case_study_df, case_study_csv_file)

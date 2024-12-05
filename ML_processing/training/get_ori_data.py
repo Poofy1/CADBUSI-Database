@@ -1,7 +1,6 @@
 import os, json
 import labelbox, requests, os
 import pandas as pd
-from PIL import Image
 from training_util import *
 env = os.path.dirname(os.path.abspath(__file__))
 

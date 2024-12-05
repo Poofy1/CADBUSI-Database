@@ -1,5 +1,5 @@
 pandas
-Pillow
+Pillow<10.0.0 # REQUIRED VER
 tqdm
 opencv-contrib-python==4.7.0.68
 numpy

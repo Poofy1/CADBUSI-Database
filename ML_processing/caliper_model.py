@@ -5,7 +5,7 @@ from torchvision import transforms
 from tqdm import tqdm
 import warnings
 from torch.utils.data import DataLoader
-from torchvision.datasets import ImageFolder
+from storage_adapter import *
 from torch.utils.data import Dataset
 warnings.filterwarnings('ignore')
 env = os.path.dirname(os.path.abspath(__file__))
@@ -23,7 +23,7 @@ class MyDataset(Dataset):
 
     def __getitem__(self, idx):
         img_name = os.path.join(self.root_dir, self.images[idx])
-        image = Image.open(img_name)
+        image = read_image(img_name, use_pil=True)
         if self.transform:
             image = self.transform(image)
         return image, self.images[idx]  

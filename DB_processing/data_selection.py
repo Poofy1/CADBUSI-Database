@@ -185,7 +185,7 @@ def Remove_Green_Images(database_dir):
     input_file = f'{database_dir}/ImageData.csv'
     
     # Load the CSV file into a pandas DataFrame
-    df = pd.read_csv(input_file)
+    df = read_csv(input_file)
 
     image_folder_path = f"{database_dir}/images/"
     
@@ -198,7 +198,7 @@ def Remove_Green_Images(database_dir):
         image_path = os.path.join(image_folder_path, image_name)
         
         # Read the image using OpenCV
-        img = cv2.imread(image_path)
+        img = read_image(image_path)
 
         # If the image is RGB
         if img is not None and len(img.shape) == 3:
@@ -217,15 +217,15 @@ def Remove_Green_Images(database_dir):
 
     # Drop rows from the DataFrame
     df = df.drop(drop_indices)
-    df.to_csv(input_file, index=False)  # Save the updated DataFrame back to the CSV
+    save_data(df, input_file)  # Save the updated DataFrame back to the CSV
     
 
 def Parse_Data(database_path, only_labels):
     input_file = f'{database_path}/ImageData.csv'
     case_file = f'{database_path}/CaseStudyData.csv'
     image_folder_path = f"{database_path}/images/"
-    db_out = pd.read_csv(input_file)
-    case_data = pd.read_csv(case_file)
+    db_out = read_csv(input_file)
+    case_data = read_csv(case_file)
     
     # Check if 'processed' column exists, if not create it
     if 'processed' not in db_out.columns:
@@ -271,7 +271,7 @@ def Parse_Data(database_path, only_labels):
 
     if 'latIsLeft' in db_out.columns:
         db_out = db_out.drop(columns=['latIsLeft'])
-    db_out.to_csv(input_file, index=False)
+    save_data(db_out, input_file)
     
     
 tqdm.pandas()
@@ -279,7 +279,7 @@ tqdm.pandas()
 def Rename_Images(database_path):
     input_file = f'{database_path}/ImageData.csv'
     image_folder_path = f"{database_path}/images/"
-    df = pd.read_csv(input_file)
+    df = read_csv(input_file)
     
     print("Renaming Images With Laterality")
     
@@ -315,12 +315,12 @@ def Rename_Images(database_path):
         new_image_path = os.path.join(image_folder_path, new_image_name)
     
         # If the new image name already exists, remove the old image path
-        if os.path.exists(new_image_path):
-            os.remove(old_image_path)
+        if file_exists(new_image_path):
+            delete_file(old_image_path)
             return None
 
         # Rename the image file
-        os.rename(old_image_path, new_image_path)
+        rename_file(old_image_path, new_image_path)
 
         # Update the dictionary for the next instance
         instance_dict[key] = instance_number + 1
@@ -331,7 +331,7 @@ def Rename_Images(database_path):
     df.dropna(subset=['ImageName'], inplace=True)
 
     # Save the updated DataFrame to the same CSV file
-    df.to_csv(input_file, index=False)
+    save_data(df, input_file)
 
 
 
@@ -342,7 +342,7 @@ def Remove_Duplicate_Data(database_path):
     image_folder_path = f"{database_path}/images/"
     
     # Read the CSV file
-    df = pd.read_csv(input_file)
+    df = read_csv(input_file)
     
     # Identify rows with duplicate 'DicomHash' values, except for the last occurrence
     duplicates = df[df.duplicated(subset='DicomHash', keep='last')]
@@ -354,10 +354,10 @@ def Remove_Duplicate_Data(database_path):
     df.drop_duplicates(subset='DicomHash', keep='last', inplace=True)
     
     # Save the cleaned dataframe back to the CSV file (optional)
-    df.to_csv(input_file, index=False)
+    save_data(df, input_file)
     
     # Delete the duplicate images
     for image_name in tqdm(duplicate_image_names):
         image_path = os.path.join(image_folder_path, image_name)
-        if os.path.exists(image_path):
-            os.remove(image_path)
+        if file_exists(image_path):
+            delete_file(image_path)
