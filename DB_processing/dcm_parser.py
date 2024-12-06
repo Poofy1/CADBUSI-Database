@@ -67,7 +67,6 @@ def generate_hash(data):
 
 
 def parse_video_data(dcm, current_index, parsed_database):
-
     data_dict = {}
     dataset = pydicom.dcmread(dcm, stop_before_pixels=True)
     
@@ -97,11 +96,10 @@ def parse_video_data(dcm, current_index, parsed_database):
     image_count = 0
     
     with ImageFileReader(dcm) as image:
-        # Calculate the index of the middle frame
-        middle_frame_index = image.number_of_frames // 2
-
-        # Save the first and middle frames
-        for i in [0, middle_frame_index]:
+        total_frames = image.number_of_frames
+        
+        # Save every 4th frame
+        for i in range(0, total_frames, 4):
             frame = image.read_frame(i, correct_color=False)
             
             # Convert to grayscale if the frame is not already grayscale
@@ -118,7 +116,7 @@ def parse_video_data(dcm, current_index, parsed_database):
     data_dict['DataType'] = 'video'
     data_dict['FileName'] = os.path.basename(dcm)
     data_dict['ImagesPath'] = video_path
-    #data_dict['SavedFrames'] = image_count
+    data_dict['SavedFrames'] = image_count
     data_dict['DicomHash'] = generate_hash(binary_data)
     
     return data_dict
@@ -284,7 +282,7 @@ def Parse_Dicom_Files(database_path, anon_location, raw_storage_database, data_r
         video_df = video_df[['Patient_ID', 
                 'Accession_Number', 
                 'ImagesPath',
-                #'SavedFrames',
+                'SavedFrames',
                 'RegionSpatialFormat', 
                 'RegionDataType', 
                 'RegionLocationMinX0', 
