@@ -12,6 +12,7 @@ from DB_processing.export import Export_Database
 from DB_processing.dcm_parser import Parse_Dicom_Files
 from DB_processing.video_processing import ProcessVideoData, Video_Cleanup
 from ML_processing.inpaint import Inpaint_Dataset
+from ML_processing.inpaint_N2N import Inpaint_Dataset_N2N
 from ML_processing.orientation_detection import Find_Orientation
 env = os.path.dirname(os.path.abspath(__file__))
 from storage_adapter import * 
@@ -75,7 +76,8 @@ if __name__ == '__main__':
         user_input = input("Continue with Data Cleaning step (Part 2/2)? (y/n): ")
         if user_input.lower() == "y":
             Parse_Data(CONFIG["DATABASE_DIR"], only_labels = False)
-            Inpaint_Dataset(f'{CONFIG["DATABASE_DIR"]}/ImageData.csv', f'{CONFIG["DATABASE_DIR"]}/images/')
+            #Inpaint_Dataset(f'{CONFIG["DATABASE_DIR"]}/ImageData.csv', f'{CONFIG["DATABASE_DIR"]}/images/') # OLD and SLOW
+            Inpaint_Dataset_N2N(f'{CONFIG["DATABASE_DIR"]}/ImageData.csv', f'{CONFIG["DATABASE_DIR"]}/images/')
             Rename_Images(CONFIG["DATABASE_DIR"])
             
         user_input = input("Process Video Data? (y/n): ")
