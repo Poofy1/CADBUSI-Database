@@ -10,7 +10,21 @@ def modify_keys(dictionary):
     return modified_dictionary
 
 
-def get_ultrasound_region(image_folder_path, db_to_process):
+def single_video_region(image_path):
+    image_name = os.path.basename(image_path)
+    
+    # Read image and convert to grayscale
+    image = read_image(image_path)
+    if image is None:
+        return None, None
+        
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    
+    x, y, w, h = process_crop_region(image)
+    
+    return image_name, (x, y, w, h)
+
+def get_video_ultrasound_region(image_folder_path, db_to_process):
     # Construct image paths for only the new data
     video_folders = [os.path.join(image_folder_path, filename) for filename in db_to_process['ImagesPath']]
     
@@ -22,7 +36,7 @@ def get_ultrasound_region(image_folder_path, db_to_process):
         futures = {}
         for video_folder in video_folders:
             image_paths = get_first_image_in_each_folder(video_folder)
-            futures.update({executor.submit(process_single_image, image_path): image_path for image_path in image_paths})
+            futures.update({executor.submit(single_video_region, image_path): image_path for image_path in image_paths})
         
         with tqdm(total=len(futures)) as pbar:
             for future in as_completed(futures):
@@ -59,18 +73,16 @@ def ProcessVideoData(database_path):
     db_to_process['processed'] = False
     
     print("Finding OCR Masks")
-    video_folders = [os.path.join(video_folder_path, filename) for filename in db_to_process['ImagesPath']]
-    _, description_masks = find_masks(video_folder_path, 'mask_model', db_to_process, 1920, 1080, video_format=True, video_folders=video_folders)
+    _, description_masks = find_masks(video_folder_path, 'mask_model', db_to_process, 1920, 1080, video_format=True)
 
     print("Performing OCR")
     first_images = get_first_image_in_each_folder(video_folder_path)
 
     # Separate image names and description masks into their own lists
-    image_names = [dm[0] for dm in description_masks]
     description_masks_coords = [dm[1] for dm in description_masks]
 
     with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-        futures = {executor.submit(process_image, image_file, description_mask, video_folder_path, reader, description_kw): image_file for image_file, description_mask in zip(first_images, description_masks_coords)}
+        futures = {executor.submit(ocr_image, image_file, description_mask, video_folder_path, reader, description_kw): image_file for image_file, description_mask in zip(first_images, description_masks_coords)}
         progress = tqdm(total=len(futures), desc='')
 
         # Initialize dictionary to store descriptions
@@ -84,7 +96,7 @@ def ProcessVideoData(database_path):
         progress.close()
 
     print("Finding Image Masks")
-    image_masks_dict = get_ultrasound_region(video_folder_path, db_to_process)
+    image_masks_dict = get_video_ultrasound_region(video_folder_path, db_to_process)
     
     db_to_process['processed'] = True
     
