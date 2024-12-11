@@ -514,12 +514,15 @@ def Export_Database(output_dir, val_split, parsed_database, labelbox_path, repar
     # Create trainable csv data
     train_data = format_data(breast_df, image_df, case_study_df, num_of_tests)
     
-    
+    # Create a mapping of (Accession_Number, laterality) to list of ImagesPath
+    video_paths = video_df.groupby(['Accession_Number', 'laterality'])['ImagesPath'].agg(list).to_dict()
+    train_data['VideoPaths'] = train_data.apply(lambda row: video_paths.get((row['Accession_Number'], row['Breast']), []), axis=1)
+
     # Write the filtered dataframes to CSV files in the output directory
-    save_data(breast_df, os.path.join(output_dir, 'BreastData.csv'))
-    save_data(case_study_df, os.path.join(output_dir, 'CaseStudyData.csv'))
-    save_data(labeled_df, os.path.join(output_dir, 'LabeledData.csv'))
-    save_data(video_df, os.path.join(output_dir, 'VideoData.csv'))
-    save_data(image_df, os.path.join(output_dir, 'ImageData.csv'))
+    #save_data(breast_df, os.path.join(output_dir, 'BreastData.csv'))
+    #save_data(casse_study_df, os.path.join(output_dir, 'CaseStudyData.csv'))
+    #save_data(labeled_df, os.path.join(output_dir, 'LabeledData.csv'))
+    #save_data(video_df, os.path.join(output_dir, 'VideoData.csv'))
+    #save_data(image_df, os.path.join(output_dir, 'ImageData.csv'))
     save_data(train_data, os.path.join(output_dir, 'TrainData.csv'))
     save_data(instance_data, os.path.join(output_dir, 'InstanceData.csv'))

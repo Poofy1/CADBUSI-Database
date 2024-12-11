@@ -251,8 +251,9 @@ def Parse_Dicom_Files(database_path, anon_location, raw_storage_database, data_r
     dcm_files_list = get_files_by_extension(raw_storage_database, '.dcm')
     print(f'Total Dicom Archive: {len(dcm_files_list)}')
 
-    # Filter out the already parsed files
-    dcm_files_list = dcm_files_list[data_range[0]:data_range[1]]
+    # Apply data range only if it's specified
+    if data_range and len(data_range) == 2:
+        dcm_files_list = dcm_files_list[data_range[0]:data_range[1]]
     parsed_files_set = set(parsed_files_list)
     dcm_files_list = [file for file in dcm_files_list if file not in parsed_files_set]
     
@@ -264,13 +265,16 @@ def Parse_Dicom_Files(database_path, anon_location, raw_storage_database, data_r
     
     # Get DCM Data
     image_df = parse_files(dcm_files_list, database_path)
-    #image_df.to_csv(f'{database_path}Debug.csv', index=False)
+    save_data(image_df.to_csv(index=False), f'{database_path}/Intermediate_Dicom.csv')
     image_df = image_df.rename(columns={'PatientID': 'Patient_ID'})
     image_df = image_df.rename(columns={'AccessionNumber': 'Accession_Number'})
     
     #Remove missing IDs
     original_row_count = len(image_df)
-    image_df = image_df.dropna(subset=['Patient_ID']).dropna(subset=['Accession_Number'])
+    # Handle both NaN and empty strings
+    image_df['Patient_ID'] = image_df['Patient_ID'].replace('', np.nan)
+    image_df['Accession_Number'] = image_df['Accession_Number'].replace('', np.nan)
+    image_df = image_df.dropna(subset=['Patient_ID', 'Accession_Number'])
     new_row_count = len(image_df)
     removed_rows = original_row_count - new_row_count
     print(f"Removed {removed_rows} rows with empty values.")
@@ -375,11 +379,16 @@ def Parse_Dicom_Files(database_path, anon_location, raw_storage_database, data_r
     
     #breast_csv.to_csv(f'{env}/breast1.csv', index=False)
 
+
     for idx, row in csv_df.iterrows():
-        if isinstance(row['Biopsy_Laterality'], str):
+        # Check if Biopsy_Laterality is a list-like object
+        if isinstance(row['Biopsy_Laterality'], (list, np.ndarray)):
             for i, laterality in enumerate(row['Biopsy_Laterality']):
                 if isinstance(laterality, str):
-                    matching_rows = (breast_csv['Patient_ID'] == row['Patient_ID']) & (breast_csv['Accession_Number'] == row['Accession_Number']) & (breast_csv['Breast'] == laterality.upper())
+                    matching_rows = (breast_csv['Patient_ID'] == row['Patient_ID']) & \
+                                (breast_csv['Accession_Number'] == row['Accession_Number']) & \
+                                (breast_csv['Breast'] == laterality.upper())
+                    
                     if isinstance(row['Biopsy'], list) and len(row['Biopsy']) > i:
                         biopsy_result = biopsy_mapping.get(row['Biopsy'][i], 'unknown')
                         if biopsy_result == 'malignant':
@@ -388,7 +397,7 @@ def Parse_Dicom_Files(database_path, anon_location, raw_storage_database, data_r
                             breast_csv.loc[matching_rows, 'Has_Benign'] = True
                         elif biopsy_result == 'unknown':
                             breast_csv.loc[matching_rows, 'Has_Unknown'] = True
-                    
+
                     if isinstance(row['Path_Desc'], list) and len(row['Path_Desc']) > i:
                         path_desc = row['Path_Desc'][i]
                         if pd.notna(breast_csv.loc[matching_rows, 'Path_Desc'].iloc[0]):
