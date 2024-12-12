@@ -332,14 +332,36 @@ def format_data(breast_data, image_data, case_data, num_of_tests):
     return data
 
 
-
+def generate_video_images_csv(video_df, root_dir):
+    """
+    Creates a CSV containing all video image paths.
+    """
+    video_image_data = []
+    
+    for _, row in tqdm(video_df.iterrows(), total=len(video_df), desc="Processing video folders"):
+        video_folder = row['ImagesPath']
+        video_dir = os.path.join(root_dir, 'videos', video_folder).replace('\\', '/')
+        
+        video_files = list_files(video_dir) 
+        
+        if video_files:
+            video_image_data.append({
+                'accession_number': row['Accession_Number'],
+                'video_name': video_folder,
+                'images': video_files
+            })
+    
+    # Create DataFrame and save
+    video_images_df = pd.DataFrame(video_image_data)
+    video_images_df['images'] = video_images_df['images'].apply(str)  # Convert lists to string
+    return video_images_df
     
 def Export_Database(output_dir, val_split, parsed_database, labelbox_path, reparse_images = True, trust_max = 2, num_of_tests = 10):
     #Debug Tools
     KnownInstancesOnly = False # When true it only exports images that have a instance label
     OnlyOneLesions = True # Only exports Breast Cases with lesion count of 1
     use_reject_system = True # True = removes rejects from trianing
-        
+    
     date = datetime.datetime.now().strftime("%m_%d_%Y_%H_%M_%S")
     output_dir = f'{output_dir}/export_{date}/'
     
@@ -415,18 +437,22 @@ def Export_Database(output_dir, val_split, parsed_database, labelbox_path, repar
     if KnownInstancesOnly:
         # Filter image_df to only include instances present in instance_data
         image_df = image_df[image_df['ImageName'].isin(instance_data['ImageName'])]
+        video_df = video_df[video_df['ImageName'].isin(instance_data['ImageName'])]
     
     #Remove bad aspect ratios
     min_aspect_ratio = 0.5
     max_aspect_ratio = 4.0
     image_df = image_df[(image_df['crop_aspect_ratio'] >= min_aspect_ratio) & 
                         (image_df['crop_aspect_ratio'] <= max_aspect_ratio)]
-    
+    video_df = video_df[(video_df['crop_aspect_ratio'] >= min_aspect_ratio) & 
+                        (video_df['crop_aspect_ratio'] <= max_aspect_ratio)]
     
     # Remove images with crop width or height less than 200 pixels
     min_dimension = 200
     image_df = image_df[(image_df['crop_w'] >= min_dimension) & 
                         (image_df['crop_h'] >= min_dimension)]
+    video_df = video_df[(video_df['crop_w'] >= min_dimension) & 
+                        (video_df['crop_h'] >= min_dimension)]
     
 
     if reparse_images:   
@@ -517,11 +543,15 @@ def Export_Database(output_dir, val_split, parsed_database, labelbox_path, repar
     video_paths = video_df.groupby(['Accession_Number', 'laterality'])['ImagesPath'].agg(list).to_dict()
     train_data['VideoPaths'] = train_data.apply(lambda row: video_paths.get((row['Accession_Number'], row['Breast']), []), axis=1)
 
+    video_images_df = generate_video_images_csv(video_df, output_dir)
+
     # Write the filtered dataframes to CSV files in the output directory
     #save_data(breast_df, os.path.join(output_dir, 'BreastData.csv'))
-    #save_data(casse_study_df, os.path.join(output_dir, 'CaseStudyData.csv'))
+    #save_data(case_study_df, os.path.join(output_dir, 'CaseStudyData.csv'))
     #save_data(labeled_df, os.path.join(output_dir, 'LabeledData.csv'))
     #save_data(video_df, os.path.join(output_dir, 'VideoData.csv'))
     #save_data(image_df, os.path.join(output_dir, 'ImageData.csv'))
     save_data(train_data, os.path.join(output_dir, 'TrainData.csv'))
     save_data(instance_data, os.path.join(output_dir, 'InstanceData.csv'))
+    
+    save_data(video_images_df, os.path.join(output_dir, 'VideoImages.csv'))
