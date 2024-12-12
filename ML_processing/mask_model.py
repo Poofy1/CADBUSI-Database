@@ -45,7 +45,7 @@ class MyDataset(Dataset):
 
     def __getitem__(self, idx):
         img_name = os.path.join(self.root_dir, self.images[idx])
-        image = Image.open(img_name)
+        image = read_image(img_name, use_pil=True)
         preprocess = transforms.Compose([
             transforms.Grayscale(num_output_channels=1),
             transforms.ToTensor(),

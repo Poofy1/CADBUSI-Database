@@ -251,7 +251,7 @@ def process_crop_region(image):
 
     contours, _ = cv2.findContours(eroded_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
-        return None, None
+        return None, None, None, None
     
     largest_contour = max(contours, key=cv2.contourArea)
     convex_hull = cv2.convexHull(largest_contour)
@@ -312,11 +312,17 @@ def process_single_image_combined(row, image_folder_path):
 
     # Process ultrasound region
     x, y, w, h = process_crop_region(image)
+    mask_map = None
+    if x is not None:
+        mask_map = (image_name, (x, y, w, h))
     
     # Process darkness
     darkness = process_darkness(image, row)
+    darkness_map = None
+    if darkness is not None:
+        darkness_map = (image_name, darkness)
 
-    return (image_name, (x, y, w, h)), (image_name, darkness)
+    return mask_map, darkness_map
 
 def process_images_combined(image_folder_path, db_to_process):
     image_masks = []

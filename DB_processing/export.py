@@ -138,38 +138,37 @@ def Crop_Images(df, input_dir, output_dir):
                 
                 
 def process_single_video(row, video_folder_path, output_dir):
+    storage = StorageClient.get_instance()
+    
     # Get the folder name and crop data
     folder_name = row['ImagesPath']
-    crop_y = row['crop_y']
-    crop_w = row['crop_w']
-    crop_x = row['crop_x']
-    crop_h = row['crop_h']
+    crop_y = int(row['crop_y'])
+    crop_x = int(row['crop_x'])
+    crop_w = int(row['crop_w'])
+    crop_h = int(row['crop_h'])
 
-    # Get the path to the folder
-    folder_path = os.path.join(video_folder_path, folder_name)
+    # Get all PNG files in the folder
+    input_folder = os.path.join(video_folder_path, folder_name)
+    all_images = list_files(input_folder, '.png')
+    
+    if not all_images:
+        return
+        
+    # Prepare output folder path
+    output_folder = os.path.join(output_dir, folder_name)
+    make_dirs(output_folder)
 
-    # Check if the folder exists
-    if os.path.isdir(folder_path):
-        # Get a list of all the images in the folder
-        all_images = [file for file in os.listdir(folder_path) if file.endswith('.png')]
-
-        # Create a new directory for the video in the output directory
-        video_output_dir = os.path.join(output_dir, folder_name)
-        make_dirs(video_output_dir)
-
-        # Iterate over all the images and crop them
-        for image_name in all_images:
-            image_path = os.path.join(folder_path, image_name)
-            image = read_image(image_path)
-
-            # Check if the image was loaded properly
-            if image is not None:
-                # Crop the image
-                cropped_image = image[int(crop_y):int(crop_y)+int(crop_h), int(crop_x):int(crop_x)+int(crop_w)]
-
-                # Save the cropped image
-                output_path = os.path.join(video_output_dir, image_name)
-                save_data(cropped_image, output_path)
+    # Process each image
+    for image_path in all_images:
+        # Get just the filename for the output
+        image_name = os.path.basename(image_path)
+        
+        # Read, crop and save
+        image = read_image(image_path)
+        if image is not None:
+            cropped_image = image[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
+            output_path = os.path.join(output_folder, image_name)
+            save_data(cropped_image, output_path)
 
 
 def Crop_Videos(df, input_dir, output_dir):
