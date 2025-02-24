@@ -94,7 +94,7 @@ if __name__ == '__main__':
         """
     
     elif task_num == 4:  # Develop Export
-        Export_Database(CONFIG["EXPORT_DIR"], CONFIG["VAL_SPLIT"], CONFIG["DATABASE_DIR"], CONFIG["LABELBOX_LABELS"], reparse_images = True)
+        Export_Database(CONFIG, reparse_images = False)
 
     if CONFIG["REPROCESS_DATA_FILTERS"]:
         Parse_Data(CONFIG["DATABASE_DIR"], only_labels = True)

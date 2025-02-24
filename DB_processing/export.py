@@ -2,6 +2,7 @@ import os, cv2, ast, datetime, glob
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
+import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 env = os.path.dirname(os.path.abspath(__file__))
 
@@ -356,11 +357,17 @@ def generate_video_images_csv(video_df, root_dir):
     video_images_df['images'] = video_images_df['images'].apply(str)  # Convert lists to string
     return video_images_df
     
-def Export_Database(output_dir, val_split, parsed_database, labelbox_path, reparse_images = True, trust_max = 2, num_of_tests = 10):
+def Export_Database(CONFIG, reparse_images = True, trust_max = 2, num_of_tests = 10):
     #Debug Tools
     KnownInstancesOnly = False # When true it only exports images that have a instance label
     OnlyOneLesions = True # Only exports Breast Cases with lesion count of 1
     use_reject_system = True # True = removes rejects from trianing
+    
+    output_dir = CONFIG["EXPORT_DIR"]
+    val_split = CONFIG["VAL_SPLIT"]
+    parsed_database = CONFIG["DATABASE_DIR"]
+    labelbox_path = CONFIG["LABELBOX_LABELS"]
+    
     
     date = datetime.datetime.now().strftime("%m_%d_%Y_%H_%M_%S")
     output_dir = f'{output_dir}/export_{date}/'
@@ -368,6 +375,11 @@ def Export_Database(output_dir, val_split, parsed_database, labelbox_path, repar
     print("Exporting Data:")
     
     make_dirs(output_dir)
+    
+    # Save the config to the export location
+    export_config_path = os.path.join(output_dir, 'export_config.json')
+    with open(export_config_path, 'w') as export_config_file:
+        json.dump(CONFIG, export_config_file, indent=4)
     
     #Dirs
     image_csv_file = f'{parsed_database}ImageData.csv'
