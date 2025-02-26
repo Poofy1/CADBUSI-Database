@@ -1,4 +1,4 @@
-# CASBUSI-Database
+# CADBUSI-Database
 This database manager is designed to process breast ultrasound data from the Mayo Clinic and store it in a structured format, making it easy to manipulate, label, analyze, and prepare for machine learning training.
 
 ## Requirements
