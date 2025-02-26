@@ -18,8 +18,43 @@ env = os.path.dirname(os.path.abspath(__file__))
 from storage_adapter import * 
 
 
+
 def load_config():
-    with open(f'{env}/config.json', 'r') as config_file:
+    config_path = f'{env}/config.json'
+    
+    # Check if config file exists
+    if not os.path.exists(config_path):
+        print("Config does not exist, creating file...")
+        
+        # Create default config with empty strings and default values
+        default_config = {
+            "BUCKET": "",
+            "WINDIR": "",
+            "UNZIPPED_DICOMS": "",
+            "ANON_FILE": "",
+            "DATABASE_DIR": "",
+            
+            "LABELBOX_API_KEY": "",
+            "LABELBOX_LABELS": "",
+            "TARGET_CASES": "",
+            
+            "EXPORT_DIR": "",
+            "VAL_SPLIT": 0.2,
+            
+            "DEBUG_DATA_RANGE": [],
+            "RESET_PROCESSED_FEILD": False,
+            "REPROCESS_DATA_FILTERS": False
+        }
+        
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(config_path), exist_ok=True)
+        
+        # Write default config to file
+        with open(config_path, 'w') as config_file:
+            json.dump(default_config, config_file, indent=4)
+    
+    # Load config (either existing or newly created)
+    with open(config_path, 'r') as config_file:
         config = json.load(config_file)
         return config
     

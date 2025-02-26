@@ -5,8 +5,8 @@ opencv-contrib-python==4.7.0.68
 numpy
 matplotlib
 easyocr
-#labelbox
-#requests
+#labelbox # wont work in GCP
+#requests # wont work in GCP
 torch==1.12.1
 torchvision==0.13.1
 segmentation-models-pytorch
