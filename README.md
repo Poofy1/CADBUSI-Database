@@ -5,6 +5,7 @@ This database manager is designed to process breast ultrasound data from the May
 - Python 3.8
 - 6GB Nvidia GPU (Recommended)
 - At least 4 TB of hard drive space (Recommended)
+- Custom storage package: storage-adapter (automatically installed via requirements.txt)
 - Install required Python packages with pip:
 ```
 pip install -r requirements.txt
