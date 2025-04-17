@@ -76,7 +76,7 @@ def parse_video_data(dcm, current_index, parsed_database):
     binary_data = memory_file.getvalue()
     
     for elem in dataset:
-        if elem.VR == "SQ":  # if sequence
+        if elem.VR == "SQ" and elem.value and len(elem.value) > 0:  # if sequence
             for sub_elem in elem.value[0]:  # only take the first item in the sequence
                 tag_name = pydicom.datadict.keyword_for_tag(sub_elem.tag)
                 if tag_name == "PixelData":
@@ -145,11 +145,12 @@ def parse_single_dcm(dcm, current_index, parsed_database):
                     region_count += 1
             
             #Get Data
-            for sub_elem in elem.value[0]:  # only take the first item in the sequence
-                tag_name = pydicom.datadict.keyword_for_tag(sub_elem.tag)
-                if tag_name == "PixelData":
-                    continue
-                data_dict[tag_name] = str(sub_elem.value)
+            if elem.value and len(elem.value) > 0:
+                for sub_elem in elem.value[0]:  # only take the first item in the sequence
+                    tag_name = pydicom.datadict.keyword_for_tag(sub_elem.tag)
+                    if tag_name == "PixelData":
+                        continue
+                    data_dict[tag_name] = str(sub_elem.value)
 
         else:
             tag_name = pydicom.datadict.keyword_for_tag(elem.tag)
@@ -225,15 +226,94 @@ def parse_files(dcm_files_list, parsed_database):
     return df
 
 
+def parse_anon_file(anon_location, database_path, image_df):
+    
+    video_df = image_df[image_df['DataType'] == 'video']
+    image_df = image_df[image_df['DataType'] == 'image']
+    
+    # Define common columns
+    common_columns = ['Patient_ID', 'Accession_Number', 'RegionSpatialFormat', 'RegionDataType', 
+                    'RegionLocationMinX0', 'RegionLocationMinY0', 'RegionLocationMaxX1', 
+                    'RegionLocationMaxY1', 'PhotometricInterpretation', 'Rows', 'Columns',
+                    'FileName', 'DicomHash']
 
+    # Keep only necessary columns from dataframes
+    if not video_df.empty:
+        video_df = video_df[common_columns + ['ImagesPath', 'SavedFrames']]
+
+    image_df = image_df[common_columns + ['ImageName', 'RegionCount']]
+    
+    
+    # Find all csv files and combine into df
+    anon_df = read_csv(anon_location)
+    anon_df = anon_df.sort_values('PATIENT_ID')
+    anon_df = anon_df.rename(columns={
+        'PATIENT_ID': 'Patient_ID',
+        'ACCESSION_NUMBER': 'Accession_Number'
+    })
+
+    
+    # Convert 'Patient_ID' to str in both dataframes before merging
+    image_df[['Patient_ID', 'Accession_Number']] = image_df[['Patient_ID', 'Accession_Number']].astype(str)
+    anon_df[['Patient_ID', 'Accession_Number']] = anon_df[['Patient_ID', 'Accession_Number']].astype(str)
+    
+    # Remove leading zeros from Patient_ID in both dataframes
+    image_df['Patient_ID'] = image_df['Patient_ID'].str.lstrip('0')
+    anon_df['Patient_ID'] = anon_df['Patient_ID'].str.lstrip('0')
+    
+    #image_df.to_csv(f"{env}/image_df.csv", index=False) # DEBUG
+    #anon_df.to_csv(f"{env}/anon_df.csv", index=False) # DEBUG
+    
+    # Merge
+    breast_csv = anon_df
+    
+
+    breast_csv['Path_Desc'] = None
+    breast_csv['Density_Desc'] = None
+    breast_csv['Has_Malignant'] = False
+    breast_csv['Has_Benign'] = False
+    breast_csv['Has_Unknown'] = False
+    
+
+    
+    image_csv_file = f'{database_path}ImageData.csv'
+    video_csv_file = f'{database_path}VideoData.csv'
+    breast_csv_file = f'{database_path}BreastData.csv'
+    
+    image_combined_df = image_df
+    if os.path.isfile(image_csv_file):
+        existing_image_df = pd.read_csv(image_csv_file)
+        existing_image_df['Patient_ID'] = existing_image_df['Patient_ID'].astype(str)
+        image_df['Patient_ID'] = image_df['Patient_ID'].astype(str)
+        
+        # keep only old IDs that don't exist in new data
+        image_df = image_df[~image_df['Patient_ID'].isin(existing_image_df['Patient_ID'].unique())]
+        
+        # now concatenate the old data with the new data
+        image_combined_df = pd.concat([existing_image_df, image_df], ignore_index=True)
+
+        
+    if os.path.isfile(video_csv_file):
+        existing_video_df = pd.read_csv(video_csv_file)
+        video_df = pd.concat([existing_video_df, video_df], ignore_index=True)
+
+
+    if os.path.isfile(breast_csv_file):
+        existing_breast_df = pd.read_csv(breast_csv_file)
+        breast_csv = pd.concat([existing_breast_df, breast_csv], ignore_index=True)
+        breast_csv = breast_csv.sort_values(['Patient_ID', 'Accession_Number', 'Breast'])
+        breast_csv = breast_csv.drop_duplicates(subset=['Patient_ID', 'Accession_Number', 'Breast'], keep='last')
+        breast_csv = breast_csv.reset_index(drop=True)
+
+    # Export the DataFrames to CSV files
+    save_data(image_combined_df, image_csv_file)
+    save_data(video_df, video_csv_file)
+    save_data(breast_csv, breast_csv_file)
+    
 
 # Main Method
 def Parse_Dicom_Files(database_path, anon_location, raw_storage_database, data_range):
-    image_csv_file = f'{database_path}ImageData.csv'
-    video_csv_file = f'{database_path}VideoData.csv'
-    case_study_csv_file = f'{database_path}CaseStudyData.csv' 
-    breast_csv_file = f'{database_path}BreastData.csv'
-
+    
     #Create database dir
     make_dirs(database_path)
     make_dirs(f'{database_path}/images/')
@@ -259,13 +339,18 @@ def Parse_Dicom_Files(database_path, anon_location, raw_storage_database, data_r
     
     
 
-    if len(dcm_files_list) <= 0:
+    """if len(dcm_files_list) <= 0:
         UpdateAnonFile(anon_location) # Not Tested
-        return
+        return"""
+    
+    
+    # Update the list of parsed files and save it
+    parsed_files_list.extend(dcm_files_list)
+    content = '\n'.join(parsed_files_list)  # Convert list to string with newlines
+    save_data(content, parsed_files_list_file)
     
     # Get DCM Data
     image_df = parse_files(dcm_files_list, database_path)
-    save_data(image_df.to_csv(index=False), f'{database_path}/Intermediate_Dicom.csv')
     image_df = image_df.rename(columns={'PatientID': 'Patient_ID'})
     image_df = image_df.rename(columns={'AccessionNumber': 'Accession_Number'})
     
@@ -279,199 +364,12 @@ def Parse_Dicom_Files(database_path, anon_location, raw_storage_database, data_r
     removed_rows = original_row_count - new_row_count
     print(f"Removed {removed_rows} rows with empty values.")
     
-    video_df = image_df[image_df['DataType'] == 'video']
-    image_df = image_df[image_df['DataType'] == 'image']
     
-    if not video_df.empty:
-        video_df = video_df[['Patient_ID', 
-                'Accession_Number', 
-                'ImagesPath',
-                'SavedFrames',
-                'RegionSpatialFormat', 
-                'RegionDataType', 
-                'RegionLocationMinX0', 
-                'RegionLocationMinY0', 
-                'RegionLocationMaxX1', 
-                'RegionLocationMaxY1',
-                'PhotometricInterpretation',
-                'Rows',
-                'Columns',
-                'FileName',
-                'DicomHash']]
+    parse_anon_file(anon_location, database_path, image_df)
     
-    #Prepare to move data to csv_df
-    temp_df = image_df.drop_duplicates(subset='Accession_Number')
-    #Remove useless data
-    image_df = image_df[['Patient_ID', 
-             'Accession_Number', 
-             'ImageName',
-             'RegionSpatialFormat', 
-             'RegionCount',
-             'RegionDataType', 
-             'RegionLocationMinX0', 
-             'RegionLocationMinY0', 
-             'RegionLocationMaxX1', 
-             'RegionLocationMaxY1',
-             'PhotometricInterpretation',
-             'Rows',
-             'Columns',
-             'FileName',
-             'DicomHash']]
     
-    # Update the list of parsed files and save it
-    parsed_files_list.extend(dcm_files_list)
-    content = '\n'.join(parsed_files_list)  # Convert list to string with newlines
-    save_data(content, parsed_files_list_file)
+    
 
-    # Find all csv files and combine into df
-    csv_df = read_csv(anon_location)
-    
-    # group the dataframe by Patient_ID and Accession_Number
-    csv_df = csv_df.sort_values('Patient_ID')
-    grouped_df = csv_df.groupby(['Patient_ID','Accession_Number'])
-    csv_df = grouped_df.agg({'Biopsy_Accession': list,
-                            'Biopsy_Laterality': list,
-                            'BI-RADS': 'first',
-                            'Study_Laterality': 'first',
-                            'Biopsy': list,
-                            'Path_Desc': list,
-                            'Density_Desc': list,
-                            'Time_Biop': 'last',
-                            #'Facility': 'first',
-                            'Age': 'first', 
-                            'Race': 'first', 
-                            'Ethnicity': 'first'}).reset_index()
-
-    
-    # Convert 'Patient_ID' to str in both dataframes before merging
-    temp_df[['Patient_ID', 'Accession_Number']] = temp_df[['Patient_ID', 'Accession_Number']].astype(int)
-    csv_df[['Patient_ID', 'Accession_Number']] = csv_df[['Patient_ID', 'Accession_Number']].astype(int)
-    csv_df = pd.merge(csv_df, temp_df[['Patient_ID', 'Accession_Number', 'StudyDescription', 'StudyDate', 'PatientSex', 'PatientSize', 'PatientWeight']], on=['Patient_ID', 'Accession_Number'], how='inner')
-    
-    
-    # Get count of duplicate rows for each Patient_ID in df
-    duplicate_count = image_df.groupby('Patient_ID').size()
-    duplicate_count = duplicate_count.reset_index(name='Image_Count')
-    duplicate_count['Patient_ID'] = duplicate_count['Patient_ID'].astype(int)
-
-    # Merge duplicate_count with csv_df
-    csv_df = pd.merge(csv_df, duplicate_count, on='Patient_ID', how='left')
-    #csv_df.to_csv("D:\DATA\CASBUSI/temp.csv", index=False)
-
-        
-    # Create Breast level data
-    breast_csv = csv_df[['Patient_ID', 'Accession_Number']].copy()
-
-    # Duplicate the rows and add 'Breast' column
-    breast_csv['Breast'] = 'LEFT'
-    breast_csv_right = breast_csv.copy()
-    breast_csv_right['Breast'] = 'RIGHT'
-
-    # Concatenate the original and duplicate rows
-    breast_csv = pd.concat([breast_csv, breast_csv_right], ignore_index=True)
-    breast_csv = breast_csv.sort_values('Accession_Number')
-    
-    breast_csv['Path_Desc'] = None
-    breast_csv['Density_Desc'] = None
-    breast_csv['Has_Malignant'] = False
-    breast_csv['Has_Benign'] = False
-    breast_csv['Has_Unknown'] = False
-    
-    #breast_csv.to_csv(f'{env}/breast1.csv', index=False)
-
-
-    for idx, row in csv_df.iterrows():
-        # Check if Biopsy_Laterality is a list-like object
-        if isinstance(row['Biopsy_Laterality'], (list, np.ndarray)):
-            for i, laterality in enumerate(row['Biopsy_Laterality']):
-                if isinstance(laterality, str):
-                    matching_rows = (breast_csv['Patient_ID'] == row['Patient_ID']) & \
-                                (breast_csv['Accession_Number'] == row['Accession_Number']) & \
-                                (breast_csv['Breast'] == laterality.upper())
-                    
-                    if isinstance(row['Biopsy'], list) and len(row['Biopsy']) > i:
-                        biopsy_result = biopsy_mapping.get(row['Biopsy'][i], 'unknown')
-                        if biopsy_result == 'malignant':
-                            breast_csv.loc[matching_rows, 'Has_Malignant'] = True
-                        elif biopsy_result == 'benign':
-                            breast_csv.loc[matching_rows, 'Has_Benign'] = True
-                        elif biopsy_result == 'unknown':
-                            breast_csv.loc[matching_rows, 'Has_Unknown'] = True
-
-                    if isinstance(row['Path_Desc'], list) and len(row['Path_Desc']) > i:
-                        path_desc = row['Path_Desc'][i]
-                        if pd.notna(breast_csv.loc[matching_rows, 'Path_Desc'].iloc[0]):
-                            existing_path_desc = breast_csv.loc[matching_rows, 'Path_Desc'].iloc[0]
-                            try:
-                                path_desc_list = ast.literal_eval(existing_path_desc)
-                                path_desc_list.append(path_desc)
-                                breast_csv.loc[matching_rows, 'Path_Desc'] = str(path_desc_list)
-                            except (ValueError, SyntaxError):
-                                breast_csv.loc[matching_rows, 'Path_Desc'] = str([existing_path_desc, path_desc])
-                        else:
-                            breast_csv.loc[matching_rows, 'Path_Desc'] = str([path_desc])
-                    
-                    if isinstance(row['Density_Desc'], list) and len(row['Density_Desc']) > i:
-                        density_desc = row['Density_Desc'][i]
-                        if pd.notna(breast_csv.loc[matching_rows, 'Density_Desc'].iloc[0]):
-                            existing_density_desc = breast_csv.loc[matching_rows, 'Density_Desc'].iloc[0]
-                            try:
-                                density_desc_list = ast.literal_eval(existing_density_desc)
-                                density_desc_list.append(density_desc)
-                                breast_csv.loc[matching_rows, 'Density_Desc'] = str(density_desc_list)
-                            except (ValueError, SyntaxError):
-                                breast_csv.loc[matching_rows, 'Density_Desc'] = str([existing_density_desc, density_desc])
-                        else:
-                            breast_csv.loc[matching_rows, 'Density_Desc'] = str([density_desc])
-    
-    #breast_csv.to_csv(f'{env}/breast2.csv', index=False)
-    
-    # Count lesions
-    # Create a DataFrame that records the 'Biopsy_Laterality' for each 'Patient_ID'
-    lesion_df = csv_df[['Patient_ID', 'Biopsy_Laterality']].explode('Biopsy_Laterality')
-    # Count the lesions for each 'Patient_ID' and 'Biopsy_Laterality'
-    lesion_count = lesion_df.groupby(['Patient_ID', 'Biopsy_Laterality']).size().reset_index(name='LesionCount')
-    # Rename 'Biopsy_Laterality' to 'Breast' in lesion_count
-    lesion_count = lesion_count.rename(columns={'Biopsy_Laterality': 'Breast'})
-    # Merge lesion_count with breast_csv
-    breast_csv = pd.merge(breast_csv, lesion_count, on=['Patient_ID', 'Breast'], how='left')
-    
-    
-    image_combined_df = image_df
-    if os.path.isfile(image_csv_file):
-        existing_image_df = pd.read_csv(image_csv_file)
-        existing_image_df['Patient_ID'] = existing_image_df['Patient_ID'].astype(str)
-        image_df['Patient_ID'] = image_df['Patient_ID'].astype(str)
-        
-        # keep only old IDs that don't exist in new data
-        image_df = image_df[~image_df['Patient_ID'].isin(existing_image_df['Patient_ID'].unique())]
-        
-        # now concatenate the old data with the new data
-        image_combined_df = pd.concat([existing_image_df, image_df], ignore_index=True)
-
-        
-    if os.path.isfile(video_csv_file):
-        existing_video_df = pd.read_csv(video_csv_file)
-        video_df = pd.concat([existing_video_df, video_df], ignore_index=True)
-
-    if os.path.isfile(case_study_csv_file):
-        existing_case_study_df = pd.read_csv(case_study_csv_file)
-        csv_df = pd.concat([existing_case_study_df, csv_df])
-        csv_df = csv_df.sort_values('Accession_Number').drop_duplicates('Accession_Number', keep='last')
-        csv_df = csv_df.reset_index(drop=True)
-        
-    if os.path.isfile(breast_csv_file):
-        existing_breast_df = pd.read_csv(breast_csv_file)
-        breast_csv = pd.concat([existing_breast_df, breast_csv], ignore_index=True)
-        breast_csv = breast_csv.sort_values(['Patient_ID', 'Accession_Number', 'Breast'])
-        breast_csv = breast_csv.drop_duplicates(subset=['Patient_ID', 'Accession_Number', 'Breast'], keep='last')
-        breast_csv = breast_csv.reset_index(drop=True)
-
-    # Export the DataFrames to CSV files
-    save_data(image_combined_df, image_csv_file)
-    save_data(video_df, video_csv_file)
-    save_data(csv_df, case_study_csv_file)
-    save_data(breast_csv, breast_csv_file)
     
     
     
@@ -482,120 +380,3 @@ def Parse_Dicom_Files(database_path, anon_location, raw_storage_database, data_r
 
 
 
-
-
-
-def UpdateAnonFile(anon_location):
-    
-    print("Updating Data with Anon File")
-    
-    parsed_database = f'{env}/database/'
-    case_study_csv_file = f'{parsed_database}CaseStudyData.csv' 
-    breast_csv_file = f'{parsed_database}BreastData.csv'
-    
-    if not file_exists(case_study_csv_file):
-        return
-    
-    
-    # Case Data
-    existing_case_study_df = read_csv(case_study_csv_file)
-    csv_df = read_csv(anon_location)
-    
-    # group the dataframe by Patient_ID and Accession_Number
-    csv_df = csv_df.sort_values('Patient_ID')
-    grouped_df = csv_df.groupby(['Patient_ID','Accession_Number'])
-    csv_df = grouped_df.agg({'Biopsy_Accession': list,
-                            'Biopsy_Laterality': list,
-                            'BI-RADS': 'first',
-                            'Study_Laterality': 'first',
-                            'Biopsy': list,
-                            'Path_Desc': list,
-                            'Density_Desc': list,
-                            'Time_Biop': 'last',
-                            #'Facility': 'first',
-                            'Age': 'first', 
-                            'Race': 'first', 
-                            'Ethnicity': 'first'}).reset_index()
-
-    
-    # Convert 'Patient_ID' to str in both dataframes before merging
-    existing_case_study_df['Patient_ID'] = existing_case_study_df['Patient_ID'].astype(int)
-    csv_df['Patient_ID'] = csv_df['Patient_ID'].astype(int)
-    csv_df = pd.merge(csv_df, existing_case_study_df[['Patient_ID', 'StudyDate', 'PatientSex', 'PatientSize', 'PatientWeight', 'Image_Count']], on='Patient_ID', how='inner')
-    
-
-    if 'Time_Biop' not in existing_case_study_df.columns:
-        existing_case_study_df['Time_Biop'] = np.nan
-    #existing_case_study_df.update(csv_df)
-    # Set index to ['Patient_ID', 'Accession_Number']
-    existing_case_study_df.set_index(['Patient_ID', 'Accession_Number'], inplace=True)
-    csv_duplicate = csv_df.copy()
-    csv_duplicate.set_index(['Patient_ID', 'Accession_Number'], inplace=True)
-    
-
-    # Drop the rows in existing_case_study_df that are in csv_df
-    existing_case_study_df = existing_case_study_df.drop(csv_duplicate.index, errors='ignore')
-
-    # Append csv_df to existing_case_study_df
-    existing_case_study_df = existing_case_study_df.append(csv_duplicate)
-
-    # Reset index
-    existing_case_study_df.reset_index(inplace=True)
-    
-    # Breast Data
-    # Create Breast level data
-    breast_csv = csv_df[['Patient_ID', 'Accession_Number']].copy()
-
-    # Duplicate the rows and add 'Breast' column
-    breast_csv['Breast'] = 'LEFT'
-    breast_csv_right = breast_csv.copy()
-    breast_csv_right['Breast'] = 'RIGHT'
-
-    # Concatenate the original and duplicate rows
-    breast_csv = pd.concat([breast_csv, breast_csv_right], ignore_index=True)
-    breast_csv = breast_csv.sort_values('Accession_Number')
-    
-    breast_csv['Path_Desc'] = None
-    breast_csv['Density_Desc'] = None
-    breast_csv['Has_Malignant'] = False
-    breast_csv['Has_Benign'] = False
-    breast_csv['Has_Unknown'] = False
-    
-    for idx, row in csv_df.iterrows():
-        if row['Biopsy_Laterality'] is not None:
-            for i, laterality in enumerate(row['Biopsy_Laterality']):
-                if isinstance(laterality, str):
-                    matching_rows = (breast_csv['Patient_ID'] == row['Patient_ID']) & (breast_csv['Accession_Number'] == row['Accession_Number']) & (breast_csv['Breast'] == laterality.upper())
-                    if isinstance(row['Biopsy'], list) and len(row['Biopsy']) > i:
-                        biopsy_result = biopsy_mapping.get(row['Biopsy'][i], 'unknown')
-                        if biopsy_result == 'malignant':
-                            breast_csv.loc[matching_rows, 'Has_Malignant'] = True
-                        elif biopsy_result == 'benign':
-                            breast_csv.loc[matching_rows, 'Has_Benign'] = True
-                        elif biopsy_result == 'unknown':
-                            breast_csv.loc[matching_rows, 'Has_Unknown'] = True
-                        if not (breast_csv.loc[matching_rows, 'Has_Malignant'] | breast_csv.loc[matching_rows, 'Has_Benign'] | breast_csv.loc[matching_rows, 'Has_Unknown']).any():
-                            print(biopsy_result)
-                    if isinstance(row['Path_Desc'], list) and len(row['Path_Desc']) > i:
-                        breast_csv.loc[matching_rows, 'Path_Desc'] = row['Path_Desc'][i]
-                    if isinstance(row['Density_Desc'], list) and len(row['Density_Desc']) > i:
-                        breast_csv.loc[matching_rows, 'Density_Desc'] = row['Density_Desc'][i]
-    
-    # Count lesions
-    # Create a DataFrame that records the 'Biopsy_Laterality' for each 'Patient_ID'
-    lesion_df = csv_df[['Patient_ID', 'Accession_Number', 'Biopsy_Laterality']].explode('Biopsy_Laterality')
-    # Count the lesions for each 'Patient_ID' and 'Biopsy_Laterality'
-    lesion_count = lesion_df.groupby(['Patient_ID', 'Accession_Number', 'Biopsy_Laterality']).size().reset_index(name='LesionCount')
-
-    # Rename 'Biopsy_Laterality' to 'Breast' in lesion_count
-    lesion_count = lesion_count.rename(columns={'Biopsy_Laterality': 'Breast'})
-    # Merge lesion_count with breast_csv
-    breast_csv = pd.merge(breast_csv, lesion_count, on=['Patient_ID', 'Accession_Number', 'Breast'], how='left')
-    
-    breast_csv = breast_csv.drop(columns=['unknown', 'unknown_x', 'unknown_y'], errors='ignore')
-    breast_csv = breast_csv.drop_duplicates(subset=['Patient_ID', 'Accession_Number', 'Breast'], keep='last')
-    
-    existing_case_study_df = existing_case_study_df.drop_duplicates(subset=['Patient_ID', 'Accession_Number'], keep='last')
-    
-    save_data(breast_csv, breast_csv_file)
-    save_data(existing_case_study_df, case_study_csv_file)

@@ -22,7 +22,7 @@ def add_labeling_categories(db):
 
 
 
-def choose_images_to_label(db, case_data):
+def choose_images_to_label(db, breast_df):
     db['label'] = True
 
     #Remove images that are too dark
@@ -42,42 +42,13 @@ def choose_images_to_label(db, case_data):
     db.loc[(db['area'] != 'breast'), 'label'] = False
 
     # Remove Males from studies
-    male_patient_ids = case_data[case_data['PatientSex'] == 'M']['Patient_ID'].values
+    male_patient_ids = breast_df[breast_df['US_CORE_BIRTHSEX'] == 'M']['Patient_ID'].values
     db.loc[db['Patient_ID'].isin(male_patient_ids),'label'] = False
     
-    # Parse 'Study_Laterality' for 'LEFT' or 'RIGHT'
-    focus_left_studies = case_data[case_data['Study_Laterality'] == 'LEFT']['Patient_ID'].values
-    db.loc[(db['Patient_ID'].isin(focus_left_studies)) & (db['laterality'] == 'right'), 'label'] = False
-
-    focus_right_studies = case_data[case_data['Study_Laterality'] == 'RIGHT']['Patient_ID'].values
-    db.loc[(db['Patient_ID'].isin(focus_right_studies)) & (db['laterality'] == 'left'), 'label'] = False
-    
-    # Filter out images based on BI-RADS
-    valid_birads_values = ['0', '1', '2', '3', '4', '4A', '4B', '4C', '5', '6']
-    invalid_birads_patient_ids = case_data[~case_data['BI-RADS'].isin(valid_birads_values)]['Patient_ID'].unique()
-    db.loc[db['Patient_ID'].isin(invalid_birads_patient_ids), 'label'] = False
-
-    
-    ###### REMOVESS BILATERAL DATA
-    #bilateral_patient_ids = case_data[case_data['Study_Laterality'] == 'BILATERAL']['Patient_ID'].values
-    #db.loc[db['Patient_ID'].isin(bilateral_patient_ids), 'label'] = False
-    ######
-    
     # If 'BILATERAL' is present in 'Study_Laterality', handle it based on 'Biopsy_Laterality'
-    bilateral_cases = case_data[case_data['Study_Laterality'] == 'BILATERAL']
-    for idx, row in bilateral_cases.iterrows():
-        if row['Biopsy_Laterality'] is not None:
-            # Count the number of 'left' and 'right' in 'Biopsy_Laterality'
-            left_count = row['Biopsy_Laterality'].lower().count('left')
-            right_count = row['Biopsy_Laterality'].lower().count('right')
-            # Remove the images of the other laterality if 'Biopsy_Laterality' contains only 'left' or only 'right'
-            if left_count > 0 and right_count == 0:
-                db.loc[(db['Patient_ID'] == row['Patient_ID']) & (db['laterality'] == 'right'), 'label'] = False
-            elif right_count > 0 and left_count == 0:
-                db.loc[(db['Patient_ID'] == row['Patient_ID']) & (db['laterality'] == 'left'), 'label'] = False
-            # Use both 'left' and 'right' if 'Biopsy_Laterality' contains both and they have at least 2 images
-            elif left_count > 1 and right_count > 1:
-                db.loc[(db['Patient_ID'] == row['Patient_ID']) & (db['laterality'] == 'unknown'), 'label'] = False
+    bilateral_cases = breast_df[breast_df['Study_Laterality'] == 'BILATERAL']
+    bilateral_db = db[db['Patient_ID'].isin(bilateral_cases['Patient_ID'].values)].copy()
+
     
     
     # Set label = False for all images with 'unknown' laterality
@@ -89,7 +60,7 @@ def choose_images_to_label(db, case_data):
     #db.loc[db['Patient_ID'].isin(affected_patient_ids), 'label'] = False
     
     # If 'chest' or 'mastectomy' is present in 'StudyDescription', set 'label' to False for all images in that study
-    chest_or_mastectomy_studies = case_data[case_data['StudyDescription'].fillna('').str.contains('chest|mastectomy', case=False)]['Patient_ID'].values
+    chest_or_mastectomy_studies = breast_df[breast_df['DESCRIPTION'].fillna('').str.contains('chest|mastectomy', case=False)]['Patient_ID'].values
     db.loc[db['Patient_ID'].isin(chest_or_mastectomy_studies), 'label'] = False
     
     # Set label = False for all images with 'RegionCount' > 1
@@ -97,10 +68,6 @@ def choose_images_to_label(db, case_data):
     
     # Check the aspect ratio of the crop region
     db['crop_aspect_ratio'] = db['crop_w'] / db['crop_h']
-    
-    # label = false where Time_Biop is empty or > 30
-    exclude_patient_ids = case_data[case_data['Time_Biop'].isnull() | (case_data['Time_Biop'] > 30)]['Patient_ID'].unique() 
-    db.loc[db['Patient_ID'].isin(exclude_patient_ids), 'label'] = False
     
     return db
 
@@ -222,10 +189,10 @@ def Remove_Green_Images(database_dir):
 
 def Parse_Data(database_path, only_labels):
     input_file = f'{database_path}/ImageData.csv'
-    case_file = f'{database_path}/CaseStudyData.csv'
+    breast_file = f'{database_path}/BreastData.csv'
     image_folder_path = f"{database_path}/images/"
     db_out = read_csv(input_file)
-    case_data = read_csv(case_file)
+    breast_df = read_csv(breast_file)
     
     # Check if 'processed' column exists, if not create it
     if 'processed' not in db_out.columns:
@@ -255,7 +222,7 @@ def Parse_Data(database_path, only_labels):
                     db_to_process.update(result)
                 progress.update()
 
-    db_to_process = choose_images_to_label(db_to_process, case_data)
+    db_to_process = choose_images_to_label(db_to_process, breast_df)
     db_to_process = add_labeling_categories(db_to_process)
     
     # Update 'processed' status to True for processed rows and merge back to the original dataframe
@@ -301,7 +268,7 @@ def Rename_Images(database_path):
         # Extract the relevant information
         patient_id = int(row['Patient_ID'])
         accession_number = row['Accession_Number']
-        accession_number = '' if pd.isna(accession_number) else int(accession_number)
+        accession_number = '' if pd.isna(accession_number) else (accession_number)
         laterality = row['laterality']
 
         # Create a unique key for this combination

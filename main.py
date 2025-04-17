@@ -96,7 +96,6 @@ if __name__ == '__main__':
         user_input = input("Continue with DCM Parsing step? (y/n): ")
         if user_input.lower() == "y":
             Parse_Dicom_Files(CONFIG["DATABASE_DIR"], CONFIG["ANON_FILE"], CONFIG["UNZIPPED_DICOMS"], CONFIG["DEBUG_DATA_RANGE"])
-            Find_Trust(CONFIG["DATABASE_DIR"])
         
         user_input = input("Continue with OCR step? (y/n): ")
         if user_input.lower() == "y":
