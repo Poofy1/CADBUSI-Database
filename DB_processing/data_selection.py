@@ -45,19 +45,8 @@ def choose_images_to_label(db, breast_df):
     male_patient_ids = breast_df[breast_df['US_CORE_BIRTHSEX'] == 'M']['Patient_ID'].values
     db.loc[db['Patient_ID'].isin(male_patient_ids),'label'] = False
     
-    # If 'BILATERAL' is present in 'Study_Laterality', handle it based on 'Biopsy_Laterality'
-    bilateral_cases = breast_df[breast_df['Study_Laterality'] == 'BILATERAL']
-    bilateral_db = db[db['Patient_ID'].isin(bilateral_cases['Patient_ID'].values)].copy()
-
-    
-    
     # Set label = False for all images with 'unknown' laterality
     db.loc[(db['laterality'] == 'unknown') | (db['laterality'].isna()), 'label'] = False
-    
-    # Find unique Patient_IDs where 'laterality' is 'unknown' or NaN
-    # Set 'label' to False for all rows with affected Patient_IDs
-    #affected_patient_ids = db.loc[(db['laterality'] == 'unknown') | (db['laterality'].isna()), 'Patient_ID'].unique()
-    #db.loc[db['Patient_ID'].isin(affected_patient_ids), 'label'] = False
     
     # If 'chest' or 'mastectomy' is present in 'StudyDescription', set 'label' to False for all images in that study
     chest_or_mastectomy_studies = breast_df[breast_df['DESCRIPTION'].fillna('').str.contains('chest|mastectomy', case=False)]['Patient_ID'].values

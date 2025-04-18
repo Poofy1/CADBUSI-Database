@@ -105,7 +105,7 @@ if __name__ == '__main__':
         if user_input.lower() == "y":
             Remove_Green_Images(CONFIG["DATABASE_DIR"])
             Remove_Duplicate_Data(CONFIG["DATABASE_DIR"])
-            Find_Orientation(f'{CONFIG["DATABASE_DIR"]}/images/', 'ori_model', f'{CONFIG["DATABASE_DIR"]}/ImageData.csv')
+            Find_Orientation(CONFIG)
             
         user_input = input("Continue with Data Cleaning step (Part 2/2)? (y/n): ")
         if user_input.lower() == "y":
@@ -128,7 +128,7 @@ if __name__ == '__main__':
         """
     
     elif task_num == 4:  # Develop Export
-        Export_Database(CONFIG, reparse_images = False)
+        Export_Database(CONFIG, reparse_images = True)
 
     if CONFIG["REPROCESS_DATA_FILTERS"]:
         Parse_Data(CONFIG["DATABASE_DIR"], only_labels = True)

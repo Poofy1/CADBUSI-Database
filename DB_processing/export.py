@@ -188,17 +188,21 @@ def Crop_Videos(df, input_dir, output_dir):
 
 def merge_and_fillna(df, breast_df):
     
-    breast_df = breast_df.drop_duplicates(subset=['Patient_ID', 'Breast'])
     
     df['laterality'] = df['laterality'].str.upper()
     # Merge df with breast_df on 'Patient_ID' and 'laterality'/'Breast'
+    # Before merging, convert Patient_ID to the same type in both dataframes
+    breast_df['Patient_ID'] = breast_df['Patient_ID'].astype(str)
+    df['Patient_ID'] = df['Patient_ID'].astype(str)
+
+    # Now perform the merge
     df = pd.merge(df, 
-                  breast_df[['Patient_ID', 'Breast', 'Has_Malignant', 'Has_Benign', 'Has_Unknown']], 
-                  left_on=['Patient_ID', 'laterality'], 
-                  right_on=['Patient_ID', 'Breast'], 
-                  how='left')
+                breast_df[['Patient_ID', 'Study_Laterality', 'Has_Malignant', 'Has_Benign', 'Has_Unknown']], 
+                left_on=['Patient_ID', 'laterality'], 
+                right_on=['Patient_ID', 'Study_Laterality'], 
+                how='left')
     # Drop 'Breast' column as it's no longer needed
-    df.drop('Breast', axis=1, inplace=True)
+    df.drop('Study_Laterality', axis=1, inplace=True)
     # Replace NaN values in new columns with appropriate values
     df[['Has_Malignant', 'Has_Benign', 'Has_Unknown']].fillna(0, inplace=True)
     return df
@@ -219,35 +223,26 @@ def safe_literal_eval(val, idx):
 def PerformVal(val_split, df):
     if 'valid' not in df.columns:
         df['valid'] = None
-
-    # Create binary label based on whether 'malignant' is in Biopsy
-    df['is_malignant'] = df['Biopsy'].apply(lambda x: 1 if 'malignant' in x else 0)
     
-    # Get accession numbers for each class
-    malignant_accessions = df[df['is_malignant'] == 1]['Accession_Number'].unique()
-    benign_accessions = df[df['is_malignant'] == 0]['Accession_Number'].unique()
+    # Get unique patient IDs
+    unique_patients = df['Patient_ID'].unique()
     
-    # Determine the size of validation set based on the minority class
-    min_class_size = min(len(malignant_accessions), len(benign_accessions))
-    val_size = int(min_class_size * val_split)
+    # Calculate how many patients should be in validation set
+    num_val_patients = int(len(unique_patients) * val_split)
     
-    # Shuffle and take equal numbers from each class
-    np.random.shuffle(malignant_accessions)
-    np.random.shuffle(benign_accessions)
+    # Randomly select patients for validation
+    val_patients = np.random.choice(unique_patients, size=num_val_patients, replace=False)
     
-    valid_accessions = set(
-        list(malignant_accessions[:val_size]) + 
-        list(benign_accessions[:val_size])
-    )
+    # Assign validation status based on patient ID
+    df['valid'] = df['Patient_ID'].apply(lambda x: 1 if x in val_patients else 0)
     
-    # Assign validation split
-    df['valid'] = df['Accession_Number'].apply(lambda x: 1 if x in valid_accessions else 0)
-    
-    # Clean up temporary column
-    df = df.drop('is_malignant', axis=1)
+    # Print split statistics
+    train_count = (df['valid'] == 0).sum()
+    val_count = (df['valid'] == 1).sum()
+    print(f"Split completed: {train_count} training samples, {val_count} validation samples")
+    print(f"Patient split: {len(unique_patients) - num_val_patients} training patients, {num_val_patients} validation patients")
     
     return df
-
     
 
 def Fix_CM_Data(df):
@@ -275,9 +270,9 @@ def Fix_CM_Data(df):
 
 
 
-def format_data(breast_data, image_data, case_data, num_of_tests):
+def format_data(breast_data, image_data, num_of_tests):
     # Join breast_data and image_data on Accession_Number and Breast/laterality
-    data = pd.merge(breast_data, image_data, left_on=['Accession_Number', 'Breast'], 
+    data = pd.merge(breast_data, image_data, left_on=['Accession_Number', 'Study_Laterality'], 
                     right_on=['Accession_Number', 'laterality'], suffixes=('', '_image_data'))
 
     # Remove columns from image_data that also exist in breast_data
@@ -289,27 +284,21 @@ def format_data(breast_data, image_data, case_data, num_of_tests):
     data = data[data['Has_Unknown'] == False]
 
     # Keep only the specified columns
-    columns_to_keep = ['Patient_ID', 'Accession_Number', 'Breast', 'ImageName', 'Has_Malignant', 'Has_Benign']
+    columns_to_keep = ['Patient_ID', 'Accession_Number', 'Study_Laterality', 'ImageName', 'Has_Malignant', 'Has_Benign', 'valid']
     data = data[columns_to_keep]
     
     
     
     # Group by Accession_Number and Breast, and aggregate
-    data = data.groupby(['Accession_Number', 'Breast']).agg({
+    data = data.groupby(['Accession_Number', 'Study_Laterality']).agg({
         'Patient_ID': 'first',
         'ImageName': lambda x: list(x),
         'Has_Malignant': 'first',
         'Has_Benign': 'first',
+        'valid': 'first',
     }).reset_index()
     
     #data.to_csv('D:\DATA\CASBUSI\exports\export_01_30_2024/test.csv', index=False)
-    
-    # Drop duplicates in case_data based on Patient_ID and keep the first occurrence
-    unique_case_data = case_data.drop_duplicates(subset='Patient_ID')
-
-    # Merge with the 'valid' column from unique_case_data on Patient_ID
-    data = pd.merge(data, unique_case_data[['Patient_ID', 'valid']], on='Patient_ID', how='left')
-
 
     # Remove the Patient_ID column
     data.drop('Patient_ID', axis=1, inplace=True)
@@ -360,7 +349,6 @@ def generate_video_images_csv(video_df, root_dir):
 def Export_Database(CONFIG, reparse_images = True, trust_max = 2, num_of_tests = 10):
     #Debug Tools
     KnownInstancesOnly = False # When true it only exports images that have a instance label
-    OnlyOneLesions = True # Only exports Breast Cases with lesion count of 1
     use_reject_system = True # True = removes rejects from trianing
     
     output_dir = CONFIG["EXPORT_DIR"]
@@ -384,12 +372,10 @@ def Export_Database(CONFIG, reparse_images = True, trust_max = 2, num_of_tests =
     #Dirs
     image_csv_file = f'{parsed_database}ImageData.csv'
     breast_csv_file = f'{parsed_database}BreastData.csv' 
-    case_study_csv_file = f'{parsed_database}CaseStudyData.csv' 
     video_csv_file =  f'{parsed_database}VideoData.csv'
     instance_labels_csv_file = f'{labelbox_path}InstanceLabels.csv'
 
     # Read data
-    case_study_df = read_csv(case_study_csv_file)
     video_df = read_csv(video_csv_file)
     image_df = read_csv(image_csv_file)
     breast_df = read_csv(breast_csv_file)
@@ -419,15 +405,6 @@ def Export_Database(CONFIG, reparse_images = True, trust_max = 2, num_of_tests =
         else:
             instance_data.drop(columns=['Reject Image'], inplace=True)
 
-    # Reformat biopsy
-    case_study_df['Biopsy'] = case_study_df.apply(lambda row: safe_literal_eval(row['Biopsy'], row.name), axis=1)
-    case_study_df['Biopsy'] = case_study_df['Biopsy'].apply(transform_biopsy_list)
-    
-    # Trustworthiness
-    case_study_df = case_study_df[case_study_df['trustworthiness'] <= trust_max]
-    #case_study_df.drop(['trustworthiness'], axis=1, inplace=True)
-    
-
     if os.path.exists(labeled_data_dir):
         all_files = glob.glob(f'{labeled_data_dir}/*.csv')
         all_dfs = (read_csv(f) for f in all_files)
@@ -438,11 +415,10 @@ def Export_Database(CONFIG, reparse_images = True, trust_max = 2, num_of_tests =
 
     # Filter the image data based on the filtered case study data and the 'label' column
     image_df = image_df[image_df['label'] == True]
-    image_df = image_df[(image_df['Patient_ID'].isin(case_study_df['Patient_ID']))]
+    image_df = image_df[(image_df['Patient_ID'].isin(breast_df['Patient_ID']))]
     image_df = image_df.drop(['label', 'area'], axis=1)
     image_df = image_df[image_df['laterality'].notna()]
-    breast_df = breast_df[(breast_df['Patient_ID'].isin(case_study_df['Patient_ID']))]
-    video_df = video_df[(video_df['Patient_ID'].isin(case_study_df['Patient_ID']))]
+    video_df = video_df[(video_df['Patient_ID'].isin(breast_df['Patient_ID']))]
     video_df = video_df[video_df['laterality'] != 'unknown']
     video_df = video_df[video_df['laterality'].notna()]
     
@@ -504,9 +480,10 @@ def Export_Database(CONFIG, reparse_images = True, trust_max = 2, num_of_tests =
     video_df['crop_aspect_ratio'] = video_df['crop_aspect_ratio'].round(2)
     
     # Convert 'Patient_ID' columns to integers
-    labeled_df['Patient_ID'] = labeled_df['Patient_ID'].astype(int)
-    image_df = image_df.astype({'Accession_Number': 'int', 'Patient_ID': 'int'})
-    breast_df = breast_df.fillna(0).astype({'Accession_Number': 'int'})
+    labeled_df['Patient_ID'] = labeled_df['Patient_ID'].astype(str)
+    image_df['Accession_Number'] = image_df['Accession_Number'].astype(str)
+    image_df['Patient_ID'] = image_df['Patient_ID'].astype(str)
+    breast_df = breast_df.fillna(0).astype({'Accession_Number': 'str'})
     
     # Set 'Labeled' to True for rows with a 'Patient_ID' in labeled_df
     image_df.loc[image_df['Patient_ID'].isin(labeled_df['Patient_ID']), 'labeled'] = True
@@ -519,25 +496,13 @@ def Export_Database(CONFIG, reparse_images = True, trust_max = 2, num_of_tests =
     #Find Image Counts (Breast Data)
     image_df['laterality'] = image_df['laterality'].str.upper()
     image_counts = image_df.groupby(['Patient_ID', 'laterality']).size().reset_index(name='Image_Count')
-    breast_df = pd.merge(breast_df, image_counts, how='left', left_on=['Patient_ID', 'Breast'], right_on=['Patient_ID', 'laterality'])
+    breast_df = pd.merge(breast_df, image_counts, how='left', left_on=['Patient_ID', 'Study_Laterality'], right_on=['Patient_ID', 'laterality'])
     breast_df = breast_df.drop(['laterality'], axis=1)
     breast_df['Image_Count'] = breast_df['Image_Count'].fillna(0).astype(int)
     
     # Filter out case and breast data that isnt relavent 
     image_patient_ids = image_df['Patient_ID'].unique()
-    case_study_df = case_study_df[case_study_df['Patient_ID'].isin(image_patient_ids)]
     breast_df = breast_df[breast_df['Patient_ID'].isin(image_patient_ids)]
-    
-    if OnlyOneLesions:
-        # Filter breast_df to only include cases with one lesion
-        breast_df = breast_df[breast_df['LesionCount'] == 1]
-        
-        # Filter image_df and video_df based on the filtered breast_df
-        image_df = image_df[image_df['Patient_ID'].isin(breast_df['Patient_ID'])]
-        video_df = video_df[video_df['Patient_ID'].isin(breast_df['Patient_ID'])]
-        
-        # Filter case_study_df based on the filtered breast_df
-        case_study_df = case_study_df[case_study_df['Patient_ID'].isin(breast_df['Patient_ID'])]
         
     # Fix cm data
     image_df = Fix_CM_Data(image_df)
@@ -545,21 +510,20 @@ def Export_Database(CONFIG, reparse_images = True, trust_max = 2, num_of_tests =
     
 
     # Val split for case data
-    case_study_df = PerformVal(val_split, case_study_df)
+    breast_df = PerformVal(val_split, breast_df)
     
     
     # Create trainable csv data
-    train_data = format_data(breast_df, image_df, case_study_df, num_of_tests)
+    train_data = format_data(breast_df, image_df, num_of_tests)
     
     # Create a mapping of (Accession_Number, laterality) to list of ImagesPath
     video_paths = video_df.groupby(['Accession_Number', 'laterality'])['ImagesPath'].agg(list).to_dict()
-    train_data['VideoPaths'] = train_data.apply(lambda row: video_paths.get((row['Accession_Number'], row['Breast']), []), axis=1)
+    train_data['VideoPaths'] = train_data.apply(lambda row: video_paths.get((row['Accession_Number'], row['Study_Laterality']), []), axis=1)
 
     video_images_df = generate_video_images_csv(video_df, output_dir)
 
     # Write the filtered dataframes to CSV files in the output directory
     #save_data(breast_df, os.path.join(output_dir, 'BreastData.csv'))
-    #save_data(case_study_df, os.path.join(output_dir, 'CaseStudyData.csv'))
     #save_data(labeled_df, os.path.join(output_dir, 'LabeledData.csv'))
     #save_data(video_df, os.path.join(output_dir, 'VideoData.csv'))
     #save_data(image_df, os.path.join(output_dir, 'ImageData.csv'))
