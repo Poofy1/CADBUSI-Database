@@ -5,9 +5,9 @@ import os, json
 import pandas as pd
 #from LB_processing.create_labelbox_data import Create_Labelbox_Data
 #rom LB_processing.retreive_labelbox_data import Read_Labelbox_Data
-from DB_processing.OCR import Perform_OCR
+from DB_processing.image_processing import analyze_images
 from DB_processing.trustworthiness import Find_Trust
-from DB_processing.data_selection import Parse_Data, Rename_Images, Remove_Duplicate_Data, Remove_Green_Images
+from DB_processing.data_selection import Select_Data, Rename_Images, Remove_Duplicate_Data, Remove_Green_Images
 from DB_processing.export import Export_Database
 from DB_processing.dcm_parser import Parse_Dicom_Files
 from DB_processing.video_processing import ProcessVideoData, Video_Cleanup
@@ -99,7 +99,7 @@ if __name__ == '__main__':
         
         user_input = input("Continue with OCR step? (y/n): ")
         if user_input.lower() == "y":
-            Perform_OCR(CONFIG["DATABASE_DIR"])
+            analyze_images(CONFIG["DATABASE_DIR"])
         
         user_input = input("Continue with Data Cleaning step (Part 1/2)? (y/n): ")
         if user_input.lower() == "y":
@@ -109,7 +109,7 @@ if __name__ == '__main__':
             
         user_input = input("Continue with Data Cleaning step (Part 2/2)? (y/n): ")
         if user_input.lower() == "y":
-            Parse_Data(CONFIG["DATABASE_DIR"], only_labels = False)
+            Select_Data(CONFIG["DATABASE_DIR"], only_labels = False)
             #Inpaint_Dataset(f'{CONFIG["DATABASE_DIR"]}/ImageData.csv', f'{CONFIG["DATABASE_DIR"]}/images/') # OLD and SLOW
             Inpaint_Dataset_N2N(f'{CONFIG["DATABASE_DIR"]}/ImageData.csv', f'{CONFIG["DATABASE_DIR"]}/images/')
             Rename_Images(CONFIG["DATABASE_DIR"])
@@ -131,4 +131,4 @@ if __name__ == '__main__':
         Export_Database(CONFIG, reparse_images = True)
 
     if CONFIG["REPROCESS_DATA_FILTERS"]:
-        Parse_Data(CONFIG["DATABASE_DIR"], only_labels = True)
+        Select_Data(CONFIG["DATABASE_DIR"], only_labels = True)

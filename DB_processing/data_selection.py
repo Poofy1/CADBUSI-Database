@@ -1,4 +1,4 @@
-from DB_processing.OCR import *
+from DB_processing.image_processing import *
 
 
 
@@ -176,7 +176,7 @@ def Remove_Green_Images(database_dir):
     save_data(df, input_file)  # Save the updated DataFrame back to the CSV
     
 
-def Parse_Data(database_path, only_labels):
+def Select_Data(database_path, only_labels):
     input_file = f'{database_path}/ImageData.csv'
     breast_file = f'{database_path}/BreastData.csv'
     image_folder_path = f"{database_path}/images/"
@@ -303,13 +303,16 @@ def Remove_Duplicate_Data(database_path):
     # Identify rows with duplicate 'DicomHash' values, except for the last occurrence
     duplicates = df[df.duplicated(subset='DicomHash', keep='last')]
     
+    # Get the count of duplicate rows
+    duplicate_count = len(duplicates)
+    
     # Extract the image names of the duplicate rows
     duplicate_image_names = duplicates['ImageName'].tolist()
     
     # Remove the duplicate rows from the dataframe
     df.drop_duplicates(subset='DicomHash', keep='last', inplace=True)
     
-    # Save the cleaned dataframe back to the CSV file (optional)
+    # Save the cleaned dataframe back to the CSV file
     save_data(df, input_file)
     
     # Delete the duplicate images
@@ -317,3 +320,6 @@ def Remove_Duplicate_Data(database_path):
         image_path = os.path.join(image_folder_path, image_name)
         if file_exists(image_path):
             delete_file(image_path)
+    
+    # Print the number of duplicates removed
+    print(f"Removed {duplicate_count} duplicate rows")

@@ -11,31 +11,6 @@ logging.getLogger().setLevel(logging.ERROR)
 warnings.filterwarnings('ignore', category=UserWarning, message='.*Invalid value for VR UI.*')
 env = os.path.dirname(os.path.abspath(__file__))
 
-
-biopsy_mapping = {
-    'Pathology Malignant': 'malignant',
-    'Known Biopsy-Proven Malignancy': 'malignant',
-    'Malignant': 'malignant',
-    'Pathology Benign': 'benign',
-    'Probably Benign': 'benign',
-    'Pathology Elevated Risk': 'benign',
-    'Benign': 'benign',
-    'Malignant': 'malignant',
-    'Waiting for Pathology': 'unknown',
-    'Low Suspicion for Malignancy': 'unknown',
-    'Suspicious': 'unknown',
-    'Need Additional Imaging Evaluation': 'unknown',
-    'Post Procedure Mammogram for Marker Placement': 'unknown',
-    'High Suspicion for Malignancy': 'unknown',
-    'Highly Suggestive of Malignancy': 'unknown',
-    'Moderate Suspicion for Malignancy': 'unknown',
-    'Negative': 'unknown', 
-    'Elevated Risk': 'unknown',
-}
-
-
-
-
  
 def has_blue_pixels(image, n=100, min_b=200):
     # Create a mask where blue is dominant
@@ -336,13 +311,7 @@ def Parse_Dicom_Files(database_path, anon_location, raw_storage_database, data_r
         dcm_files_list = dcm_files_list[data_range[0]:data_range[1]]
     parsed_files_set = set(parsed_files_list)
     dcm_files_list = [file for file in dcm_files_list if file not in parsed_files_set]
-    
-    
 
-    """if len(dcm_files_list) <= 0:
-        UpdateAnonFile(anon_location) # Not Tested
-        return"""
-    
     
     # Update the list of parsed files and save it
     parsed_files_list.extend(dcm_files_list)

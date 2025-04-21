@@ -4,7 +4,6 @@ import cv2, os, re, sys
 import numpy as np
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import easyocr
 import threading
 from storage_adapter import *
 thread_local = threading.local()
@@ -15,56 +14,11 @@ sys.path.append(parent_dir)
 
 from ML_processing.caliper_model import *
 from ML_processing.mask_model import *
+from DB_processing.reader import get_reader, reader
 
-
-def get_reader():
-    # Check if this thread already has a reader
-    if not hasattr(thread_local, "reader"):
-        # If not, create a new reader and store it in the thread-local storage
-        thread_local.reader = easyocr.Reader(['en'])
-    return thread_local.reader
-
-
-def is_color( img ):
-    """Returns true if numpy array H x W x C has C > 1
-    
-    Used to determine if images converted to numpy arrays are multi-channel.
-    
-    Args:
-        img:  numpy array that is H x W or H x W x 3
-    
-    Returns:
-        boolean:  True if C > 1, False if Array is 2D or C = 1   
-    """
-    return len(img.shape) > 2
-
-def make_grayscale( img ):
-    color = is_color(img)
-    if color:
-        img_gray = cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
-    else:
-        img_gray = img
-    return img_gray, color
-
-# configure easyocr reader
-reader = easyocr.Reader(['en'])
 
 # configuration
 description_kw = ['breast','lt','long','rt','trans','area','palpated','axilla','areolar','radial','marked','supraclavicular','oblique','contrast']
-description_kw_expand= ['cm','fn','breast','lt','long','rt','trans','area',
-                        'palpated','axilla','areolar','radial','marked',
-                        'supraclavicular','oblique','contrast','retroareolar',
-                        'harmonics','axillary','subareolar','nipple','anti', 
-                        'periareolar','subclavicular']
-description_kw_contract = ['retro areolar', 
-                           'sub areoloar', 
-                           'peri areolar',
-                           'anti -rad']
-description_kw_sub = {'scm':'5 cm', 
-                      'anti radial':'anti-rad', 
-                      'axillary':'axilla', 
-                      'axlla':'axilla',
-                      'subclavcular':'subclavicular'}
 
 description_labels_dict = {
     'area':{'breast':['breast'],
@@ -80,7 +34,13 @@ description_labels_dict = {
                     'oblique':['oblique']}
 }
 
-
+def make_grayscale( img ):
+    color = len(img.shape) > 2 # True if C > 1, False if Array is 2D or C = 1  
+    if color:
+        img_gray = cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
+    else:
+        img_gray = img
+    return img_gray, color
 
 def contains_substring(input_string, substring_list):
     input_string = str(input_string).lower()  # Convert input string to lowercase
@@ -162,54 +122,6 @@ def extract_descript_features( input_str, labels_dict ):
     output_dict['nipple_dist'] = find_cm_substring(input_str)
     
     return output_dict
-    
-def extract_descript_features_df(df, labels_dict, col = 'description'):
-
-    # first extract simple text features
-    for feature in labels_dict.keys():
-        levels_dict = labels_dict[feature]
-        df[feature] = df[col].apply( label_parser, label_dict = levels_dict )
-    
-    # extract clock_position
-    df['clock_pos'] = df[col].apply( find_time_substring )
-    
-    # extract nipple_dist
-    df['nipple_dist'] = df[col].apply( find_cm_substring )
-    
-    return df
-
-def fetch_index_for_patient_id( id, db, only_gray = False, only_calipers = False ):
-    # id is a patient id number that should be listed in database
-    # only_gray = True → return only monochrome files (not doppler)
-    # only_calipers = True → return only files that include calipers
-    # returns list of indices
-    
-    if id in db['Patient_ID'].tolist():
-         indices= db.index[db['Patient_ID']==id].tolist()
-    else:
-        indices = []
-    return indices
-
-
-def find_mixed_lateralities( db ):
-    ''' returns a list of all patient ids for which the study contains both left and right lateralities (to be deleted for now)
-    
-    Args:
-        db is a dataframe with one row per image, must have columns for patient_id and laterality
-        
-    Returns:
-        list of patient ids from db for which the lateralities are mixed
-    '''
-    db['latIsLeft']=(db['laterality']=='left')
-    df = db.groupby(['Patient_ID']).agg({'Patient_ID':'count', 'latIsLeft':'sum'})
-    df['notPure'] = ~( (df['latIsLeft']==0) |  (df['latIsLeft']==df['Patient_ID']) )
-    
-    mixedPatientIDs = df[df['notPure']].index.tolist()
-    return mixedPatientIDs
-
-
-
-
 
 
 # ULTRASOUND MASK
@@ -425,71 +337,77 @@ def get_OCR(image_folder_path, description_masks):
 
 
 # Main method to prefrom operations
-def Perform_OCR(database_path):
+def analyze_images(database_path):
         
     image_folder_path = f"{database_path}/images/"
-    input_file = f'{database_path}/ImageData.csv'
-    db_out = read_csv(input_file)
+    image_data_file = f'{database_path}/ImageData.csv'
+    breast_data_file = f'{database_path}/BreastData.csv'
+    image_df = read_csv(image_data_file)
+    breast_df = read_csv(breast_data_file)
 
-    # Check if any new features are missing in db_out and add them
-    new_features = ['labeled', 'crop_x', 'crop_y', 'crop_w', 'crop_h', 'description', 'has_calipers', 'darkness', 'area', 'laterality', 'orientation', 'clock_pos', 'nipple_dist']
-    missing_features = set(new_features) - set(db_out.columns)
+    # Check if any new features are missing in image_df and add them
+    new_features = ['labeled', 'crop_x', 'crop_y', 'crop_w', 'crop_h', 'description', 'has_calipers',  'has_calipers_prediction', 'darkness', 'area', 'laterality', 'orientation', 'clock_pos', 'nipple_dist']
+    missing_features = set(new_features) - set(image_df.columns)
     for nf in missing_features:
-        db_out[nf] = None
+        image_df[nf] = None
     
     
     
-    db_out['labeled'] = False
+    image_df['labeled'] = False
     
     # Check if 'processed' column exists, if not, create it and set all to False
-    if 'processed' not in db_out.columns:
-        db_out['processed'] = False
+    if 'processed' not in image_df.columns:
+        image_df['processed'] = False
 
     # Only keep rows where 'processed' is False
-    db_to_process = db_out[db_out['processed'] != True]
+    db_to_process = image_df[image_df['processed'] != True]
     db_to_process['processed'] = False
     
-    
+
     print("Finding OCR Masks")
     _, description_masks = find_masks(image_folder_path, 'mask_model', db_to_process, 1920, 1080)
+    
+    print("Performing OCR")  
+    descriptions = get_OCR(image_folder_path, description_masks)
     
     print("Finding Darkness and Image Masks")
     image_masks, darknesses = process_images_combined(image_folder_path, db_to_process)
 
-    print("Performing OCR")  
-    descriptions = get_OCR(image_folder_path, description_masks)
-    
     print("Finding Calipers")
-    has_calipers = find_calipers(image_folder_path, 'caliper_model', db_to_process)
+    caliper_results = find_calipers(image_folder_path, 'caliper_model', db_to_process)
     
     # Convert lists of tuples to dictionaries
-    has_calipers_dict = {filename: value for filename, value in has_calipers}
+    has_calipers_dict = {filename: bool_val for filename, bool_val, _ in caliper_results}
+    has_calipers_confidence_dict = {filename: pred_val for filename, _, pred_val in caliper_results}
     darknesses_dict = {filename: value for filename, value in darknesses}
     image_masks_dict = {filename: mask for filename, mask in image_masks}
-    
-    # Convert dictionaries to Series for easy mapping
-    descriptions_series = pd.Series(descriptions)
-    darknesses_series = pd.Series(darknesses_dict)
-    has_calipers_series = pd.Series(has_calipers_dict)
-    image_masks_series = pd.Series(image_masks_dict)
 
     # Update dataframe using map
-    db_to_process['description'] = db_to_process['ImageName'].map(descriptions_series)
-    db_to_process['darkness'] = db_to_process['ImageName'].map(darknesses_series)
-    db_to_process['has_calipers'] = db_to_process['ImageName'].map(has_calipers_series)
-    db_to_process['bounding_box'] = db_to_process['ImageName'].map(image_masks_series)
+    db_to_process['description'] = db_to_process['ImageName'].map(pd.Series(descriptions))
+    db_to_process['darkness'] = db_to_process['ImageName'].map(pd.Series(darknesses_dict))
+    db_to_process['has_calipers'] = db_to_process['ImageName'].map(pd.Series(has_calipers_dict))
+    db_to_process['has_calipers_prediction'] = db_to_process['ImageName'].map(pd.Series(has_calipers_confidence_dict))
+    db_to_process['bounding_box'] = db_to_process['ImageName'].map(pd.Series(image_masks_dict))
     
     
     db_to_process[['crop_x', 'crop_y', 'crop_w', 'crop_h']] = pd.DataFrame(db_to_process['bounding_box'].tolist(), index=db_to_process.index)
 
     # Construct a temporary DataFrame with the feature extraction
-    temp_df = db_to_process.loc[db_to_process['description'].str.len() > 0, 'description'].apply(lambda x: extract_descript_features(x, labels_dict=description_labels_dict)).apply(pd.Series)
-
-    # Update the columns in db_out directly from temp_df
+    temp_df = db_to_process['description'].apply(lambda x: extract_descript_features(x, labels_dict=description_labels_dict)).apply(pd.Series)
     for column in temp_df.columns:
         db_to_process[column] = temp_df[column]
+    
+    # Overwrite non bilateral cases with known lateralities
+    laterality_mapping = breast_df[breast_df['Study_Laterality'].isin(['LEFT', 'RIGHT'])].set_index('Accession_Number')['Study_Laterality'].to_dict()
+    db_to_process['laterality'] = db_to_process.apply(
+        lambda row: laterality_mapping.get(row['Accession_Number']).lower() 
+        if row['Accession_Number'] in laterality_mapping 
+        else row['laterality'],
+        axis=1
+    )
+
+    
         
-    db_out.update(db_to_process, overwrite=True)
-    save_data(db_out, input_file)
-
-
+    image_df.update(db_to_process, overwrite=True)
+    save_data(image_df, image_data_file)
+    

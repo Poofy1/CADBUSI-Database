@@ -71,12 +71,14 @@ def find_calipers(images_dir, model_name, db_to_process, image_size=256, batch_s
     results = []
     
     with torch.no_grad():
-        for images, filenames in tqdm(dataloader, total=len(dataloader)):  # Unpack filenames here
+        for images, filenames in tqdm(dataloader, total=len(dataloader)):
             images = images.to(device)
             has_calipers_pred = model(images)
-            prediction = (has_calipers_pred > 0.5).cpu() 
-            # Pair each filename with its corresponding prediction
-            result_pairs = list(zip(filenames, prediction.view(-1).tolist()))
-            results.extend(result_pairs)  # Extend results with pairs
+            raw_predictions = has_calipers_pred.cpu().view(-1).tolist()
+            boolean_predictions = (has_calipers_pred > 0.5).cpu().view(-1).tolist()
+            
+            # Pair each filename with both its boolean prediction and raw prediction value
+            result_triplets = list(zip(filenames, boolean_predictions, raw_predictions))
+            results.extend(result_triplets)
 
     return results

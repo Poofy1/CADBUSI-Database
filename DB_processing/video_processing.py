@@ -1,4 +1,4 @@
-from DB_processing.OCR import *
+from DB_processing.image_processing import *
 
 
 def modify_keys(dictionary):
