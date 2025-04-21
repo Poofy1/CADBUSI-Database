@@ -220,9 +220,9 @@ def parse_anon_file(anon_location, database_path, image_df):
     
     
     # Find all csv files and combine into df
-    anon_df = read_csv(anon_location)
-    anon_df = anon_df.sort_values('PATIENT_ID')
-    anon_df = anon_df.rename(columns={
+    breast_csv = read_csv(anon_location)
+    breast_csv = breast_csv.sort_values('PATIENT_ID')
+    breast_csv = breast_csv.rename(columns={
         'PATIENT_ID': 'Patient_ID',
         'ACCESSION_NUMBER': 'Accession_Number'
     })
@@ -230,26 +230,18 @@ def parse_anon_file(anon_location, database_path, image_df):
     
     # Convert 'Patient_ID' to str in both dataframes before merging
     image_df[['Patient_ID', 'Accession_Number']] = image_df[['Patient_ID', 'Accession_Number']].astype(str)
-    anon_df[['Patient_ID', 'Accession_Number']] = anon_df[['Patient_ID', 'Accession_Number']].astype(str)
+    breast_csv[['Patient_ID', 'Accession_Number']] = breast_csv[['Patient_ID', 'Accession_Number']].astype(str)
     
     # Remove leading zeros from Patient_ID in both dataframes
     image_df['Patient_ID'] = image_df['Patient_ID'].str.lstrip('0')
-    anon_df['Patient_ID'] = anon_df['Patient_ID'].str.lstrip('0')
+    breast_csv['Patient_ID'] = breast_csv['Patient_ID'].str.lstrip('0')
     
     #image_df.to_csv(f"{env}/image_df.csv", index=False) # DEBUG
     #anon_df.to_csv(f"{env}/anon_df.csv", index=False) # DEBUG
     
-    # Merge
-    breast_csv = anon_df
-    
-
-    breast_csv['Path_Desc'] = None
-    breast_csv['Density_Desc'] = None
-    breast_csv['Has_Malignant'] = False
-    breast_csv['Has_Benign'] = False
-    breast_csv['Has_Unknown'] = False
-    
-
+    # Populate Has_Malignant and Has_Benign based on final_interpretation
+    breast_csv['Has_Malignant'] = breast_csv['final_interpretation'] == 'MALIGNANT'
+    breast_csv['Has_Benign'] = breast_csv['final_interpretation'] == 'BENIGN'
     
     image_csv_file = f'{database_path}ImageData.csv'
     video_csv_file = f'{database_path}VideoData.csv'

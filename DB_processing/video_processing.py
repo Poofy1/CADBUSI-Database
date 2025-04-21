@@ -53,23 +53,25 @@ def get_video_ultrasound_region(image_folder_path, db_to_process):
 def ProcessVideoData(database_path):
     
     video_folder_path = f"{database_path}/videos/"
-    input_file = f'{database_path}/VideoData.csv'
-    db_out = read_csv(input_file)
+    video_data_file = f'{database_path}/VideoData.csv'
+    breast_data_file = f'{database_path}/BreastData.csv'
+    video_df = read_csv(video_data_file)
+    breast_df = read_csv(breast_data_file)
 
-    # Check if any new features are missing in db_out and add them
+    # Check if any new features are missing in video_df and add them
     new_features = ['crop_x', 'crop_y', 'crop_w', 'crop_h', 'description', 'area', 'laterality', 'orientation', 'clock_pos', 'nipple_dist']
-    missing_features = set(new_features) - set(db_out.columns)
+    missing_features = set(new_features) - set(video_df.columns)
     for nf in missing_features:
-        db_out[nf] = None
+        video_df[nf] = None
     
     
 
     # Check if 'processed' column exists, if not, create it and set all to False
-    if 'processed' not in db_out.columns:
-        db_out['processed'] = False
+    if 'processed' not in video_df.columns:
+        video_df['processed'] = False
 
     # Only keep rows where 'processed' is False
-    db_to_process = db_out[db_out['processed'] != True]
+    db_to_process = video_df[video_df['processed'] != True]
     db_to_process['processed'] = False
     
     print("Finding OCR Masks")
@@ -114,13 +116,21 @@ def ProcessVideoData(database_path):
     db_to_process[['crop_x', 'crop_y', 'crop_w', 'crop_h']] = pd.DataFrame(db_to_process['bounding_box'].tolist(), index=db_to_process.index)
 
     # Construct a temporary DataFrame with the feature extraction
-    temp_df = db_to_process.loc[db_to_process['description'].str.len() > 0, 'description'].apply(lambda x: extract_descript_features(x, labels_dict=description_labels_dict)).apply(pd.Series)
-
+    temp_df = db_to_process['description'].apply(lambda x: extract_descript_features(x, labels_dict=description_labels_dict)).apply(pd.Series)
     for column in temp_df.columns:
         db_to_process[column] = temp_df[column]
+    
+    # Overwrite non bilateral cases with known lateralities
+    laterality_mapping = breast_df[breast_df['Study_Laterality'].isin(['LEFT', 'RIGHT'])].set_index('Accession_Number')['Study_Laterality'].to_dict()
+    db_to_process['laterality'] = db_to_process.apply(
+        lambda row: laterality_mapping.get(row['Accession_Number']).lower() 
+        if row['Accession_Number'] in laterality_mapping 
+        else row['laterality'],
+        axis=1
+    )
 
-    db_out.update(db_to_process, overwrite=True)
-    save_data(db_out, input_file)
+    video_df.update(db_to_process, overwrite=True)
+    save_data(video_df, video_data_file)
 
 
 def Video_Cleanup(database_path):
@@ -134,7 +144,7 @@ def Video_Cleanup(database_path):
     db.loc[(db['area'] == 'unknown') | (db['area'].isna()), 'area'] = 'breast'
     
     # Find crop ratio
-    db['crop_aspect_ratio'] = db['crop_w'] / db['crop_h']
+    db['crop_aspect_ratio'] = (db['crop_w'] / db['crop_h']).round(2)
     
     save_data(db, input_file)
 

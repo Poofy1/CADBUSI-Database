@@ -1,6 +1,14 @@
 from DB_processing.image_processing import *
 
-
+def fetch_index_for_patient_id( id, db):
+    # id is a patient id number that should be listed in database
+    # returns list of indices
+    
+    if id in db['Patient_ID'].tolist():
+         indices= db.index[db['Patient_ID']==id].tolist()
+    else:
+        indices = []
+    return indices
 
 def add_labeling_categories(db):
     db['label_cat'] = ''
@@ -56,7 +64,7 @@ def choose_images_to_label(db, breast_df):
     db.loc[db['RegionCount'] > 1, 'label'] = False
     
     # Check the aspect ratio of the crop region
-    db['crop_aspect_ratio'] = db['crop_w'] / db['crop_h']
+    db['crop_aspect_ratio'] = (db['crop_w'] / db['crop_h']).round(2)
     
     return db
 

@@ -128,7 +128,7 @@ if __name__ == '__main__':
         """
     
     elif task_num == 4:  # Develop Export
-        Export_Database(CONFIG, reparse_images = True)
+        Export_Database(CONFIG)
 
     if CONFIG["REPROCESS_DATA_FILTERS"]:
         Select_Data(CONFIG["DATABASE_DIR"], only_labels = True)

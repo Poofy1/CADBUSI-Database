@@ -186,27 +186,6 @@ def Crop_Videos(df, input_dir, output_dir):
                 pbar.update()
 
 
-def merge_and_fillna(df, breast_df):
-    
-    
-    df['laterality'] = df['laterality'].str.upper()
-    # Merge df with breast_df on 'Patient_ID' and 'laterality'/'Breast'
-    # Before merging, convert Patient_ID to the same type in both dataframes
-    breast_df['Patient_ID'] = breast_df['Patient_ID'].astype(str)
-    df['Patient_ID'] = df['Patient_ID'].astype(str)
-
-    # Now perform the merge
-    df = pd.merge(df, 
-                breast_df[['Patient_ID', 'Study_Laterality', 'Has_Malignant', 'Has_Benign', 'Has_Unknown']], 
-                left_on=['Patient_ID', 'laterality'], 
-                right_on=['Patient_ID', 'Study_Laterality'], 
-                how='left')
-    # Drop 'Breast' column as it's no longer needed
-    df.drop('Study_Laterality', axis=1, inplace=True)
-    # Replace NaN values in new columns with appropriate values
-    df[['Has_Malignant', 'Has_Benign', 'Has_Unknown']].fillna(0, inplace=True)
-    return df
-
 
 def safe_literal_eval(val, idx):
     val = val.replace("nan,", "'unknown',")
@@ -258,12 +237,6 @@ def Fix_CM_Data(df):
 
     # Replace 0 with NaN
     df.loc[df['nipple_dist'] == 0, 'nipple_dist'] = np.nan
-
-    # Convert NaN values to -1 and convert to int
-    df['nipple_dist'].fillna(-1, inplace=True)
-
-    # Convert -1 back to NaN
-    df.loc[df['nipple_dist'] == -1, 'nipple_dist'] = np.nan
     
     return df
 
@@ -279,9 +252,6 @@ def format_data(breast_data, image_data, num_of_tests):
     for col in breast_data.columns:
         if col + '_image_data' in data.columns:
             data.drop(col + '_image_data', axis=1, inplace=True)
-
-    # Filter out rows where Has_Unknown is False
-    data = data[data['Has_Unknown'] == False]
 
     # Keep only the specified columns
     columns_to_keep = ['Patient_ID', 'Accession_Number', 'Study_Laterality', 'ImageName', 'Has_Malignant', 'Has_Benign', 'valid']
@@ -415,12 +385,13 @@ def Export_Database(CONFIG, reparse_images = True, trust_max = 2, num_of_tests =
 
     # Filter the image data based on the filtered case study data and the 'label' column
     image_df = image_df[image_df['label'] == True]
+    image_df = image_df[image_df['laterality'] != 'unknown']
     image_df = image_df[(image_df['Patient_ID'].isin(breast_df['Patient_ID']))]
     image_df = image_df.drop(['label', 'area'], axis=1)
-    image_df = image_df[image_df['laterality'].notna()]
-    video_df = video_df[(video_df['Patient_ID'].isin(breast_df['Patient_ID']))]
+    
     video_df = video_df[video_df['laterality'] != 'unknown']
-    video_df = video_df[video_df['laterality'].notna()]
+    video_df = video_df[(video_df['Patient_ID'].isin(breast_df['Patient_ID']))]
+    
     
     if KnownInstancesOnly:
         # Filter image_df to only include instances present in instance_data
@@ -474,24 +445,15 @@ def Export_Database(CONFIG, reparse_images = True, trust_max = 2, num_of_tests =
                           'crop_aspect_ratio']
     video_df = video_df[video_columns]
     
-    
-    # Round 'crop_aspect_ratio' to 2 decimal places
-    image_df['crop_aspect_ratio'] = image_df['crop_aspect_ratio'].round(2)
-    video_df['crop_aspect_ratio'] = video_df['crop_aspect_ratio'].round(2)
-    
     # Convert 'Patient_ID' columns to integers
     labeled_df['Patient_ID'] = labeled_df['Patient_ID'].astype(str)
     image_df['Accession_Number'] = image_df['Accession_Number'].astype(str)
     image_df['Patient_ID'] = image_df['Patient_ID'].astype(str)
-    breast_df = breast_df.fillna(0).astype({'Accession_Number': 'str'})
-    
+    breast_df['Accession_Number'] = breast_df['Accession_Number'].astype(str)
+    breast_df['Patient_ID'] = breast_df['Patient_ID'].astype(str)
+
     # Set 'Labeled' to True for rows with a 'Patient_ID' in labeled_df
     image_df.loc[image_df['Patient_ID'].isin(labeled_df['Patient_ID']), 'labeled'] = True
-    
-    # Transfer Biopsy data
-    image_df = merge_and_fillna(image_df, breast_df)
-    video_df = merge_and_fillna(video_df, breast_df)
-    
     
     #Find Image Counts (Breast Data)
     image_df['laterality'] = image_df['laterality'].str.upper()
@@ -520,14 +482,16 @@ def Export_Database(CONFIG, reparse_images = True, trust_max = 2, num_of_tests =
     video_paths = video_df.groupby(['Accession_Number', 'laterality'])['ImagesPath'].agg(list).to_dict()
     train_data['VideoPaths'] = train_data.apply(lambda row: video_paths.get((row['Accession_Number'], row['Study_Laterality']), []), axis=1)
 
-    video_images_df = generate_video_images_csv(video_df, output_dir)
+    if reparse_images:  
+        video_images_df = generate_video_images_csv(video_df, output_dir)
+        save_data(video_images_df, os.path.join(output_dir, 'VideoImages.csv'))
 
     # Write the filtered dataframes to CSV files in the output directory
-    #save_data(breast_df, os.path.join(output_dir, 'BreastData.csv'))
-    #save_data(labeled_df, os.path.join(output_dir, 'LabeledData.csv'))
-    #save_data(video_df, os.path.join(output_dir, 'VideoData.csv'))
-    #save_data(image_df, os.path.join(output_dir, 'ImageData.csv'))
+    save_data(breast_df, os.path.join(output_dir, 'BreastData.csv'))
+    save_data(labeled_df, os.path.join(output_dir, 'LabeledData.csv'))
+    save_data(video_df, os.path.join(output_dir, 'VideoData.csv'))
+    save_data(image_df, os.path.join(output_dir, 'ImageData.csv'))
     save_data(train_data, os.path.join(output_dir, 'TrainData.csv'))
     save_data(instance_data, os.path.join(output_dir, 'InstanceData.csv'))
     
-    save_data(video_images_df, os.path.join(output_dir, 'VideoImages.csv'))
+    
