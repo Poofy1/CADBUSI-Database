@@ -88,7 +88,7 @@ def find_nearest_images(db, patient_id, image_folder_path):
     for image_id in idx:
         file_name = subset.loc[image_id, 'ImageName']
         full_filename = os.path.join(image_folder_path, file_name)
-        img = Image.open(full_filename)
+        img = read_image(full_filename, use_pil=True)
         img = np.array(img).astype(np.uint8)
         img_dict[image_id] = img
 
@@ -146,6 +146,7 @@ def process_patient_id(pid, db_out, image_folder_path):
     return subset
 
 def Remove_Green_Images(database_dir):
+    print("Searching for corrupted images")
     input_file = f'{database_dir}/ImageData.csv'
     
     # Load the CSV file into a pandas DataFrame

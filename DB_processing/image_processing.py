@@ -263,7 +263,7 @@ def process_images_combined(image_folder_path, db_to_process):
 
 def ocr_image(image_file, description_mask, image_folder_path, reader, kw_list):
     reader_thread = get_reader()
-    
+    image_file = os.path.basename(image_file)
     try:
         image = read_image(os.path.join(image_folder_path, image_file), use_pil=True).convert('L')
     except:

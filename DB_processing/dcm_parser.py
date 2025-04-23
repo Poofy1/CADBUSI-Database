@@ -1,10 +1,9 @@
-import os, pydicom, zipfile, hashlib, ast
+import os, pydicom, hashlib
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import pandas as pd
 import io
 from tqdm import tqdm
-from highdicom.io import ImageFileReader
 import warnings, logging, cv2
 from storage_adapter import *
 logging.getLogger().setLevel(logging.ERROR)
@@ -44,12 +43,6 @@ def generate_hash(data):
 def parse_video_data(dcm, current_index, parsed_database):
     data_dict = {}
     dcm_data = read_binary(dcm)
-    dataset = pydicom.dcmread(io.BytesIO(dcm_data), stop_before_pixels=True)
-    
-    # Convert dataset to binary
-    memory_file = io.BytesIO()
-    pydicom.filewriter.write_file(memory_file, dataset)
-    binary_data = memory_file.getvalue()
     
     for elem in dataset:
         if elem.VR == "SQ" and elem.value and len(elem.value) > 0:  # if sequence
@@ -71,16 +64,21 @@ def parse_video_data(dcm, current_index, parsed_database):
     #get image frames
     image_count = 0
     
-    with ImageFileReader(dcm) as image:
-        total_frames = image.number_of_frames
-        
-        # Save every 4th frame
-        for i in range(0, total_frames, 4):
-            frame = image.read_frame(i, correct_color=False)
-            
+   # Get total number of frames
+    total_frames = getattr(dataset, 'NumberOfFrames', 1)
+    
+    # Extract frames directly from dataset using pydicom
+    for i in range(0, total_frames, 4):  # Process every 4th frame
+        # Use pydicom to extract the frame
+        if hasattr(dataset, 'pixel_array'):
+            if total_frames > 1:
+                frame = dataset.pixel_array[i]
+            else:
+                frame = dataset.pixel_array
+                
             # Convert to grayscale if the frame is not already grayscale
             if len(frame.shape) == 3:  # if the frame has 3 channels
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)  # Convert to grayscale
+                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)  # Convert to grayscale
             
             image_name = f"{data_dict.get('PatientID', '')}_{data_dict.get('AccessionNumber', '')}_{current_index}_{image_count}.png"
             
@@ -93,7 +91,7 @@ def parse_video_data(dcm, current_index, parsed_database):
     data_dict['FileName'] = os.path.basename(dcm)
     data_dict['ImagesPath'] = video_path
     data_dict['SavedFrames'] = image_count
-    data_dict['DicomHash'] = generate_hash(binary_data)
+    data_dict['DicomHash'] = generate_hash(dcm_data)
     
     return data_dict
 

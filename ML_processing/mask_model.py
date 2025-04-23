@@ -36,7 +36,16 @@ class MyDataset(Dataset):
     def __init__(self, root_dir, db_to_process, max_width, max_height, transform=None):
         self.root_dir = root_dir
         self.transform = transform
-        self.images = sorted([img for img in os.listdir(root_dir) if img in db_to_process['ImageName'].values])
+        # Get all files from the directory
+        all_files = list_files(root_dir)
+
+        # Extract just the filenames from the full paths
+        file_dict = {os.path.basename(img): img for img in all_files}
+
+        # Filter by the database image names and store only the filenames (not full paths)
+        self.images = sorted([os.path.basename(file_dict[img_name]) for img_name in db_to_process['ImageName'].values 
+                            if img_name in file_dict])
+        
         self.max_width = max_width
         self.max_height = max_height
 

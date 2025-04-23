@@ -6,10 +6,18 @@ This database manager is designed to process breast ultrasound data from the May
 - 6GB Nvidia GPU (Recommended)
 - At least 4 TB of hard drive space (Recommended)
 - Custom storage package: [storage-adapter](https://github.com/Poofy1/storage-adapter.git) (automatically installed via requirements.txt)
-- Install required Python packages with pip:
-```
-pip install -r requirements.txt
-```
+
+
+
+## Setup
+
+- Create a Mayo Clinic AI Factory instance with T4 GPU
+- Install git-lfs: `sudo apt-get install git-lfs`
+- Install git-lfs: `git lfs install`
+- Clone repository: `git clone https://github.com/Poofy1/CADBUSI-Database.git`
+- Pull LFS objects: `git lfs pull`
+- Install requirements: `pip install -r requirements.txt`
+- Configure: `config.json`
 
 
 ## Configuration
