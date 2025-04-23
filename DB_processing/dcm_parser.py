@@ -43,6 +43,7 @@ def generate_hash(data):
 def parse_video_data(dcm, current_index, parsed_database):
     data_dict = {}
     dcm_data = read_binary(dcm)
+    dataset = pydicom.dcmread(io.BytesIO(dcm_data))
     
     for elem in dataset:
         if elem.VR == "SQ" and elem.value and len(elem.value) > 0:  # if sequence

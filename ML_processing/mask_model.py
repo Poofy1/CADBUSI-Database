@@ -13,16 +13,29 @@ device = torch.device("cuda")
 def get_first_image_in_each_folder(video_folder_path):
     first_images = []
 
+    # Normalize path to remove double slashes
+    video_folder_path = os.path.normpath(video_folder_path)
+    
     # Get all PNG files in the directory
     image_files = get_files_by_extension(video_folder_path, '.png')
 
     # Sort the files and group them by directory
     grouped_files = {}
     for file_path in image_files:
+        # Get the directory part
         directory = os.path.dirname(file_path)
+        
+        # Extract just the last folder name from the directory path
+        video_folder_name = os.path.basename(directory)
+        
         if directory not in grouped_files:
             grouped_files[directory] = []
-        grouped_files[directory].append(file_path)
+        
+        # Create the desired format: video_folder_name/image_name.png
+        image_name = os.path.basename(file_path)
+        desired_path = f"{video_folder_name}/{image_name}"
+        
+        grouped_files[directory].append(desired_path)
 
     # Get the first image from each directory
     for directory in grouped_files:

@@ -10,11 +10,10 @@ def modify_keys(dictionary):
     return modified_dictionary
 
 
-def single_video_region(image_path):
-    image_name = os.path.basename(image_path)
-    
+def single_video_region(base_path, image_path):
+    target_path = os.path.join(base_path, image_path)
     # Read image and convert to grayscale
-    image = read_image(image_path)
+    image = read_image(target_path)
     if image is None:
         return None, None
         
@@ -22,21 +21,18 @@ def single_video_region(image_path):
     
     x, y, w, h = process_crop_region(image)
     
-    return image_name, (x, y, w, h)
+    return image_path, (x, y, w, h)
 
-def get_video_ultrasound_region(image_folder_path, db_to_process):
-    # Construct image paths for only the new data
-    video_folders = [os.path.join(image_folder_path, filename) for filename in db_to_process['ImagesPath']]
-    
+def get_video_ultrasound_region(image_folder_path, first_images):
+
     # Collect image data in list
     image_data = []
     
     # Thread pool and TQDM
     with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
         futures = {}
-        for video_folder in video_folders:
-            image_paths = get_first_image_in_each_folder(video_folder)
-            futures.update({executor.submit(single_video_region, image_path): image_path for image_path in image_paths})
+        futures.update({executor.submit(single_video_region, image_folder_path, img_path): img_path 
+                       for img_path in first_images})
         
         with tqdm(total=len(futures)) as pbar:
             for future in as_completed(futures):
@@ -98,7 +94,7 @@ def ProcessVideoData(database_path):
         progress.close()
 
     print("Finding Image Masks")
-    image_masks_dict = get_video_ultrasound_region(video_folder_path, db_to_process)
+    image_masks_dict = get_video_ultrasound_region(video_folder_path, first_images)
     
     db_to_process['processed'] = True
     
