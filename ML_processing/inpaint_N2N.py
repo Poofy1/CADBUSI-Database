@@ -40,6 +40,7 @@ def Inpaint_Dataset_N2N(csv_file_path, input_folder):
         for index, row in tqdm(processed_data.iterrows(), total=len(processed_data)):
             # Load and process input image
             input_image_path = os.path.join(input_folder, row['ImageName'])
+            input_image_path = os.path.normpath(input_image_path)
             original_image = read_image(input_image_path, use_pil=True).convert('L')
             
             # Preprocess image
@@ -56,7 +57,7 @@ def Inpaint_Dataset_N2N(csv_file_path, input_folder):
             output_image = transforms.ToPILImage()(output)
             
             # Save inpainted image
-            os.remove(input_image_path)
+            delete_file(input_image_path)
             save_data(output_image, input_image_path)
             
             # Update CSV

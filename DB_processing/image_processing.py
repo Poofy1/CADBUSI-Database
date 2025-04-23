@@ -311,16 +311,13 @@ def ocr_image(image_file, description_mask, image_folder_path, reader, kw_list):
 
 
 def get_OCR(image_folder_path, description_masks):
-    # Create a mapping of basenames to full paths for use in the function
-    basename_to_full_path = {os.path.basename(image_file): image_file for image_file, _ in description_masks}
-    
     # Create new description_masks with just the basenames
     basename_description_masks = [(os.path.basename(image_file), description_mask) 
                                  for image_file, description_mask in description_masks]
     
     with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
         # Pass basename to the future, but also provide a way to access the full path inside ocr_image
-        futures = {executor.submit(ocr_image, basename, description_mask, image_folder_path, reader, description_kw, basename_to_full_path): 
+        futures = {executor.submit(ocr_image, basename, description_mask, image_folder_path, reader, description_kw): 
                   basename for basename, description_mask in basename_description_masks}
         progress = tqdm(total=len(futures), desc='')
 
