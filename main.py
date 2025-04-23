@@ -95,7 +95,10 @@ if __name__ == '__main__':
     if task_num == 1:  # Develop Database
         user_input = input("Continue with DCM Parsing step? (y/n): ")
         if user_input.lower() == "y":
-            Parse_Dicom_Files(CONFIG["DATABASE_DIR"], CONFIG["ANON_FILE"], CONFIG["UNZIPPED_DICOMS"], CONFIG["DEBUG_DATA_RANGE"])
+            target_input = input("Enter target data folder: ")
+            dicom_path = f'anon_dicoms/{target_input}'
+            anon_file = f'{dicom_path}/anon_data.csv'
+            Parse_Dicom_Files(CONFIG["DATABASE_DIR"], anon_file, CONFIG["UNZIPPED_DICOMS"], CONFIG["DEBUG_DATA_RANGE"])
         
         user_input = input("Continue with OCR step? (y/n): ")
         if user_input.lower() == "y":

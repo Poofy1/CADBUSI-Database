@@ -43,7 +43,8 @@ def generate_hash(data):
 
 def parse_video_data(dcm, current_index, parsed_database):
     data_dict = {}
-    dataset = pydicom.dcmread(dcm, stop_before_pixels=True)
+    dcm_data = read_binary(dcm)
+    dataset = pydicom.dcmread(io.BytesIO(dcm_data), stop_before_pixels=True)
     
     # Convert dataset to binary
     memory_file = io.BytesIO()

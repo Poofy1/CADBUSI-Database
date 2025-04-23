@@ -16,7 +16,6 @@ pip install -r requirements.txt
 All user parameters will be controlled from a `config.json` file, you will need to configure the following parameters:
 
 - `UNZIPPED_DICOMS`: Directory of the anonymized unzipped dicom data. 
-- `ANON_FILE`: Location of the additional input `total_cases_anon.csv` file.
 - `DATABASE_DIR`: Final location of the database.
 
 - `LABELBOX_API_KEY`: Label Box API key for uploading and retrieving Label Box data.
