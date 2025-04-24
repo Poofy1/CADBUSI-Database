@@ -48,10 +48,6 @@ def choose_images_to_label(db, breast_df):
     # set label = False for all non-breast images
     db.loc[(db['area'] == 'unknown') | (db['area'].isna()), 'area'] = 'breast'
     db.loc[(db['area'] != 'breast'), 'label'] = False
-
-    # Remove Males from studies
-    male_patient_ids = breast_df[breast_df['US_CORE_BIRTHSEX'] == 'M']['Patient_ID'].values
-    db.loc[db['Patient_ID'].isin(male_patient_ids),'label'] = False
     
     # Set label = False for all images with 'unknown' laterality
     db.loc[(db['laterality'] == 'unknown') | (db['laterality'].isna()), 'label'] = False
