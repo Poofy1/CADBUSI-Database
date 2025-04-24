@@ -241,64 +241,6 @@ def Select_Data(database_path, only_labels):
     
 tqdm.pandas()
 
-def Rename_Images(database_path):
-    input_file = f'{database_path}/ImageData.csv'
-    image_folder_path = f"{database_path}/images/"
-    df = read_csv(input_file)
-    
-    print("Renaming Images With Laterality")
-    
-    # Create a dictionary to keep track of the instance numbers
-    instance_dict = {}
-
-    def rename_images(row):
-        old_image_name = row['ImageName']
-        old_image_path = os.path.join(image_folder_path, old_image_name)
-        
-        # Check if the old image path exists
-        if not file_exists(old_image_path):
-            return None
-
-        # Check if the old image name is already in the desired format
-        if old_image_name.count('_') == 3:
-            return old_image_name
-    
-        # Extract the relevant information
-        patient_id = int(row['Patient_ID'])
-        accession_number = row['Accession_Number']
-        accession_number = '' if pd.isna(accession_number) else (accession_number)
-        laterality = row['laterality']
-
-        # Create a unique key for this combination
-        key = (patient_id, accession_number, laterality)
-
-        # Get the current instance number for this combination
-        instance_number = instance_dict.get(key, 0)
-
-        # Generate the new image name
-        new_image_name = f"{patient_id}_{accession_number}_{laterality}_{instance_number}.png"
-        new_image_path = os.path.join(image_folder_path, new_image_name)
-
-        # If the new image name already exists, remove the old image path
-        if file_exists(new_image_path):
-            delete_file(old_image_path)
-            return None
-
-        # Rename the image file
-        rename_file(old_image_path, new_image_path)
-
-        # Update the dictionary for the next instance
-        instance_dict[key] = instance_number + 1
-        
-        return new_image_name
-
-    df['ImageName'] = df.progress_apply(rename_images, axis=1)
-    df.dropna(subset=['ImageName'], inplace=True)
-
-    # Save the updated DataFrame to the same CSV file
-    save_data(df, input_file)
-
-
 
 def Remove_Duplicate_Data(database_path):
     print("Removing Duplicate Data")
