@@ -256,7 +256,7 @@ def Rename_Images(database_path):
         old_image_path = os.path.join(image_folder_path, old_image_name)
         
         # Check if the old image path exists
-        if not os.path.exists(old_image_path):
+        if not file_exists(old_image_path):
             return None
 
         # Check if the old image name is already in the desired format
@@ -278,7 +278,7 @@ def Rename_Images(database_path):
         # Generate the new image name
         new_image_name = f"{patient_id}_{accession_number}_{laterality}_{instance_number}.png"
         new_image_path = os.path.join(image_folder_path, new_image_name)
-    
+
         # If the new image name already exists, remove the old image path
         if file_exists(new_image_path):
             delete_file(old_image_path)

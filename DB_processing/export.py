@@ -16,30 +16,6 @@ from storage_adapter import *
 # Paths
 labeled_data_dir = f'{env}/labeled_data_archive/'
 
-biopsy_mapping = {
-        'Pathology Malignant': 'malignant',
-        'Known Biopsy-Proven Malignancy': 'malignant',
-        'Malignant': 'malignant',
-        
-        'Pathology Benign': 'benign',
-        'Probably Benign': 'benign',
-        'Pathology Elevated Risk': 'benign',
-        'Benign': 'benign',
-        
-        'Waiting for Pathology': 'unknown',
-        'Low Suspicion for Malignancy': 'unknown',
-        'Suspicious': 'unknown',
-        'Need Additional Imaging Evaluation': 'unknown',
-        'Post Procedure Mammogram for Marker Placement': 'unknown',
-        'High Suspicion for Malignancy': 'unknown',
-        'Highly Suggestive of Malignancy': 'unknown',
-        'Moderate Suspicion for Malignancy': 'unknown',
-        'Negative': 'unknown',
-    }
-
-def transform_biopsy_list(biopsy_list):
-    return [biopsy_mapping.get(biopsy, 'unknown') for biopsy in biopsy_list]
-
 def process_single_image(row, image_folder_path, image_output, mask_folder_input, mask_folder_output):
     try:
         image_name = row['ImageName']
@@ -139,8 +115,6 @@ def Crop_Images(df, input_dir, output_dir):
                 
                 
 def process_single_video(row, video_folder_path, output_dir):
-    storage = StorageClient.get_instance()
-    
     # Get the folder name and crop data
     folder_name = row['ImagesPath']
     crop_y = int(row['crop_y'])
@@ -184,19 +158,6 @@ def Crop_Videos(df, input_dir, output_dir):
         with tqdm(total=len(futures)) as pbar:
             for future in as_completed(futures):
                 pbar.update()
-
-
-
-def safe_literal_eval(val, idx):
-    val = val.replace("nan,", "'unknown',")
-    val = val.replace("nan]", "'unknown']")
-
-    try:
-        return ast.literal_eval(val)
-    except ValueError:
-        print(f"Error parsing value at index {idx}: {val}")
-        return val  # or some other default value
-
 
 
 def PerformVal(val_split, df):
@@ -316,7 +277,7 @@ def generate_video_images_csv(video_df, root_dir):
     video_images_df['images'] = video_images_df['images'].apply(str)  # Convert lists to string
     return video_images_df
     
-def Export_Database(CONFIG, reparse_images = True, trust_max = 2, num_of_tests = 10):
+def Export_Database(CONFIG, reparse_images = True, num_of_tests = 10):
     #Debug Tools
     KnownInstancesOnly = False # When true it only exports images that have a instance label
     use_reject_system = True # True = removes rejects from trianing
@@ -336,15 +297,17 @@ def Export_Database(CONFIG, reparse_images = True, trust_max = 2, num_of_tests =
     
     # Save the config to the export location
     export_config_path = os.path.join(output_dir, 'export_config.json')
-    with open(export_config_path, 'w') as export_config_file:
-        json.dump(CONFIG, export_config_file, indent=4)
+    export_config_path = os.path.normpath(export_config_path)
+    # Convert CONFIG to a JSON string
+    config_json_str = json.dumps(CONFIG, indent=4)
+    save_data(config_json_str, export_config_path)
     
     #Dirs
     image_csv_file = f'{parsed_database}ImageData.csv'
     breast_csv_file = f'{parsed_database}BreastData.csv' 
     video_csv_file =  f'{parsed_database}VideoData.csv'
     instance_labels_csv_file = f'{labelbox_path}InstanceLabels.csv'
-
+    
     # Read data
     video_df = read_csv(video_csv_file)
     image_df = read_csv(image_csv_file)
