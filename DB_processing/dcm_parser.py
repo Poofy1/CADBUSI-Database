@@ -232,10 +232,6 @@ def parse_anon_file(anon_location, database_path, image_df):
     image_df[['Patient_ID', 'Accession_Number']] = image_df[['Patient_ID', 'Accession_Number']].astype(str)
     breast_csv[['Patient_ID', 'Accession_Number']] = breast_csv[['Patient_ID', 'Accession_Number']].astype(str)
     
-    # Remove leading zeros from Patient_ID in both dataframes
-    image_df['Patient_ID'] = image_df['Patient_ID'].str.lstrip('0')
-    breast_csv['Patient_ID'] = breast_csv['Patient_ID'].str.lstrip('0')
-    
     #image_df.to_csv(f"{env}/image_df.csv", index=False) # DEBUG
     #anon_df.to_csv(f"{env}/anon_df.csv", index=False) # DEBUG
     
@@ -248,8 +244,8 @@ def parse_anon_file(anon_location, database_path, image_df):
     breast_csv_file = f'{database_path}BreastData.csv'
     
     image_combined_df = image_df
-    if os.path.isfile(image_csv_file):
-        existing_image_df = pd.read_csv(image_csv_file)
+    if file_exists(image_csv_file):
+        existing_image_df = read_csv(image_csv_file)
         existing_image_df['Patient_ID'] = existing_image_df['Patient_ID'].astype(str)
         image_df['Patient_ID'] = image_df['Patient_ID'].astype(str)
         
@@ -260,13 +256,13 @@ def parse_anon_file(anon_location, database_path, image_df):
         image_combined_df = pd.concat([existing_image_df, image_df], ignore_index=True)
 
         
-    if os.path.isfile(video_csv_file):
-        existing_video_df = pd.read_csv(video_csv_file)
+    if file_exists(video_csv_file):
+        existing_video_df = read_csv(video_csv_file)
         video_df = pd.concat([existing_video_df, video_df], ignore_index=True)
 
 
-    if os.path.isfile(breast_csv_file):
-        existing_breast_df = pd.read_csv(breast_csv_file)
+    if file_exists(breast_csv_file):
+        existing_breast_df = read_csv(breast_csv_file)
         breast_csv = pd.concat([existing_breast_df, breast_csv], ignore_index=True)
         breast_csv = breast_csv.sort_values(['Patient_ID', 'Accession_Number', 'Breast'])
         breast_csv = breast_csv.drop_duplicates(subset=['Patient_ID', 'Accession_Number', 'Breast'], keep='last')
@@ -296,11 +292,12 @@ def Parse_Dicom_Files(database_path, anon_location, raw_storage_database, data_r
 
     # Get every Dicom File
     dcm_files_list = get_files_by_extension(raw_storage_database, '.dcm')
-    print(f'Total Dicom Archive: {len(dcm_files_list)}')
+    print(f'Total Dicoms in Input: {len(dcm_files_list)}')
 
     # Apply data range only if it's specified
     if data_range and len(data_range) == 2:
         dcm_files_list = dcm_files_list[data_range[0]:data_range[1]]
+        print(f'Applied Data Range: {len(dcm_files_list)}')
     parsed_files_set = set(parsed_files_list)
     dcm_files_list = [file for file in dcm_files_list if file not in parsed_files_set]
 
@@ -329,15 +326,3 @@ def Parse_Dicom_Files(database_path, anon_location, raw_storage_database, data_r
     parse_anon_file(anon_location, database_path, image_df)
     
     
-    
-
-    
-    
-    
-    
-
-
-
-
-
-

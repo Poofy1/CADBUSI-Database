@@ -1,4 +1,5 @@
 from DB_processing.image_processing import *
+tqdm.pandas()
 
 def fetch_index_for_patient_id( id, db):
     # id is a patient id number that should be listed in database
@@ -29,17 +30,14 @@ def add_labeling_categories(db):
     return db
 
 
-
 def choose_images_to_label(db, breast_df):
     db['label'] = True
 
     #Remove images that are too dark
     db.loc[db['darkness'] > 65, 'label'] = False
-    
-    # find all of the rows with calipers
-    caliper_rows = db[db['has_calipers']]
 
     # loop over caliper rows and tag twin images (not efficient)
+    caliper_rows = db[db['has_calipers']]
     for idx, row in caliper_rows.iterrows():
         distance = row['distance']
         if distance <= 5:
@@ -233,9 +231,6 @@ def Select_Data(database_path, only_labels):
     if 'latIsLeft' in db_out.columns:
         db_out = db_out.drop(columns=['latIsLeft'])
     save_data(db_out, input_file)
-    
-    
-tqdm.pandas()
 
 
 def Remove_Duplicate_Data(database_path):
