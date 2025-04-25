@@ -158,9 +158,7 @@ def Video_Cleanup(database_path):
     append_audit(database_path, f"Set {unknown_areas_count} unknown areas to 'breast'")
     
     # Find crop ratio
-    missing_crop_ratio = len(db[db['crop_aspect_ratio'].isna()])
     db['crop_aspect_ratio'] = (db['crop_w'] / db['crop_h']).round(2)
-    append_audit(database_path, f"Calculated crop aspect ratio for {len(db) - missing_crop_ratio} videos")
     
     save_data(db, input_file)
     append_audit(database_path, f"Completed Video_Cleanup: processed {len(db)} videos")

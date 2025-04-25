@@ -31,7 +31,7 @@ def add_labeling_categories(db):
     return db
 
 
-def choose_images_to_label(db, breast_df):
+def choose_images_to_label(db, breast_df, database_path):
     initial_count = len(db)
     db['label'] = True
     
@@ -81,7 +81,6 @@ def choose_images_to_label(db, breast_df):
     db['crop_aspect_ratio'] = (db['crop_w'] / db['crop_h']).round(2)
     
     # Create an audit log for all the filtering operations
-    database_path = os.path.dirname(os.path.dirname(os.path.abspath(breast_df.name) if hasattr(breast_df, 'name') else '.'))
     append_audit(database_path, f"Image filtering summary: Started with {initial_count} images")
     append_audit(database_path, f"Removed - Dark images: {dark_removed}, Caliper issues: {caliper_removed}, Non-breast: {area_removed}")
     append_audit(database_path, f"Removed - Unknown laterality: {lat_removed}, Chest/Mastectomy: {chest_removed}, Multi-region: {region_removed}")
@@ -248,7 +247,7 @@ def Select_Data(database_path, only_labels):
                     db_to_process.update(result)
                 progress.update()
 
-    db_to_process = choose_images_to_label(db_to_process, breast_df)
+    db_to_process = choose_images_to_label(db_to_process, breast_df, database_path)
     # Count how many were marked for labeling
     label_count = db_to_process['label'].sum()
     append_audit(database_path, f"Selected {label_count} images for labeling out of {len(db_to_process)} processed images")
