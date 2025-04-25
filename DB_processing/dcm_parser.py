@@ -220,6 +220,7 @@ def parse_anon_file(anon_location, database_path, image_df):
     
     
     # Find all csv files and combine into df
+    anon_location = os.path.normpath(anon_location)
     breast_csv = read_csv(anon_location)
     breast_csv = breast_csv.sort_values('PATIENT_ID')
     breast_csv = breast_csv.rename(columns={
