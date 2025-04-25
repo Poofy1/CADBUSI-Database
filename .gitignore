@@ -19,6 +19,8 @@
 !/pipeline/CADBUSI-Pipeline.png
 !/requirements.txt
 
+config.py
+
 
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
