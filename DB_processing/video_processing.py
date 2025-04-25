@@ -54,14 +54,15 @@ def ProcessVideoData(database_path):
     video_df = read_csv(video_data_file)
     breast_df = read_csv(breast_data_file)
 
+    # Initial state audit
+    append_audit(database_path, f"Starting ProcessVideoData with {len(video_df)} total videos")
+
     # Check if any new features are missing in video_df and add them
     new_features = ['crop_x', 'crop_y', 'crop_w', 'crop_h', 'description', 'area', 'laterality', 'orientation', 'clock_pos', 'nipple_dist']
     missing_features = set(new_features) - set(video_df.columns)
     for nf in missing_features:
         video_df[nf] = None
     
-    
-
     # Check if 'processed' column exists, if not, create it and set all to False
     if 'processed' not in video_df.columns:
         video_df['processed'] = False
@@ -69,12 +70,15 @@ def ProcessVideoData(database_path):
     # Only keep rows where 'processed' is False
     db_to_process = video_df[video_df['processed'] != True]
     db_to_process['processed'] = False
+    append_audit(database_path, f"Processing {len(db_to_process)} unprocessed videos")
     
     print("Finding OCR Masks")
     _, description_masks = find_masks(video_folder_path, 'mask_model', db_to_process, 1920, 1080, video_format=True)
+    append_audit(database_path, f"Found {len(description_masks)} description masks for videos")
 
     print("Performing OCR")
     first_images = get_first_image_in_each_folder(video_folder_path)
+    append_audit(database_path, f"Found {len(first_images)} first frames from video folders")
 
     # Separate image names and description masks into their own lists
     description_masks_coords = [dm[1] for dm in description_masks]
@@ -92,22 +96,28 @@ def ProcessVideoData(database_path):
             progress.update()
 
         progress.close()
+    
+    valid_descriptions = sum(1 for desc in descriptions.values() if desc)
+    append_audit(database_path, f"Extracted {valid_descriptions} descriptions out of {len(descriptions)} video frames")
 
     print("Finding Image Masks")
     image_masks_dict = get_video_ultrasound_region(video_folder_path, first_images)
+    valid_masks = sum(1 for mask in image_masks_dict.values() if mask is not None)
+    append_audit(database_path, f"Found {valid_masks} valid ultrasound masks out of {len(image_masks_dict)} video frames")
     
     db_to_process['processed'] = True
     
     descriptions = modify_keys(descriptions)
     image_masks_dict = modify_keys(image_masks_dict)
 
-    # Convert dictionaries to Series for easy mapping
-    descriptions_series = pd.Series(descriptions)
-    image_masks_series = pd.Series(image_masks_dict)
+    # After processing
+    matched_descriptions = sum(1 for key in db_to_process['ImagesPath'] if key in descriptions)
+    matched_masks = sum(1 for key in db_to_process['ImagesPath'] if key in image_masks_dict)
+    append_audit(database_path, f"Matched {matched_descriptions} descriptions and {matched_masks} masks to database entries")
 
     # Update dataframe using map
-    db_to_process['description'] = db_to_process['ImagesPath'].map(descriptions_series)
-    db_to_process['bounding_box'] = db_to_process['ImagesPath'].map(image_masks_series)
+    db_to_process['description'] = db_to_process['ImagesPath'].map(pd.Series(descriptions))
+    db_to_process['bounding_box'] = db_to_process['ImagesPath'].map(pd.Series(image_masks_dict))
     
     db_to_process[['crop_x', 'crop_y', 'crop_w', 'crop_h']] = pd.DataFrame(db_to_process['bounding_box'].tolist(), index=db_to_process.index)
 
@@ -124,9 +134,14 @@ def ProcessVideoData(database_path):
         else row['laterality'],
         axis=1
     )
+    
+    # Count unknown lateralities after correction
+    unknown_lateralities = db_to_process[db_to_process['laterality'] == 'unknown'].shape[0]
+    append_audit(database_path, f"Remaining unknown lateralities after correction: {unknown_lateralities}")
 
     video_df.update(db_to_process, overwrite=True)
     save_data(video_df, video_data_file)
+    append_audit(database_path, f"Completed ProcessVideoData: updated {len(db_to_process)} videos")
 
 
 def Video_Cleanup(database_path):
@@ -135,13 +150,17 @@ def Video_Cleanup(database_path):
     
     input_file = f'{database_path}/VideoData.csv'
     db = read_csv(input_file)
+    append_audit(database_path, f"Starting Video_Cleanup with {len(db)} videos")
     
     #Replace unknown areas with breast
+    unknown_areas_count = len(db[(db['area'] == 'unknown') | (db['area'].isna())])
     db.loc[(db['area'] == 'unknown') | (db['area'].isna()), 'area'] = 'breast'
+    append_audit(database_path, f"Set {unknown_areas_count} unknown areas to 'breast'")
     
     # Find crop ratio
+    missing_crop_ratio = len(db[db['crop_aspect_ratio'].isna()])
     db['crop_aspect_ratio'] = (db['crop_w'] / db['crop_h']).round(2)
+    append_audit(database_path, f"Calculated crop aspect ratio for {len(db) - missing_crop_ratio} videos")
     
     save_data(db, input_file)
-
-
+    append_audit(database_path, f"Completed Video_Cleanup: processed {len(db)} videos")
