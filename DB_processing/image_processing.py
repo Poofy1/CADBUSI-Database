@@ -350,8 +350,6 @@ def analyze_images(database_path):
     breast_data_file = f'{database_path}/BreastData.csv'
     image_df = read_csv(image_data_file)
     breast_df = read_csv(breast_data_file)
-    
-    append_audit(database_path, f"Starting analyze_images with {len(image_df)} total images")
 
     # Check if any new features are missing in image_df and add them
     new_features = ['labeled', 'crop_x', 'crop_y', 'crop_w', 'crop_h', 'description', 'has_calipers',  'has_calipers_prediction', 'darkness', 'area', 'laterality', 'orientation', 'clock_pos', 'nipple_dist']
@@ -374,22 +372,23 @@ def analyze_images(database_path):
 
     print("Finding OCR Masks")
     _, description_masks = find_masks(image_folder_path, 'mask_model', db_to_process, 1920, 1080)
-    append_audit(database_path, f"Found {len(description_masks)} description masks")
+    append_audit(database_path, f"Extracted {len(description_masks)} description masks")
     
     print("Performing OCR")  
     descriptions = get_OCR(image_folder_path, description_masks)
     valid_descriptions = sum(1 for desc in descriptions.values() if desc)
-    append_audit(database_path, f"Extracted {valid_descriptions} descriptions out of {len(descriptions)} images")
+    append_audit(database_path, f"Extracted {valid_descriptions} descriptions (OCR)")
     
     
     print("Finding Darkness and Image Masks")
     image_masks, darknesses = process_images_combined(image_folder_path, db_to_process)
-    append_audit(database_path, f"Found {len(image_masks)} image masks and {len(darknesses)} darkness measurements")
+    append_audit(database_path, f"Extracted {len(image_masks)} image crop regions")
+    append_audit(database_path, f"Extracted {len(darknesses)} darkness measurements")
 
     print("Finding Calipers")
     caliper_results = find_calipers(image_folder_path, 'caliper_model', db_to_process)
     caliper_count = sum(1 for _, bool_val, _ in caliper_results if bool_val)
-    append_audit(database_path, f"Found {caliper_count} images with calipers out of {len(caliper_results)} processed")
+    append_audit(database_path, f"Found {caliper_count} images with calipers")
     
     # Convert lists of tuples to dictionaries
     has_calipers_dict = {filename: bool_val for filename, bool_val, _ in caliper_results}
@@ -423,10 +422,8 @@ def analyze_images(database_path):
     
     # Count unknown lateralities after correction
     unknown_after = db_to_process[db_to_process['laterality'] == 'unknown'].shape[0]
-    append_audit(database_path, f"Remaining unknown lateralities after correction: {unknown_after}")
+    append_audit(database_path, f"Images with unknown lateralities (Bilateral only): {unknown_after}")
 
-    
-    append_audit(database_path, f"Completed analyze_images: processed {len(db_to_process)} images")
     image_df.update(db_to_process, overwrite=True)
     
     save_data(image_df, image_data_file)

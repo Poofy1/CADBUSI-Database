@@ -206,7 +206,7 @@ def parse_anon_file(anon_location, database_path, image_df):
     
     video_df = image_df[image_df['DataType'] == 'video']
     image_df = image_df[image_df['DataType'] == 'image']
-    append_audit(database_path, f"Split data: {len(video_df)} video files and {len(image_df)} image files")
+    append_audit(database_path, f"Split data: {len(video_df)} video files / {len(image_df)} image files")
     
     # Define common columns
     common_columns = ['Patient_ID', 'Accession_Number', 'RegionSpatialFormat', 'RegionDataType', 
@@ -229,7 +229,6 @@ def parse_anon_file(anon_location, database_path, image_df):
         'PATIENT_ID': 'Patient_ID',
         'ACCESSION_NUMBER': 'Accession_Number'
     })
-    append_audit(database_path, f"Loaded anonymized data with {len(breast_csv)} records")
 
     
     # Convert 'Patient_ID' to str in both dataframes before merging
@@ -276,7 +275,7 @@ def parse_anon_file(anon_location, database_path, image_df):
     save_data(image_combined_df, image_csv_file)
     save_data(video_df, video_csv_file)
     save_data(breast_csv, breast_csv_file)
-    append_audit(database_path, f"Saved final data: {len(image_combined_df)} images, {len(video_df)} videos, {len(breast_csv)} breast records")
+    append_audit(database_path, f"Saved data: {len(image_combined_df)} images, {len(video_df)} videos, {len(breast_csv)} breast records")
     
 
 # Main Method
@@ -297,14 +296,14 @@ def Parse_Dicom_Files(database_path, anon_location, raw_storage_database, data_r
 
     # Get every Dicom File
     dcm_files_list = get_files_by_extension(raw_storage_database, '.dcm')
-    append_audit(database_path, f"Found {len(dcm_files_list)} total DICOM files in input")
+    append_audit(database_path, f"Found {len(dcm_files_list)} total DICOM files")
     print(f'Total Dicoms in Input: {len(dcm_files_list)}')
 
     # Apply data range only if it's specified
     if data_range and len(data_range) == 2:
         dcm_files_list = dcm_files_list[data_range[0]:data_range[1]]
         print(f'Applied Data Range: {len(dcm_files_list)}')
-        append_audit(database_path, f"Applied data range filter: kept {len(dcm_files_list)} of {len(dcm_files_list)} files")
+        append_audit(database_path, f"Applied data limit: processing {len(dcm_files_list)} of {len(dcm_files_list)} files")
         
         
     # Filter out already processed files
@@ -334,7 +333,7 @@ def Parse_Dicom_Files(database_path, anon_location, raw_storage_database, data_r
     new_row_count = len(image_df)
     removed_rows = original_row_count - new_row_count
     print(f"Removed {removed_rows} rows with empty values.")
-    append_audit(database_path, f"Removed {removed_rows} rows with missing Patient_ID or Accession_Number")
+    append_audit(database_path, f"Removed {removed_rows} DICOMs with missing Patient_ID or Accession_Number")
     
     
     parse_anon_file(anon_location, database_path, image_df)

@@ -12,6 +12,8 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
 from storage_adapter import *
+from DB_processing.tools import append_audit
+
 
 # Paths
 labeled_data_dir = f'{env}/labeled_data_archive/'
@@ -109,6 +111,9 @@ def Crop_Images(df, input_dir, output_dir):
             print(error)
             
     print(f"\nProcessing Complete: Success={results['success']}, Failed={results['failed']}")
+    append_audit(output_dir, f"{results['failed']} images failed")
+    append_audit(output_dir, f"Exported {results['success']} images")
+    
                 
                 
                 
@@ -127,7 +132,7 @@ def process_single_video(row, video_folder_path, output_dir):
     all_images = list_files(input_folder, '.png')
     
     if not all_images:
-        return
+        return 0  # Return 0 if no images were processed
         
     # Prepare output folder path
     output_folder = os.path.join(output_dir, folder_name)
@@ -144,6 +149,8 @@ def process_single_video(row, video_folder_path, output_dir):
             cropped_image = image[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
             output_path = os.path.join(output_folder, image_name)
             save_data(cropped_image, output_path)
+    
+    return 1  # Return 1 to indicate a successfully processed video
 
 
 def Crop_Videos(df, input_dir, output_dir):
@@ -152,15 +159,24 @@ def Crop_Videos(df, input_dir, output_dir):
     make_dirs(video_output)
     
     video_folder_path = f"{input_dir}/videos/"
+    
+    processed_videos = 0
 
     with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
         futures = {executor.submit(process_single_video, row, video_folder_path, video_output): index for index, row in df.iterrows()}
         with tqdm(total=len(futures)) as pbar:
             for future in as_completed(futures):
                 pbar.update()
+                try:
+                    result = future.result()
+                    processed_videos += result
+                except Exception as e:
+                    print(f"Error processing video: {e}")
+                
+    append_audit(output_dir, f"Exported {processed_videos} videos")
 
 
-def PerformVal(val_split, df):
+def PerformVal(val_split, df, output_dir):
     if 'valid' not in df.columns:
         df['valid'] = None
     
@@ -181,6 +197,8 @@ def PerformVal(val_split, df):
     val_count = (df['valid'] == 1).sum()
     print(f"Split completed: {train_count} training samples, {val_count} validation samples")
     print(f"Patient split: {len(unique_patients) - num_val_patients} training patients, {num_val_patients} validation patients")
+    append_audit(output_dir, f"{len(unique_patients) - num_val_patients} Training patients")
+    append_audit(output_dir, f"{num_val_patients} Validation patients")
     
     return df
     
@@ -279,7 +297,6 @@ def generate_video_images_csv(video_df, root_dir):
     
 def Export_Database(CONFIG, reparse_images = True, num_of_tests = 10):
     #Debug Tools
-    KnownInstancesOnly = False # When true it only exports images that have a instance label
     use_reject_system = True # True = removes rejects from trianing
     
     output_dir = CONFIG["EXPORT_DIR"]
@@ -292,8 +309,8 @@ def Export_Database(CONFIG, reparse_images = True, num_of_tests = 10):
     output_dir = f'{output_dir}/export_{date}/'
     
     print("Exporting Data:")
-    
     make_dirs(output_dir)
+    append_audit(output_dir, "STARTING EXPORT...")
     
     # Save the config to the export location
     export_config_path = os.path.join(output_dir, 'export_config.json')
@@ -331,12 +348,15 @@ def Export_Database(CONFIG, reparse_images = True, num_of_tests = 10):
             
             # Remove rows from image_df based on rejected_images['FileName']
             image_df = image_df[~image_df['FileName'].isin(rejected_images['FileName'])]
+            
+            append_audit(output_dir, f"Removed {len(rejected_images)} images - Marked as rejected")
         
         # If not using reject system, keep 'Reject Image' as a column
         if not use_reject_system:
             instance_data['Reject Image'] = instance_data['Reject Image'].fillna(False)
         else:
             instance_data.drop(columns=['Reject Image'], inplace=True)
+        
 
     if os.path.exists(labeled_data_dir):
         all_files = glob.glob(f'{labeled_data_dir}/*.csv')
@@ -348,34 +368,39 @@ def Export_Database(CONFIG, reparse_images = True, num_of_tests = 10):
 
     # Filter the image data based on the filtered case study data and the 'label' column
     image_df = image_df[image_df['label'] == True]
-    image_df = image_df[image_df['laterality'] != 'unknown']
     image_df = image_df[(image_df['Patient_ID'].isin(breast_df['Patient_ID']))]
     image_df = image_df.drop(['label', 'area'], axis=1)
     
     video_df = video_df[video_df['laterality'] != 'unknown']
     video_df = video_df[(video_df['Patient_ID'].isin(breast_df['Patient_ID']))]
     
-    
-    if KnownInstancesOnly:
-        # Filter image_df to only include instances present in instance_data
-        image_df = image_df[image_df['ImageName'].isin(instance_data['ImageName'])]
-        video_df = video_df[video_df['ImageName'].isin(instance_data['ImageName'])]
+    initial_image_count = len(image_df)
+    initial_video_count = len(video_df)
+    append_audit(output_dir, f"Images available: {initial_image_count}")
+    append_audit(output_dir, f"Videos available: {initial_video_count}")
     
     #Remove bad aspect ratios
     min_aspect_ratio = 0.5
     max_aspect_ratio = 4.0
-    image_df = image_df[(image_df['crop_aspect_ratio'] >= min_aspect_ratio) & 
+    image_df_after_aspect = image_df[(image_df['crop_aspect_ratio'] >= min_aspect_ratio) & 
                         (image_df['crop_aspect_ratio'] <= max_aspect_ratio)]
-    video_df = video_df[(video_df['crop_aspect_ratio'] >= min_aspect_ratio) & 
+    video_df_after_aspect = video_df[(video_df['crop_aspect_ratio'] >= min_aspect_ratio) & 
                         (video_df['crop_aspect_ratio'] <= max_aspect_ratio)]
     
+    intermediate_image_count = len(image_df_after_aspect)
+    intermediate_video_count = len(video_df_after_aspect)
+    append_audit(output_dir, f"Removed {initial_image_count - intermediate_image_count} images - Bad aspect ratio")
+    append_audit(output_dir, f"Removed {initial_video_count - intermediate_video_count} videos - Bad aspect ratio")
+
     # Remove images with crop width or height less than 200 pixels
     min_dimension = 200
-    image_df = image_df[(image_df['crop_w'] >= min_dimension) & 
-                        (image_df['crop_h'] >= min_dimension)]
-    video_df = video_df[(video_df['crop_w'] >= min_dimension) & 
-                        (video_df['crop_h'] >= min_dimension)]
+    image_df = image_df_after_aspect[(image_df_after_aspect['crop_w'] >= min_dimension) & 
+                    (image_df_after_aspect['crop_h'] >= min_dimension)]
+    video_df = video_df_after_aspect[(video_df_after_aspect['crop_w'] >= min_dimension) & 
+                        (video_df_after_aspect['crop_h'] >= min_dimension)]
     
+    append_audit(output_dir, f"Removed {intermediate_image_count - len(image_df)} images - Small dimensions")
+    append_audit(output_dir, f"Removed {intermediate_video_count - len(video_df)} videos - Small dimensions")
 
     if reparse_images:   
         # Crop the images for the relevant studies
@@ -425,9 +450,14 @@ def Export_Database(CONFIG, reparse_images = True, num_of_tests = 10):
     breast_df = breast_df.drop(['laterality'], axis=1)
     breast_df['Image_Count'] = breast_df['Image_Count'].fillna(0).astype(int)
     
-    # Filter out case and breast data that isnt relavent 
+    # Filter out case and breast data that isn't relevant
+    initial_breast_count = len(breast_df)
     image_patient_ids = image_df['Patient_ID'].unique()
     breast_df = breast_df[breast_df['Patient_ID'].isin(image_patient_ids)]
+    remaining_breast_count = len(breast_df)
+    removed_breast_count = initial_breast_count - remaining_breast_count
+    append_audit(output_dir, f"Removed {removed_breast_count} breasts - No remaining image data - {remaining_breast_count} remain")
+    append_audit(output_dir, f"{remaining_breast_count} Total breasts remain")
         
     # Fix cm data
     image_df = Fix_CM_Data(image_df)
@@ -435,8 +465,7 @@ def Export_Database(CONFIG, reparse_images = True, num_of_tests = 10):
     
 
     # Val split for case data
-    breast_df = PerformVal(val_split, breast_df)
-    
+    breast_df = PerformVal(val_split, breast_df, output_dir)
     
     # Create trainable csv data
     train_data = format_data(breast_df, image_df, num_of_tests)

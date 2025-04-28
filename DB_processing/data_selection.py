@@ -81,10 +81,13 @@ def choose_images_to_label(db, breast_df, database_path):
     db['crop_aspect_ratio'] = (db['crop_w'] / db['crop_h']).round(2)
     
     # Create an audit log for all the filtering operations
-    append_audit(database_path, f"Image filtering summary: Started with {initial_count} images")
-    append_audit(database_path, f"Removed - Dark images: {dark_removed}, Caliper issues: {caliper_removed}, Non-breast: {area_removed}")
-    append_audit(database_path, f"Removed - Unknown laterality: {lat_removed}, Chest/Mastectomy: {chest_removed}, Multi-region: {region_removed}")
-    append_audit(database_path, f"Total remaining for labeling: {len(db[db['label']])}")
+    append_audit(database_path, f"Removed {dark_removed} images - Too dark")
+    append_audit(database_path, f"Removed {caliper_removed} images - Caliper issues")
+    append_audit(database_path, f"Removed {area_removed} images - Non-breast")
+    append_audit(database_path, f"Removed {lat_removed} images - Unknown laterality")
+    append_audit(database_path, f"Removed {chest_removed} images - Chest/Mastectomy")
+    append_audit(database_path, f"Removed {region_removed} images - Multi-region")
+    append_audit(database_path, f"Usable images: {len(db[db['label']])}")
     
     return db
 
@@ -202,7 +205,7 @@ def Remove_Green_Images(database_dir):
 
     # Drop rows from the DataFrame
     df = df.drop(drop_indices)
-    append_audit(database_dir, f"Removed {len(drop_indices)} green-corrupted images. {len(df)} images remaining")
+    append_audit(database_dir, f"Removed {len(drop_indices)} images - Corrupted / Incorrect coloring")
     save_data(df, input_file)  # Save the updated DataFrame back to the CSV
     
 
@@ -213,9 +216,6 @@ def Select_Data(database_path, only_labels):
     db_out = read_csv(input_file)
     breast_df = read_csv(breast_file)
     
-    initial_count = len(db_out)
-    append_audit(database_path, f"Starting Select_Data with {initial_count} images and {len(breast_df)} breast records")
-    
     # Check if 'processed' column exists, if not create it
     if 'processed' not in db_out.columns:
         db_out['processed'] = False
@@ -224,7 +224,7 @@ def Select_Data(database_path, only_labels):
     rows_before = len(db_out)
     db_out.dropna(subset=['crop_x', 'crop_y', 'crop_w', 'crop_h'], inplace=True)
     rows_after = len(db_out)
-    append_audit(database_path, f"Removed {rows_before - rows_after} images with missing crop data")
+    append_audit(database_path, f"Removed {rows_before - rows_after} images - Missing crop data")
 
     if only_labels:
         db_to_process = db_out
@@ -248,11 +248,6 @@ def Select_Data(database_path, only_labels):
                 progress.update()
 
     db_to_process = choose_images_to_label(db_to_process, breast_df, database_path)
-    # Count how many were marked for labeling
-    label_count = db_to_process['label'].sum()
-    append_audit(database_path, f"Selected {label_count} images for labeling out of {len(db_to_process)} processed images")
-    
-    
     db_to_process = add_labeling_categories(db_to_process)
     
     # Update 'processed' status to True for processed rows and merge back to the original dataframe
@@ -268,8 +263,7 @@ def Select_Data(database_path, only_labels):
 
     if 'latIsLeft' in db_out.columns:
         db_out = db_out.drop(columns=['latIsLeft'])
-        
-    append_audit(database_path, f"Final dataset size after Select_Data: {len(db_out)} total images")
+
     save_data(db_out, input_file)
 
 
@@ -296,7 +290,7 @@ def Remove_Duplicate_Data(database_path):
     
     # Save the cleaned dataframe back to the CSV file
     save_data(df, input_file)
-    append_audit(database_path, f"Removed {duplicate_count} duplicate images. {len(df)} unique images remaining")
+    append_audit(database_path, f"Removed {duplicate_count} images - Duplicates")
     
     # Delete the duplicate images
     for image_name in tqdm(duplicate_image_names):
