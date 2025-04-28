@@ -335,21 +335,26 @@ def Export_Database(CONFIG, reparse_images = True, num_of_tests = 10):
     ##Format Instance Data
     file_to_image_name_map = dict(zip(image_df['FileName'], image_df['ImageName']))
     instance_data['ImageName'] = instance_data['FileName'].map(file_to_image_name_map)
-    instance_data.drop(columns=['FileName'], inplace=True)
+    instance_data = instance_data[instance_data['Accession_Number'].isin(image_df['Accession_Number'])]
 
     if 'Reject Image' in instance_data.columns:
         if use_reject_system:
+            # Count before filtering
+            before_count = len(image_df)
+            
             # Create a new DataFrame with rejected instances
-            rejected_images = instance_data[instance_data['Reject Image'] == True][['ImageName']]
-            rejected_images['FileName'] = rejected_images['ImageName'].map({v: k for k, v in file_to_image_name_map.items()})
+            rejected_images = instance_data[instance_data['Reject Image'] == True][['FileName', 'ImageName']]
             
             # Remove rows where 'Reject Image' is True from instance_data
             instance_data = instance_data[instance_data['Reject Image'] != True]
             
-            # Remove rows from image_df based on rejected_images['FileName']
+            # Remove rows from image_df based on rejected FileNames
             image_df = image_df[~image_df['FileName'].isin(rejected_images['FileName'])]
             
-            append_audit(output_dir, f"Removed {len(rejected_images)} images - Marked as rejected")
+            # Calculate how many were removed
+            removed_count = before_count - len(image_df)
+            
+            append_audit(output_dir, f"Removed {removed_count} images - Marked as rejected")
         
         # If not using reject system, keep 'Reject Image' as a column
         if not use_reject_system:

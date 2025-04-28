@@ -206,7 +206,6 @@ def parse_anon_file(anon_location, database_path, image_df):
     
     video_df = image_df[image_df['DataType'] == 'video']
     image_df = image_df[image_df['DataType'] == 'image']
-    append_audit(database_path, f"Split data: {len(video_df)} video files / {len(image_df)} image files")
     
     # Define common columns
     common_columns = ['Patient_ID', 'Accession_Number', 'RegionSpatialFormat', 'RegionDataType', 
@@ -333,7 +332,7 @@ def Parse_Dicom_Files(database_path, anon_location, raw_storage_database, data_r
     new_row_count = len(image_df)
     removed_rows = original_row_count - new_row_count
     print(f"Removed {removed_rows} rows with empty values.")
-    append_audit(database_path, f"Removed {removed_rows} DICOMs with missing Patient_ID or Accession_Number")
+    append_audit(database_path, f"Removed {removed_rows} DICOMs - Missing Patient_ID or Accession_Number")
     
     
     parse_anon_file(anon_location, database_path, image_df)
