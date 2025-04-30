@@ -364,6 +364,13 @@ def dicom_download_remote_start(csv_file=None, deploy=False, cleanup=False, buck
     global PUBLISHER
     global TOPIC_PATH
     
+    # Check if certificate file exists
+    if not os.path.exists(os.path.join(FASTAPI_DIR, "CertEmulationCA.crt")):
+        print(f"Error: Certificate file not found at {FASTAPI_DIR}")
+        print("Please ensure the certificate file exists before running this function.")
+        sys.exit(1)  # Exit with error code
+        
+        
     PUBLISHER = pubsub_v1.PublisherClient()
     TOPIC_PATH = PUBLISHER.topic_path(CONFIG['env']['project_id'], CONFIG['env']['topic_name'])
     

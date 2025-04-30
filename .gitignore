@@ -7,7 +7,6 @@
 *.png
 *.csv
 *.json
-*.txt
 *.rsuser
 *.suo
 *.user
@@ -16,9 +15,6 @@
 .tmp.driveupload/*
 *.ini
 *.zip
-!/demo/CADBUSI-Pipeline.png
-!/demo/CADBUSI_Query.png
-!/requirements.txt
 
 config.py
 encryption_key.pkl
