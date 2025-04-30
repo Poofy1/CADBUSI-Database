@@ -1,5 +1,5 @@
-from DB_processing.image_processing import *
-from DB_processing.tools import append_audit
+from src.DB_processing.image_processing import *
+from src.DB_processing.tools import append_audit
 tqdm.pandas()
 
 def fetch_index_for_patient_id( id, db):

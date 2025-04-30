@@ -1,0 +1,227 @@
+<mxfile host="Electron" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/26.2.2 Chrome/134.0.6998.178 Electron/35.1.2 Safari/537.36" version="26.2.2">
+  <diagram name="Page-1" id="qyDKPoL6kkOLxWbVye0j">
+    <mxGraphModel dx="2068" dy="1201" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2000" pageHeight="1500" background="#505050" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-22" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" source="FXaRxvGdWlJYn_I8MsOg-1" target="Pl7VbvmUPMgID_0otKhZ-23" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="780" y="320.0000000000001" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-26" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" source="FXaRxvGdWlJYn_I8MsOg-1" target="Pl7VbvmUPMgID_0otKhZ-27" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="930" y="290.0000000000001" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-28" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;exitX=0;exitY=0.5;exitDx=0;exitDy=0;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" source="FXaRxvGdWlJYn_I8MsOg-1" target="Pl7VbvmUPMgID_0otKhZ-29" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="630" y="280.0000000000001" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-30" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;exitX=0;exitY=0.5;exitDx=0;exitDy=0;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" source="FXaRxvGdWlJYn_I8MsOg-1" target="Pl7VbvmUPMgID_0otKhZ-31" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="480" y="290.0000000000001" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-33" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" source="FXaRxvGdWlJYn_I8MsOg-1" target="Pl7VbvmUPMgID_0otKhZ-32" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="FXaRxvGdWlJYn_I8MsOg-3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" source="Pl7VbvmUPMgID_0otKhZ-1" target="FXaRxvGdWlJYn_I8MsOg-1" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-1" value="Raw Radiology" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=light-dark(#000000, #171717);arcSize=50;strokeWidth=3;" parent="1" vertex="1">
+          <mxGeometry x="720" y="160" width="130" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-4" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" source="Pl7VbvmUPMgID_0otKhZ-2" target="Pl7VbvmUPMgID_0otKhZ-3" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" source="Pl7VbvmUPMgID_0otKhZ-3" target="Pl7VbvmUPMgID_0otKhZ-10" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1560" y="260" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-13" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;exitX=0;exitY=0.5;exitDx=0;exitDy=0;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" source="Pl7VbvmUPMgID_0otKhZ-10" target="Pl7VbvmUPMgID_0otKhZ-14" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1260" y="420.0000000000001" as="targetPoint" />
+            <mxPoint x="1170" y="540" as="sourcePoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-2" value="Raw Pathology" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=light-dark(#000000, #171717);arcSize=50;strokeWidth=3;" parent="1" vertex="1">
+          <mxGeometry x="1350" y="160" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-3" value="&lt;div style=&quot;line-height: 100%;&quot;&gt;Extract Diagnosis&lt;div&gt;&lt;i&gt;&lt;font style=&quot;font-size: 8px; line-height: 100%;&quot;&gt;SPECIMEN_NOTE&lt;/font&gt;&lt;/i&gt;&lt;/div&gt;&lt;/div&gt;" style="whiteSpace=wrap;html=1;rounded=1;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" vertex="1">
+          <mxGeometry x="1350" y="260" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-16" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=1;entryY=0.5;entryDx=0;entryDy=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" source="Pl7VbvmUPMgID_0otKhZ-8" target="Pl7VbvmUPMgID_0otKhZ-15" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-8" value="&lt;div style=&quot;line-height: 100%;&quot;&gt;Pathology Interpretation&lt;div&gt;&lt;font style=&quot;font-size: 8px; line-height: 100%;&quot;&gt;&lt;i&gt;final_diag&lt;/i&gt;&lt;/font&gt;&lt;/div&gt;&lt;/div&gt;" style="whiteSpace=wrap;html=1;rounded=1;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" vertex="1">
+          <mxGeometry x="1510" y="460" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-12" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;entryPerimeter=0;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" source="Pl7VbvmUPMgID_0otKhZ-10" target="FXaRxvGdWlJYn_I8MsOg-4" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1680" y="660" as="sourcePoint" />
+            <mxPoint x="1410" y="560" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-10" value="&lt;div style=&quot;line-height: 90%;&quot;&gt;Split Lesions&lt;div&gt;&lt;font style=&quot;font-size: 8px; line-height: 90%;&quot;&gt;&lt;i&gt;final_diag&lt;/i&gt;&lt;/font&gt;&lt;/div&gt;&lt;/div&gt;" style="whiteSpace=wrap;html=1;rounded=1;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" vertex="1">
+          <mxGeometry x="1350" y="360" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-17" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" source="Pl7VbvmUPMgID_0otKhZ-10" target="Pl7VbvmUPMgID_0otKhZ-8" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1610" y="730" as="sourcePoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-25" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" target="Pl7VbvmUPMgID_0otKhZ-15" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1410" y="520" as="sourcePoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-18" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" source="Pl7VbvmUPMgID_0otKhZ-14" target="Pl7VbvmUPMgID_0otKhZ-15" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-14" value="&lt;div style=&quot;line-height: 100%;&quot;&gt;Extract Modality&lt;div&gt;&lt;font style=&quot;font-size: 8px; line-height: 100%;&quot;&gt;&lt;i&gt;SPECIMEN_COMMENT&lt;/i&gt;&lt;/font&gt;&lt;/div&gt;&lt;/div&gt;" style="whiteSpace=wrap;html=1;rounded=1;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" vertex="1">
+          <mxGeometry x="1190" y="460" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-19" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" source="Pl7VbvmUPMgID_0otKhZ-15" target="Pl7VbvmUPMgID_0otKhZ-20" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1410" y="760" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-15" value="Remove Duplicate Rows" style="rounded=1;whiteSpace=wrap;html=1;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" vertex="1">
+          <mxGeometry x="1350" y="560" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-47" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=1;entryY=0.5;entryDx=0;entryDy=0;exitX=0;exitY=0.5;exitDx=0;exitDy=0;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" source="Pl7VbvmUPMgID_0otKhZ-20" target="Pl7VbvmUPMgID_0otKhZ-45" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-20" value="Parsed Pathology" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=light-dark(#000000, #171717);arcSize=50;strokeWidth=3;" parent="1" vertex="1">
+          <mxGeometry x="1350" y="660" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-35" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" source="Pl7VbvmUPMgID_0otKhZ-23" target="Pl7VbvmUPMgID_0otKhZ-34" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-23" value="&lt;div style=&quot;line-height: 100%;&quot;&gt;Extract Density&lt;div&gt;&lt;font style=&quot;font-size: 8px; line-height: 100%;&quot;&gt;&lt;i&gt;RADIOLOGY_REPORT&lt;/i&gt;&lt;/font&gt;&lt;/div&gt;&lt;/div&gt;" style="whiteSpace=wrap;html=1;rounded=1;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" vertex="1">
+          <mxGeometry x="725" y="360" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-39" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=1;entryY=0.5;entryDx=0;entryDy=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" source="Pl7VbvmUPMgID_0otKhZ-27" target="Pl7VbvmUPMgID_0otKhZ-34" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-27" value="&lt;div style=&quot;line-height: 100%;&quot;&gt;Extract Biopsy/RADS&lt;div&gt;&lt;font style=&quot;font-size: 8px; line-height: 100%;&quot;&gt;&lt;i&gt;RADIOLOGY_REPORT&lt;/i&gt;&lt;/font&gt;&lt;/div&gt;&lt;div&gt;&lt;font style=&quot;font-size: 8px; line-height: 100%;&quot;&gt;&lt;i&gt;RADIOLOGY_NARRATIVE&lt;/i&gt;&lt;/font&gt;&lt;/div&gt;&lt;/div&gt;" style="whiteSpace=wrap;html=1;rounded=1;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" vertex="1">
+          <mxGeometry x="880" y="360" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-36" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" source="Pl7VbvmUPMgID_0otKhZ-29" target="Pl7VbvmUPMgID_0otKhZ-34" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-29" value="&lt;div style=&quot;line-height: 100%;&quot;&gt;Extract Laterality&lt;div&gt;&lt;font style=&quot;font-size: 8px; line-height: 100%;&quot;&gt;&lt;i&gt;DESCRIPTION&lt;/i&gt;&lt;/font&gt;&lt;/div&gt;&lt;div&gt;&lt;font style=&quot;font-size: 8px; line-height: 100%;&quot;&gt;&lt;i&gt;TEST_DESCRIPTION&lt;/i&gt;&lt;/font&gt;&lt;/div&gt;&lt;div&gt;&lt;font style=&quot;font-size: 8px; line-height: 100%;&quot;&gt;&lt;i&gt;RADIOLOGY_REPORT&lt;/i&gt;&lt;/font&gt;&lt;/div&gt;&lt;/div&gt;" style="whiteSpace=wrap;html=1;rounded=1;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" vertex="1">
+          <mxGeometry x="570" y="360" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-41" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" source="Pl7VbvmUPMgID_0otKhZ-31" target="Pl7VbvmUPMgID_0otKhZ-34" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-31" value="Extract Pathology&lt;div style=&quot;line-height: 100%;&quot;&gt;&lt;font style=&quot;font-size: 8px;&quot;&gt;&lt;i&gt;RADIOLOGY_REPORT&lt;/i&gt;&lt;/font&gt;&lt;/div&gt;" style="whiteSpace=wrap;html=1;rounded=1;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" vertex="1">
+          <mxGeometry x="420" y="360" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-40" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=1;entryY=0.5;entryDx=0;entryDy=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" source="Pl7VbvmUPMgID_0otKhZ-32" target="Pl7VbvmUPMgID_0otKhZ-34" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-32" value="Extract Impression&lt;div&gt;&lt;font style=&quot;font-size: 8px; line-height: 100%;&quot;&gt;RADIOLOGY_REPORT&lt;/font&gt;&lt;/div&gt;" style="whiteSpace=wrap;html=1;rounded=1;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" vertex="1">
+          <mxGeometry x="1030" y="360" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-46" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" source="Pl7VbvmUPMgID_0otKhZ-34" target="Pl7VbvmUPMgID_0otKhZ-45" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-34" value="Parsed Radiology" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=light-dark(#000000, #171717);arcSize=50;strokeWidth=3;" parent="1" vertex="1">
+          <mxGeometry x="725" y="460" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-43" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" source="Pl7VbvmUPMgID_0otKhZ-42" target="Pl7VbvmUPMgID_0otKhZ-1" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-44" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" source="Pl7VbvmUPMgID_0otKhZ-42" target="Pl7VbvmUPMgID_0otKhZ-2" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-42" value="QUERY" style="rounded=1;whiteSpace=wrap;html=1;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" vertex="1">
+          <mxGeometry x="1050" y="30" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-52" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" source="Pl7VbvmUPMgID_0otKhZ-45" target="Pl7VbvmUPMgID_0otKhZ-53" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1100" y="780" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-45" value="&lt;div style=&quot;line-height: 100%;&quot;&gt;Stack Data&lt;div&gt;&lt;font style=&quot;font-size: 8px; line-height: 100%;&quot;&gt;&lt;i&gt;RADIOLOGY_DTM&lt;/i&gt;&lt;/font&gt;&lt;/div&gt;&lt;div&gt;&lt;font style=&quot;font-size: 8px; line-height: 100%;&quot;&gt;&lt;i&gt;SPECIMEN_RECEIVED_DTM&lt;/i&gt;&lt;/font&gt;&lt;/div&gt;&lt;/div&gt;" style="whiteSpace=wrap;html=1;rounded=1;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" vertex="1">
+          <mxGeometry x="1040" y="660" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-54" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" source="Pl7VbvmUPMgID_0otKhZ-53" target="Pl7VbvmUPMgID_0otKhZ-55" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1100" y="910" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="FXaRxvGdWlJYn_I8MsOg-8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;endArrow=none;startFill=0;dashed=1;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" source="Pl7VbvmUPMgID_0otKhZ-53" target="FXaRxvGdWlJYn_I8MsOg-7" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-53" value="Check for assumed benign cases&lt;div&gt;BENIGN1&lt;/div&gt;" style="whiteSpace=wrap;html=1;rounded=1;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" vertex="1">
+          <mxGeometry x="1040" y="760" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-57" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" source="Pl7VbvmUPMgID_0otKhZ-55" target="Pl7VbvmUPMgID_0otKhZ-56" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-55" value="Check for malignant cases&lt;div&gt;MALIGNANT1&lt;/div&gt;" style="whiteSpace=wrap;html=1;rounded=1;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" vertex="1">
+          <mxGeometry x="1040" y="860" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-56" value="Find matching path&lt;div&gt;BENIGN2&lt;/div&gt;&lt;div&gt;MALIGNANT2&lt;/div&gt;" style="whiteSpace=wrap;html=1;rounded=1;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" vertex="1">
+          <mxGeometry x="1040" y="960" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-60" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" source="Pl7VbvmUPMgID_0otKhZ-58" target="Pl7VbvmUPMgID_0otKhZ-61" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1100" y="1260" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-58" value="Combined Data" style="whiteSpace=wrap;html=1;rounded=1;fillColor=#e1d5e7;strokeColor=light-dark(#000000, #171717);arcSize=50;strokeWidth=3;" parent="1" vertex="1">
+          <mxGeometry x="1040" y="1060" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-59" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" source="Pl7VbvmUPMgID_0otKhZ-56" target="Pl7VbvmUPMgID_0otKhZ-58" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1100" y="1140" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-63" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" source="Pl7VbvmUPMgID_0otKhZ-61" target="Pl7VbvmUPMgID_0otKhZ-62" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-61" value="&lt;div style=&quot;line-height: 100%;&quot;&gt;Remove incomplete&amp;nbsp;&lt;div&gt;&lt;font style=&quot;font-size: 8px; line-height: 100%;&quot;&gt;&lt;i&gt;MODALITY&lt;/i&gt;&lt;/font&gt;&lt;/div&gt;&lt;div&gt;&lt;font style=&quot;font-size: 8px; line-height: 100%;&quot;&gt;&lt;i&gt;ENDPOINT_ADDRESS&lt;/i&gt;&lt;/font&gt;&lt;/div&gt;&lt;div&gt;&lt;font style=&quot;font-size: 8px; line-height: 100%;&quot;&gt;&lt;i&gt;final_interpretation&lt;/i&gt;&lt;/font&gt;&lt;/div&gt;&lt;/div&gt;" style="whiteSpace=wrap;html=1;rounded=1;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" vertex="1">
+          <mxGeometry x="1040" y="1160" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="Pl7VbvmUPMgID_0otKhZ-62" value="Final Output" style="whiteSpace=wrap;html=1;rounded=1;fillColor=#e1d5e7;strokeColor=light-dark(#000000, #171717);arcSize=50;strokeWidth=3;" parent="1" vertex="1">
+          <mxGeometry x="1040" y="1260" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="FXaRxvGdWlJYn_I8MsOg-1" value="Remove &quot;Outside&quot;" style="whiteSpace=wrap;html=1;rounded=1;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" vertex="1">
+          <mxGeometry x="725" y="260" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="FXaRxvGdWlJYn_I8MsOg-5" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" source="FXaRxvGdWlJYn_I8MsOg-4" target="Pl7VbvmUPMgID_0otKhZ-15" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="FXaRxvGdWlJYn_I8MsOg-4" value="&lt;div style=&quot;line-height: 100%;&quot;&gt;&lt;font style=&quot;font-size: 8px; line-height: 100%;&quot;&gt;&lt;span style=&quot;background-color: transparent; color: light-dark(rgb(0, 0, 0), rgb(255, 255, 255)); font-size: 12px;&quot;&gt;Extract Laterality&lt;/span&gt;&lt;/font&gt;&lt;/div&gt;&lt;div style=&quot;line-height: 100%;&quot;&gt;&lt;font style=&quot;font-size: 8px; line-height: 100%;&quot;&gt;&lt;i&gt;final_diag&lt;/i&gt;&lt;/font&gt;&lt;div&gt;&lt;font style=&quot;font-size: 8px; line-height: 100%;&quot;&gt;&lt;i&gt;PART_DESCRIPTION&lt;/i&gt;&lt;/font&gt;&lt;/div&gt;&lt;div&gt;&lt;font style=&quot;font-size: 8px; line-height: 100%;&quot;&gt;&lt;i&gt;SPECIMEN_NOTE&lt;/i&gt;&lt;/font&gt;&lt;/div&gt;&lt;/div&gt;" style="whiteSpace=wrap;html=1;rounded=1;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" vertex="1">
+          <mxGeometry x="1350" y="460" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="FXaRxvGdWlJYn_I8MsOg-7" value="&lt;div&gt;&lt;span style=&quot;font-size: 10px;&quot;&gt;For ultrasound records older than 18 months:&lt;/span&gt;&lt;/div&gt;&lt;div&gt;&lt;span style=&quot;font-size: 10px; background-color: transparent; color: light-dark(rgb(0, 0, 0), rgb(255, 255, 255));&quot;&gt;Mark benign if no malignancy keywords in follow-up period&lt;/span&gt;&lt;/div&gt;" style="whiteSpace=wrap;html=1;rounded=1;dashed=1;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" vertex="1">
+          <mxGeometry x="1200" y="745" width="180" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="FXaRxvGdWlJYn_I8MsOg-9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;endArrow=none;startFill=0;dashed=1;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" target="FXaRxvGdWlJYn_I8MsOg-10" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1160" y="890" as="sourcePoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="FXaRxvGdWlJYn_I8MsOg-10" value="&lt;span style=&quot;font-size: 10px;&quot;&gt;Mark malignant if BIRADS 6&lt;/span&gt;" style="whiteSpace=wrap;html=1;rounded=1;dashed=1;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" vertex="1">
+          <mxGeometry x="1200" y="845" width="180" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="FXaRxvGdWlJYn_I8MsOg-13" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;endArrow=none;startFill=0;dashed=1;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" target="FXaRxvGdWlJYn_I8MsOg-14" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1160" y="990" as="sourcePoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="FXaRxvGdWlJYn_I8MsOg-14" value="&lt;div&gt;&lt;span style=&quot;font-size: 10px;&quot;&gt;Check future pathology within 8 months&lt;/span&gt;&lt;/div&gt;&lt;div&gt;&lt;span style=&quot;font-size: 10px;&quot;&gt;Mark malignant if laterality matches AND has ultrasound biopsy&lt;/span&gt;&lt;/div&gt;&lt;div&gt;&lt;span style=&quot;font-size: 10px;&quot;&gt;Mark benign if laterality matches&lt;/span&gt;&lt;/div&gt;&lt;div&gt;&lt;span style=&quot;font-size: 10px;&quot;&gt;For bilateral cases, ignore&amp;nbsp;&lt;/span&gt;&lt;span style=&quot;font-size: 10px; background-color: transparent; color: light-dark(rgb(0, 0, 0), rgb(255, 255, 255));&quot;&gt;laterality&lt;/span&gt;&lt;span style=&quot;font-size: 10px; background-color: transparent; color: light-dark(rgb(0, 0, 0), rgb(255, 255, 255));&quot;&gt;&amp;nbsp;&lt;/span&gt;&lt;/div&gt;" style="whiteSpace=wrap;html=1;rounded=1;dashed=1;strokeColor=light-dark(#000000, #171717);strokeWidth=3;" parent="1" vertex="1">
+          <mxGeometry x="1200" y="945" width="180" height="90" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

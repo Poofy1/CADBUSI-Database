@@ -1,5 +1,6 @@
 # CADBUSI-Database
-This database manager is designed to process breast ultrasound data from the Mayo Clinic and store it in a structured format, making it easy to manipulate, label, analyze, and prepare for machine learning training.
+
+Custom database manager that is designed to process breast ultrasound data from the Mayo Clinic and store it in a structured format, making it easy to anonymize, manipulate, label, analyze, and prepare for machine learning training.
 
 ## Requirements
 - Python 3.8
@@ -18,7 +19,7 @@ This database manager is designed to process breast ultrasound data from the May
 - Pull LFS objects: `git lfs pull`
 - Install requirements: `pip install -r requirements.txt`
 - Configure: `config.json`
-
+- Obtain certificate `./src/_fastapi/CertEmulationCA.crt`
 
 ## Configuration
 All user parameters will be controlled from a `config.json` file, you will need to configure the following parameters:
@@ -35,10 +36,54 @@ All user parameters will be controlled from a `config.json` file, you will need 
 - `VAL_SPLIT`: Validation split ratio for splitting up training data.
 
 - `DEBUG_DATA_RANGE`: (Default: `null`) Process a reduced set of dicom files (Ex: [0, 1000]).
-- `RESET_PROCESSED_FEILD`: (Default: `false`) Sets all images as 'unprocessed' withing the `ImageData.csv`.
-- `REPROCESS_DATA_FILTERS`: (Default: `false`) Re-filters what will be included in the final export. 
+
+### Querying Data
+
+To query breast imaging data:
+`python main.py --query [optional: limit=N]`
+
+This will:
+1. Run a query to retrieve breast imaging records
+2. Filter and clean the radiology and pathology data
+3. Create a final dataset for processing
+4. Save results to `output/endpoint_data.csv`
+
+Example with a limit:`python main.py --query --limit=100`
 
 
+### Downloading DICOM Files
+
+The tool offers Cloud Run deployment for efficient DICOM downloads. Dicoms will appear in specified GCP bucket storage:
+```
+# Deploy the FastAPI service to Cloud Run and start dicom data download (REQUIRED)
+python main.py --deploy
+
+# Resend the download requests to the pre-deployed service (OPTIONAL)
+python main.py --rerun 
+
+# Clean up Cloud Run resources when finished (REQUIRED)
+python main.py --cleanup
+```
+
+IMPORTANT: After `python main.py --deploy` finishes execution, that does not mean the data transfer is complete. The download requests have been sent to Cloud Run. Check the bucket storage to see when population is finished. Only then should you run `python main.py --cleanup`
+
+### Anonymizing DICOM Files
+
+To anonymize downloaded DICOM files:
+
+`python main.py --anon [source-bucket-location]`
+
+This will:
+1. Generate encryption keys for safely anonymizing patient IDs
+2. Deidentify DICOM files from the source bucket
+3. Store anonymized files in the specified output directory in the destination bucket
+
+Example:
+
+`python main.py --anon "2025-04-01_221610"`
+
+## Query Diagram `--query [optional: limit=N]`
+![CASBUSI Query](/demo/CADBUSI_Query.png)
 
 ## Usage / Modes
 - When running `main.py`, you will be presented with 4 modes. Each mode will conduct a specific task.
@@ -90,4 +135,4 @@ After configuring the `config.json` file, run the script to start the program:
 - [CADBUSI-Anonymize](https://github.com/Poofy1/CADBUSI-Anonymize)
 - [CADBUSI-Database](https://github.com/Poofy1/CADBUSI-Database)
 - [CADBUSI-Training](https://github.com/Poofy1/CADBUSI-Training)
-![CASBUSI Pipeline](/pipeline/CADBUSI-Pipeline.png)
+![CASBUSI Pipeline](/demo/CADBUSI-Pipeline.png)

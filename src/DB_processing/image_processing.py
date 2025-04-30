@@ -12,9 +12,9 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
 
-from ML_processing.caliper_model import *
-from ML_processing.mask_model import *
-from DB_processing.tools import get_reader, reader, append_audit
+from src.ML_processing.caliper_model import *
+from src.ML_processing.mask_model import *
+from src.DB_processing.tools import get_reader, reader, append_audit
 
 
 # configuration

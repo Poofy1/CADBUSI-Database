@@ -2,7 +2,8 @@ pandas
 Pillow<10.0.0 # REQUIRED VER
 tqdm
 opencv-contrib-python==4.7.0.68
-numpy
+numpy<2.0.0
+pyffx
 matplotlib
 easyocr
 #labelbox # wont work in GCP
@@ -11,7 +12,11 @@ torch==1.12.1
 torchvision==0.13.1
 segmentation-models-pytorch
 google-cloud-storage
+google-cloud-pubsub
+google-cloud-bigquery
 pydicom
 highdicom
 python-bidi
+pylibjpeg>=2.0
+pylibjpeg-libjpeg>=2.1
 git+https://github.com/Poofy1/storage-adapter.git

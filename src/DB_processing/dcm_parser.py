@@ -6,7 +6,7 @@ import io
 from tqdm import tqdm
 import warnings, logging, cv2
 from storage_adapter import *
-from DB_processing.tools import append_audit
+from src.DB_processing.tools import append_audit
 logging.getLogger().setLevel(logging.ERROR)
 warnings.filterwarnings('ignore', category=UserWarning, message='.*Invalid value for VR UI.*')
 env = os.path.dirname(os.path.abspath(__file__))
