@@ -6,12 +6,45 @@ import io
 from tqdm import tqdm
 import warnings, logging, cv2
 from storage_adapter import *
+from src.encrypt_keys import *
 from src.DB_processing.tools import append_audit
 logging.getLogger().setLevel(logging.ERROR)
 warnings.filterwarnings('ignore', category=UserWarning, message='.*Invalid value for VR UI.*')
 env = os.path.dirname(os.path.abspath(__file__))
 
- 
+# Define sets at module level for better performance
+NAMES_TO_REMOVE = {
+    'SOP Instance UID', 'Study Time', 'Series Time', 'Content Time',
+    'Study Instance UID', 'Series Instance UID', 'Private Creator',
+    'Media Storage SOP Instance UID', 'Implementation Class UID',
+    "Patient's Name", "Referring Physician's Name", "Acquisition DateTime",
+    "Institution Name", "Station Name", "Physician(s) of Record",
+    "Referenced SOP Class UID", "Referenced SOP Instance UID",
+    "Device Serial Number", "Patient Comments", "Issuer of Patient ID",
+    "Study ID", "Study Comments", "Current Patient Location",
+    "Requested Procedure ID", "Performed Procedure Step ID",
+    "Other Patient IDs", "Operators' Name", "Institutional Department Name",
+    "Manufacturer", "Requesting Physician",
+}
+
+NAMES_TO_ANON_TIME = {
+    'Study Time', 'Series Time', 'Content Time',
+}
+
+def anon_callback(ds, element):
+    # Check if the element name is in the removal set
+    if element.name in NAMES_TO_REMOVE:
+        del ds[element.tag]
+        
+    # Handle date elements
+    if element.VR == "DA":
+        element.value = element.value[0:4] + "0101"  # set all dates to YYYY0101
+    # Handle time elements not in the exception list
+    elif element.VR == "TM" and element.name not in NAMES_TO_ANON_TIME:
+        element.value = "000000"  # set time to zeros
+
+
+
 def has_blue_pixels(image, n=100, min_b=200):
     # Create a mask where blue is dominant
     channel_max = np.argmax(image, axis=-1)
@@ -39,6 +72,56 @@ def generate_hash(data):
     sha256_hash = hashlib.sha256()
     sha256_hash.update(data)
     return sha256_hash.hexdigest()
+
+
+def deidentify_dicom(ds):
+    ds.remove_private_tags()  # take out private tags added by notion or otherwise
+    
+    # Avoid separate walks by combining them
+    ds.walk(anon_callback)
+    # Only walk file_meta if it exists
+    if hasattr(ds, 'file_meta') and ds.file_meta is not None:
+        ds.file_meta.walk(anon_callback)
+
+    media_type = ds.file_meta[0x00020002]
+    is_video = 'Multi-frame' in str(media_type)
+    is_secondary = 'Secondary' in str(media_type)
+    
+    y0 = 101
+    
+    if not is_secondary and (0x0018, 0x6011) in ds:
+            y0 = ds['SequenceOfUltrasoundRegions'][0]['RegionLocationMinY0'].value
+
+    if 'OriginalAttributesSequence' in ds:
+        del ds.OriginalAttributesSequence
+        
+    # Check if Pixel Data is compressed
+    if ds.file_meta.TransferSyntaxUID.is_compressed:
+        # Attempt to decompress the Pixel Data
+        try:
+            ds.decompress()
+        except NotImplementedError as e:
+            print(f"Decompression not implemented for this transfer syntax: {e}")
+            return None  # or handle this appropriately for your use case
+        except Exception as e:
+            print(f"An error occurred during decompression: {e}")
+            return None  # or handle this appropriately for your use case
+
+    # crop patient info above US region 
+    arr = ds.pixel_array
+    
+    if is_video:
+        arr[:,:y0] = 0
+    else:
+        arr[:y0] = 0
+    
+    # Update the Pixel Data
+    ds.PixelData = arr.tobytes()
+    
+    # Important: Keep the original transfer syntax - DO NOT MODIFY THIS LINE
+    ds.file_meta.TransferSyntaxUID = ds.file_meta.TransferSyntaxUID
+
+    return ds
 
 
 def parse_video_data(dcm, current_index, parsed_database):
@@ -99,8 +182,16 @@ def parse_video_data(dcm, current_index, parsed_database):
 
 
 
-def parse_single_dcm(dcm, current_index, parsed_database):
+def parse_single_dcm(dcm, current_index, parsed_database, encryption_key):
     
+    
+    # Anonymize 
+    # Encrypt identifiers
+    dcm.PatientID = encrypt_single_id(encryption_key, dcm.PatientID)
+    dcm.AccessionNumber = encrypt_single_id(encryption_key, dcm.AccessionNumber)
+    
+    dcm = deidentify_dicom(dcm)
+        
     media_type = os.path.basename(dcm)[:5]
     if media_type != 'image':
         return parse_video_data(dcm, current_index, parsed_database)
@@ -169,7 +260,7 @@ def parse_single_dcm(dcm, current_index, parsed_database):
 
 
 
-def parse_files(dcm_files_list, parsed_database):
+def parse_files(dcm_files_list, parsed_database, encryption_key):
     print("Parsing DCM Data")
 
     # Load the current index from a file
@@ -184,7 +275,7 @@ def parse_files(dcm_files_list, parsed_database):
     print(f'New Dicom Files: {len(dcm_files_list)}')
 
     with ThreadPoolExecutor() as executor:
-        futures = {executor.submit(parse_single_dcm, dcm, i+current_index, parsed_database): dcm for i, dcm in enumerate(dcm_files_list)}
+        futures = {executor.submit(parse_single_dcm, dcm, i+current_index, parsed_database, encryption_key): dcm for i, dcm in enumerate(dcm_files_list)}
         data_list = []
         for future in tqdm(as_completed(futures), total=len(futures), desc=""):
             try:
@@ -202,7 +293,7 @@ def parse_files(dcm_files_list, parsed_database):
     return df
 
 
-def parse_anon_file(anon_location, database_path, image_df):
+def parse_anon_file(anon_location, database_path, image_df, ):
     
     video_df = image_df[image_df['DataType'] == 'video']
     image_df = image_df[image_df['DataType'] == 'image']
@@ -278,7 +369,7 @@ def parse_anon_file(anon_location, database_path, image_df):
     
 
 # Main Method
-def Parse_Dicom_Files(database_path, anon_location, raw_storage_database, data_range):
+def Parse_Dicom_Files(database_path, anon_location, raw_storage_database, data_range, encryption_key):
     
     #Create database dir
     make_dirs(database_path)
@@ -319,7 +410,7 @@ def Parse_Dicom_Files(database_path, anon_location, raw_storage_database, data_r
     save_data(content, parsed_files_list_file)
     
     # Get DCM Data
-    image_df = parse_files(dcm_files_list, database_path)
+    image_df = parse_files(dcm_files_list, database_path, encryption_key)
     image_df = image_df.rename(columns={'PatientID': 'Patient_ID'})
     image_df = image_df.rename(columns={'AccessionNumber': 'Accession_Number'})
 

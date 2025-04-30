@@ -171,7 +171,7 @@ def anonymize_date(date_str):
         print(f"Warning: Couldn't anonymize date '{date_str}' - unexpected format")
         return date_str
 
-def encrypt_ids(input_file=None, output_file_gcp=None, output_file_local=None, key_output=None):
+def encrypt_ids(input_file=None, output_file_local=None, key_output=None):
     
     # Ensure output folder exists for local file
     if output_file_local:
@@ -274,23 +274,5 @@ def encrypt_ids(input_file=None, output_file_gcp=None, output_file_local=None, k
             writer.writerow(encrypted_row)
 
     print(f"Encryption and date anonymization complete. Output saved locally to {output_file_local}")
-    
-
-    # Upload to GCS if output_file_gcp is specified
-    if output_file_gcp:
-        from google.cloud import storage
-        
-        # Get the bucket using the CONFIG variable
-        client = storage.Client()
-        bucket = client.bucket(CONFIG["storage"]["bucket_name"])
-        
-        # Determine the blob name - this is the path within the bucket
-        blob_name = f"{output_file_gcp}"
-        
-        # Upload the file to GCS
-        blob_name = os.path.normpath(blob_name)
-        blob = bucket.blob(blob_name)
-        blob.upload_from_filename(output_file_local)
-        print(f"File uploaded to gs://{CONFIG['storage']['bucket_name']}/{blob_name}")
     
     return key

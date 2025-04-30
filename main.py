@@ -3,7 +3,6 @@ ssl._create_default_https_context = ssl._create_unverified_context
 
 from src.dicom_download import *
 from src.query import *
-from src.anonymize_dicoms import *
 from src.encrypt_keys import *
 from src.query_clean_path import filter_path_data
 from src.query_clean_rad import filter_rad_data
@@ -89,25 +88,18 @@ def main():
         
     elif args.database:
         
-        anon_file_gcp = f'{CONFIG["storage"]["anonymized_path"]}/{args.database}/anon_data.csv'
-        anon_file_local = f'{env}/output/anon_data.csv'
-        
-        key = encrypt_ids(dicom_query_file, anon_file_gcp, anon_file_local, key_output)
-        
+        anon_file = f'{env}/output/anon_data.csv'
         BUCKET_PATH = f'{CONFIG["storage"]["download_path"]}/{args.database}'
-        BUCKET_OUTPUT_PATH = f'{CONFIG["storage"]["anonymized_path"]}/{args.database}'
-        deidentify_bucket_dicoms(
-            bucket_path=BUCKET_PATH,
-            output_bucket_path=BUCKET_OUTPUT_PATH,
-            encryption_key=key
-        )
         
-        user_input = input("Continue with DCM Parsing step? (y/n): ")
+        key = encrypt_ids(dicom_query_file, anon_file, key_output)
+        
+        user_input = input("Continue with DCM parsing/anonymization step? (y/n): ")
         if user_input.lower() == "y":
-            target_input = input("Enter target data folder: ")
-            dicom_path = f'anon_dicoms/{target_input}'
-            anon_file = f'{dicom_path}/anon_data.csv'
-            Parse_Dicom_Files(CONFIG["DATABASE_DIR"], anon_file, CONFIG["UNZIPPED_DICOMS"], CONFIG["DEBUG_DATA_RANGE"])
+            Parse_Dicom_Files(CONFIG["DATABASE_DIR"], 
+                              anon_file, 
+                              BUCKET_PATH, 
+                              CONFIG["DEBUG_DATA_RANGE"],
+                              encryption_key=key)
         
         user_input = input("Continue with OCR step? (y/n): ")
         if user_input.lower() == "y":
