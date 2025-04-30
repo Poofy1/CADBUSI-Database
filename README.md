@@ -83,7 +83,7 @@ Example:
 `python main.py --anon "2025-04-01_221610"`
 
 ## Query Diagram `--query [optional: limit=N]`
-![CASBUSI Query](/demo/CADBUSI_Query.png)
+![CADBUSI Query](/demo/CADBUSI_Query.png)
 
 ## Usage / Modes
 - When running `main.py`, you will be presented with 4 modes. Each mode will conduct a specific task.
@@ -135,4 +135,4 @@ After configuring the `config.json` file, run the script to start the program:
 - [CADBUSI-Anonymize](https://github.com/Poofy1/CADBUSI-Anonymize)
 - [CADBUSI-Database](https://github.com/Poofy1/CADBUSI-Database)
 - [CADBUSI-Training](https://github.com/Poofy1/CADBUSI-Training)
-![CASBUSI Pipeline](/demo/CADBUSI-Pipeline.png)
+![CADBUSI Pipeline](/demo/CADBUSI-Pipeline.png)

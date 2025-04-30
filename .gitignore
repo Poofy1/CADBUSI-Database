@@ -16,7 +16,8 @@
 .tmp.driveupload/*
 *.ini
 *.zip
-!/pipeline/CADBUSI-Pipeline.png
+!/demo/CADBUSI-Pipeline.png
+!/demo/CADBUSI_Query.png
 !/requirements.txt
 
 config.py
