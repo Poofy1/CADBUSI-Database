@@ -78,7 +78,7 @@ def generate_hash(data):
     return sha256_hash.hexdigest()
 
 
-def deidentify_dicom(ds):
+def deidentify_dicom(ds, dcm):
     
     global ENCRYPTION_KEY
     
@@ -93,10 +93,25 @@ def deidentify_dicom(ds):
     if hasattr(ds, 'file_meta') and ds.file_meta is not None:
         ds.file_meta.walk(anon_callback)
 
-    media_type = ds.file_meta[0x00020002]
-    is_video = 'Multi-frame' in str(media_type)
-    is_secondary = 'Secondary' in str(media_type)
-    
+    # Safely check for Multi-frame content
+    is_video = False
+    is_secondary = False
+    try:
+        if hasattr(ds, 'file_meta') and 0x00020002 in ds.file_meta:
+            media_type = ds.file_meta[0x00020002]
+            is_video = str(media_type).find('Multi-frame') > -1
+            is_secondary = 'Secondary' in str(media_type)
+        # Additional check for multi-frame files
+        elif hasattr(ds, 'NumberOfFrames') and ds.NumberOfFrames > 1:
+            is_video = True
+            
+        # Method 3: Check SOP Class UID (backup method)
+        elif hasattr(ds, 'SOPClassUID') and 'Multi-frame' in str(ds.SOPClassUID):
+            is_video = True
+    except Exception as e:
+        print(f"Error determining media type: {e}")
+        print(ds)
+
     y0 = 101
     
     if not is_secondary and (0x0018, 0x6011) in ds:
@@ -105,18 +120,21 @@ def deidentify_dicom(ds):
     if 'OriginalAttributesSequence' in ds:
         del ds.OriginalAttributesSequence
         
-    # Check if Pixel Data is compressed
-    if ds.file_meta.TransferSyntaxUID.is_compressed:
-        # Attempt to decompress the Pixel Data
+    # Check if Pixel Data is compressed - safely check TransferSyntaxUID
+    is_compressed = False
+    if hasattr(ds, 'file_meta') and hasattr(ds.file_meta, 'TransferSyntaxUID'):
+        is_compressed = ds.file_meta.TransferSyntaxUID.is_compressed
+    else:
+        return None, is_video
+
+    # Attempt to decompress if needed
+    if is_compressed:
         try:
             ds.decompress()
-        except NotImplementedError as e:
-            print(f"Decompression not implemented for this transfer syntax: {e}")
-            return None  # or handle this appropriately for your use case
         except Exception as e:
-            print(f"An error occurred during decompression: {e}")
-            return None  # or handle this appropriately for your use case
-
+            print(f"Decompression error: {e}")
+            return None
+        
     # crop patient info above US region 
     arr = ds.pixel_array
     
@@ -128,10 +146,11 @@ def deidentify_dicom(ds):
     # Update the Pixel Data
     ds.PixelData = arr.tobytes()
     
-    # Important: Keep the original transfer syntax - DO NOT MODIFY THIS LINE
+    # Keep the original transfer syntax
     ds.file_meta.TransferSyntaxUID = ds.file_meta.TransferSyntaxUID
 
-    return ds
+    return ds, is_video
+
 
 
 def parse_video_data(dcm, dcm_data, dataset, current_index, parsed_database):
@@ -194,13 +213,15 @@ def parse_single_dcm(dcm, current_index, parsed_database):
 
     # Read the DICOM file
     dcm_data = read_binary(dcm)
-    dataset = pydicom.dcmread(io.BytesIO(dcm_data))
+    dataset = pydicom.dcmread(io.BytesIO(dcm_data), force=True)
     
     # Anonymize 
-    dataset = deidentify_dicom(dataset)
+    dataset, is_video = deidentify_dicom(dataset, dcm)
     
-    media_type = dataset.file_meta[0x00020002]
-    is_video = str(media_type).find('Multi-frame') > -1
+    if (dataset is None):
+        return None
+    
+    # Safely check for Multi-frame content
     if is_video:
         return parse_video_data(dcm, dcm_data, dataset, current_index, parsed_database)
 
@@ -281,6 +302,8 @@ def parse_files(dcm_files_list, parsed_database):
         current_index = 0
 
     print(f'New Dicom Files: {len(dcm_files_list)}')
+    
+    failure_counter = 0  # Initialize failure counter
 
     with ThreadPoolExecutor() as executor:
         futures = {executor.submit(parse_single_dcm, dcm, i+current_index, parsed_database): dcm for i, dcm in enumerate(dcm_files_list)}
@@ -288,15 +311,23 @@ def parse_files(dcm_files_list, parsed_database):
         for future in tqdm(as_completed(futures), total=len(futures), desc=""):
             try:
                 data = future.result()
-                data_list.append(data)
+                if data is None:
+                    failure_counter += 1  # Count as failure if None is returned
+                else:
+                    data_list.append(data)
             except Exception as exc:
+                failure_counter += 1  # Count exceptions as failures too
                 print(f'An exception occurred: {exc}')
 
-        # Save index
+        # Save index - only count successful parses
         new_index = str(current_index + len(data_list))
         save_data(new_index, index_file)
 
-    # Create a DataFrame from the list of dictionaries
+    # Print total failures at the end
+    if failure_counter > 0:
+        print(f'Total failures: {failure_counter}')
+
+    # Create a DataFrame from the list of dictionaries (only successful parses)
     df = pd.DataFrame(data_list)
     return df
 

@@ -1,5 +1,5 @@
 pandas
-Pillow<10.0.0 # REQUIRED VER
+Pillow
 tqdm
 opencv-contrib-python==4.7.0.68
 numpy<2.0.0
@@ -8,8 +8,8 @@ matplotlib
 easyocr
 #labelbox # wont work in GCP
 #requests # wont work in GCP
-torch==1.12.1
-torchvision==0.13.1
+torch
+torchvision
 segmentation-models-pytorch
 google-cloud-storage
 google-cloud-pubsub
