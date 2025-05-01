@@ -363,6 +363,10 @@ def parse_single_dcm(dcm, current_index, parsed_database):
     dcm_data = read_binary(dcm)
     dataset = pydicom.dcmread(io.BytesIO(dcm_data), force=True)
     
+    # Not a ultrasound image, likely a image of the settings or some sketch notes
+    if not hasattr(dataset, 'SequenceOfUltrasoundRegions'):
+        return None
+        
     # Anonymize 
     dataset, is_video = deidentify_dicom(dataset)
     
@@ -473,7 +477,7 @@ def parse_files(dcm_files_list, parsed_database):
 
     # Print total failures at the end
     if failure_counter > 0:
-        print(f'Total failures: {failure_counter}')
+        print(f'Skipped {failure_counter} DICOMS from missing or irrelevant data')
 
     # Create a DataFrame from the list of dictionaries (only successful parses)
     df = pd.DataFrame(data_list)
