@@ -5,6 +5,7 @@ import pandas as pd
 import io
 from tqdm import tqdm
 import warnings, logging, cv2
+from PIL import Image
 from storage_adapter import *
 from src.encrypt_keys import *
 from src.DB_processing.tools import append_audit
@@ -77,8 +78,149 @@ def generate_hash(data):
     sha256_hash.update(data)
     return sha256_hash.hexdigest()
 
+def manual_decompress(ds):
+    """
+    Replacement for ds.decompress() for specific edge cases where normal decompression fails
+    
+    Parameters:
+    - ds: pydicom Dataset that needs decompression
+    
+    Returns:
+    - Modified dataset with uncompressed pixel data, or None if decompression fails
+    """
+    # Check if dataset has pixel data
+    if 'PixelData' not in ds:
+        print("No pixel data found in dataset")
+        return None
+    
+    pixel_data = ds.PixelData
+    
+    # Find all JPEG frame start positions
+    frame_starts = []
+    pos = 0
+    while pos < len(pixel_data) - 1:
+        if pixel_data[pos] == 0xFF and pixel_data[pos+1] == 0xD8:
+            frame_starts.append(pos)
+            pos += 2
+        else:
+            pos += 1
+    
+    # Return None if no frames found
+    if not frame_starts:
+        print("No JPEG frames found in pixel data")
+        return None
+    
+    # Get image dimensions from DICOM attributes
+    rows = ds.Rows if 'Rows' in ds else 0
+    columns = ds.Columns if 'Columns' in ds else 0
+    
+    # Check if we have enough information
+    if rows == 0 or columns == 0:
+        print("Missing image dimensions in DICOM")
+        return None
+    
+    # Determine if multi-frame
+    is_multi_frame = False
+    if 'NumberOfFrames' in ds and ds.NumberOfFrames > 1:
+        is_multi_frame = True
 
-def deidentify_dicom(ds, dcm):
+    # Process each frame
+    frames = []
+    for i in range(len(frame_starts)):
+        # Calculate frame size
+        start = frame_starts[i]
+        end = frame_starts[i+1] if i < len(frame_starts)-1 else len(pixel_data)
+        
+        # Get frame data
+        frame_data = pixel_data[start:end]
+        
+        # Ensure it ends with JPEG EOI marker
+        jpeg_end = frame_data.rfind(b'\xFF\xD9')
+        if jpeg_end > 0:
+            frame_data = frame_data[:jpeg_end+2]
+        
+        # Skip invalid frames
+        if frame_data[:2] != b'\xFF\xD8':
+            continue
+        
+        try:
+            # Open JPEG with PIL
+            img = Image.open(io.BytesIO(frame_data))
+            
+            # Ensure dimensions match
+            if img.width != columns or img.height != rows:
+                # Resize if needed
+                img = img.resize((columns, rows))
+            
+            # Convert to numpy array
+            frame_array = np.array(img)
+            
+            # Append to frames list
+            frames.append(frame_array)
+        except Exception as e:
+            print(f"Error processing frame {i+1}: {e}")
+    
+    # Return None if no frames were successfully decoded
+    if not frames:
+        print("No frames could be successfully decompressed")
+        return None
+    
+    # Create uncompressed pixel data
+    if is_multi_frame:
+        # Stack frames for multi-frame
+        pixel_array = np.stack(frames)
+    else:
+        # Single frame
+        pixel_array = frames[0]
+    
+    # Update dataset
+    try:
+        # Calculate pixel representation based on array
+        if pixel_array.dtype.kind == 'u':  # unsigned integer
+            ds.PixelRepresentation = 0
+        else:  # signed integer
+            ds.PixelRepresentation = 1
+        
+        # Update bits stored if needed
+        max_value = np.max(pixel_array)
+        if max_value > 255:
+            ds.BitsStored = 16
+        else:
+            ds.BitsStored = 8
+        
+        # Update high bit
+        ds.HighBit = ds.BitsStored - 1
+        
+        # Update photometric interpretation if needed
+        if len(pixel_array.shape) >= 3 and pixel_array.shape[-1] == 3:
+            ds.PhotometricInterpretation = "RGB"
+        else:
+            # Default to MONOCHROME2 for grayscale
+            if 'PhotometricInterpretation' not in ds:
+                ds.PhotometricInterpretation = "MONOCHROME2"
+        
+        # Set uncompressed transfer syntax
+        if hasattr(ds, 'file_meta') and ds.file_meta is not None:
+            ds.file_meta.TransferSyntaxUID = pydicom.uid.ExplicitVRLittleEndian
+        else:
+            ds.file_meta = pydicom.dataset.FileMetaDataset()
+            ds.file_meta.TransferSyntaxUID = pydicom.uid.ExplicitVRLittleEndian
+            ds.file_meta.MediaStorageSOPClassUID = ds.SOPClassUID if 'SOPClassUID' in ds else '1.2.840.10008.5.1.4.1.1.4'  # Default to MR
+            ds.file_meta.MediaStorageSOPInstanceUID = ds.SOPInstanceUID if 'SOPInstanceUID' in ds else pydicom.uid.generate_uid()
+            ds.file_meta.ImplementationClassUID = pydicom.uid.PYDICOM_IMPLEMENTATION_UID
+            ds.file_meta.ImplementationVersionName = 'MANUAL_DECOMPRESS'
+        
+        # Set pixel data from array
+        ds.PixelData = pixel_array.tobytes()
+        
+        return ds
+    except Exception as e:
+        print(f"Error updating dataset: {e}")
+        return None
+    
+    
+    
+def deidentify_dicom(ds):
     
     global ENCRYPTION_KEY
     
@@ -110,7 +252,6 @@ def deidentify_dicom(ds, dcm):
             is_video = True
     except Exception as e:
         print(f"Error determining media type: {e}")
-        print(ds)
 
     y0 = 101
     
@@ -119,12 +260,15 @@ def deidentify_dicom(ds, dcm):
 
     if 'OriginalAttributesSequence' in ds:
         del ds.OriginalAttributesSequence
-        
+
     # Check if Pixel Data is compressed - safely check TransferSyntaxUID
     is_compressed = False
     if hasattr(ds, 'file_meta') and hasattr(ds.file_meta, 'TransferSyntaxUID'):
         is_compressed = ds.file_meta.TransferSyntaxUID.is_compressed
+    elif (0x0028, 0x2110) in ds and ds[0x0028, 0x2110].value == '01':
+        is_compressed = True
     else:
+        print("couldn't determine if compressed")
         return None, is_video
 
     # Attempt to decompress if needed
@@ -132,8 +276,12 @@ def deidentify_dicom(ds, dcm):
         try:
             ds.decompress()
         except Exception as e:
-            print(f"Decompression error: {e}")
-            return None
+            # Try manual decompression
+            ds = manual_decompress(ds)
+            
+            if ds is None:
+                print("Manual and automatic decompression failed")
+                return None
         
     # crop patient info above US region 
     arr = ds.pixel_array
@@ -216,7 +364,7 @@ def parse_single_dcm(dcm, current_index, parsed_database):
     dataset = pydicom.dcmread(io.BytesIO(dcm_data), force=True)
     
     # Anonymize 
-    dataset, is_video = deidentify_dicom(dataset, dcm)
+    dataset, is_video = deidentify_dicom(dataset)
     
     if (dataset is None):
         return None
