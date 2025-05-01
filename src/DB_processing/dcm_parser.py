@@ -12,6 +12,10 @@ logging.getLogger().setLevel(logging.ERROR)
 warnings.filterwarnings('ignore', category=UserWarning, message='.*Invalid value for VR UI.*')
 env = os.path.dirname(os.path.abspath(__file__))
 
+
+ENCRYPTION_KEY = None
+
+
 # Define sets at module level for better performance
 NAMES_TO_REMOVE = {
     'SOP Instance UID', 'Study Time', 'Series Time', 'Content Time',
@@ -75,6 +79,12 @@ def generate_hash(data):
 
 
 def deidentify_dicom(ds):
+    
+    global ENCRYPTION_KEY
+    
+    ds.PatientID = encrypt_single_id(ENCRYPTION_KEY, ds.PatientID)
+    ds.AccessionNumber = encrypt_single_id(ENCRYPTION_KEY, ds.AccessionNumber)
+
     ds.remove_private_tags()  # take out private tags added by notion or otherwise
     
     # Avoid separate walks by combining them
@@ -124,10 +134,8 @@ def deidentify_dicom(ds):
     return ds
 
 
-def parse_video_data(dcm, current_index, parsed_database):
+def parse_video_data(dcm, dcm_data, dataset, current_index, parsed_database):
     data_dict = {}
-    dcm_data = read_binary(dcm)
-    dataset = pydicom.dcmread(io.BytesIO(dcm_data))
     
     for elem in dataset:
         if elem.VR == "SQ" and elem.value and len(elem.value) > 0:  # if sequence
@@ -182,27 +190,27 @@ def parse_video_data(dcm, current_index, parsed_database):
 
 
 
-def parse_single_dcm(dcm, current_index, parsed_database, encryption_key):
-    
+def parse_single_dcm(dcm, current_index, parsed_database):
+
+    # Read the DICOM file
+    dcm_data = read_binary(dcm)
+    dataset = pydicom.dcmread(io.BytesIO(dcm_data))
     
     # Anonymize 
-    # Encrypt identifiers
-    dcm.PatientID = encrypt_single_id(encryption_key, dcm.PatientID)
-    dcm.AccessionNumber = encrypt_single_id(encryption_key, dcm.AccessionNumber)
+    dataset = deidentify_dicom(dataset)
     
-    dcm = deidentify_dicom(dcm)
-        
-    media_type = os.path.basename(dcm)[:5]
-    if media_type != 'image':
-        return parse_video_data(dcm, current_index, parsed_database)
+    media_type = dataset.file_meta[0x00020002]
+    is_video = str(media_type).find('Multi-frame') > -1
+    if is_video:
+        return parse_video_data(dcm, dcm_data, dataset, current_index, parsed_database)
+
+    
+    
+    # Continue with image
     
     data_dict = {}
     region_count = 0
     
-    # Read the DICOM file
-    dcm_data = read_binary(dcm)
-    dataset = pydicom.dcmread(io.BytesIO(dcm_data))
-
     for elem in dataset:
         # Check if element is a sequence
         if elem.VR == "SQ":
@@ -260,7 +268,7 @@ def parse_single_dcm(dcm, current_index, parsed_database, encryption_key):
 
 
 
-def parse_files(dcm_files_list, parsed_database, encryption_key):
+def parse_files(dcm_files_list, parsed_database):
     print("Parsing DCM Data")
 
     # Load the current index from a file
@@ -275,7 +283,7 @@ def parse_files(dcm_files_list, parsed_database, encryption_key):
     print(f'New Dicom Files: {len(dcm_files_list)}')
 
     with ThreadPoolExecutor() as executor:
-        futures = {executor.submit(parse_single_dcm, dcm, i+current_index, parsed_database, encryption_key): dcm for i, dcm in enumerate(dcm_files_list)}
+        futures = {executor.submit(parse_single_dcm, dcm, i+current_index, parsed_database): dcm for i, dcm in enumerate(dcm_files_list)}
         data_list = []
         for future in tqdm(as_completed(futures), total=len(futures), desc=""):
             try:
@@ -313,7 +321,7 @@ def parse_anon_file(anon_location, database_path, image_df, ):
     
     # Find all csv files and combine into df
     anon_location = os.path.normpath(anon_location)
-    breast_csv = read_csv(anon_location)
+    breast_csv = pd.read_csv(anon_location)
     breast_csv = breast_csv.sort_values('PATIENT_ID')
     breast_csv = breast_csv.rename(columns={
         'PATIENT_ID': 'Patient_ID',
@@ -371,6 +379,10 @@ def parse_anon_file(anon_location, database_path, image_df, ):
 # Main Method
 def Parse_Dicom_Files(database_path, anon_location, raw_storage_database, data_range, encryption_key):
     
+    # Set the global encryption key
+    global ENCRYPTION_KEY
+    ENCRYPTION_KEY = encryption_key
+    
     #Create database dir
     make_dirs(database_path)
     make_dirs(f'{database_path}/images/')
@@ -410,7 +422,7 @@ def Parse_Dicom_Files(database_path, anon_location, raw_storage_database, data_r
     save_data(content, parsed_files_list_file)
     
     # Get DCM Data
-    image_df = parse_files(dcm_files_list, database_path, encryption_key)
+    image_df = parse_files(dcm_files_list, database_path)
     image_df = image_df.rename(columns={'PatientID': 'Patient_ID'})
     image_df = image_df.rename(columns={'AccessionNumber': 'Accession_Number'})
 
