@@ -18,38 +18,72 @@ Custom database manager that is designed to process breast ultrasound data from 
 - Clone repository: `git clone https://github.com/Poofy1/CADBUSI-Database.git`
 - Pull LFS objects: `git lfs pull`
 - Install requirements: `pip install -r requirements.txt`
-- Configure: `config.json`
+- Create/Configure: `./config.py`
 - Obtain certificate `./src/_fastapi/CertEmulationCA.crt`
 
 ## Configuration
-All user parameters will be controlled from a `config.json` file, you will need to configure the following parameters:
-
-- `UNZIPPED_DICOMS`: Directory of the anonymized unzipped dicom data. 
-- `DATABASE_DIR`: Final location of the database.
-
-- `LABELBOX_API_KEY`: Label Box API key for uploading and retrieving Label Box data.
-- `PROJECT_ID`: LabelBox project ID.
-- `LABELBOX_LABELS`: Directory of processed labels from Label Box.
-- `TARGET_CASES`: Directory of worst performing cases from training. Prepares these cases for instance labeling on Label Box.
-
-- `EXPORT_DIR`: Output directory of all processed export data.
-- `VAL_SPLIT`: Validation split ratio for splitting up training data.
-
-- `DEBUG_DATA_RANGE`: (Default: `null`) Process a reduced set of dicom files (Ex: [0, 1000]).
+All user parameters will be controlled from a `./config.py` file, you will need to configure the following parameters:
+```
+CONFIG = {
+    # Environment configuration
+    "env": {
+        "project_id": "your-project-id",
+        "region": "us-central1",
+        "topic_name": "dicom-processing-topic",
+        "subscription_name": "dicom-processing-subscription",
+        "my_service_account": "your-service-id",
+        "service_account_identity": "your-service-account@your-project-id.iam.gserviceaccount.com"
+    },
+    
+    # Cloud Run configuration
+    "cloud_run": {
+        "service": "pubsub-push-cloudrun",
+        "version": "1.0",
+        "ar": "your-artifact-registry",
+        "ar_name": "pubsub-push-cloudrun",
+        "target_tag": "us-central1-docker.pkg.dev/your-project-id/your-artifact-registry/pubsub-push-cloudrun:1.0",
+        "vpc_shared": "your-shared-vpc-id",
+        "vpc_name": "your-vpc-name"
+    },
+    
+    # Storage configuration
+    "storage": {
+        "gcs_log": "gs://your-bucket-name/cloudbuild_log",
+        "gcs_stage": "gs://your-bucket-name/cloudbuild_stage",
+        "bucket_name": "your-bucket-name",
+        "download_path": "Downloads",
+    },
+    
+    "BUCKET": "your-bucket-name",
+    "WINDIR": "D:/DATA/YOUR_PROJECT/",
+    "DATABASE_DIR": "Databases/database_YYYY_MM_DD/", # Final location of the database.
+    "LABELBOX_API_KEY": "your-labelbox-api-key",
+    "PROJECT_ID": "your-labelbox-project-id",
+    "LABELBOX_LABELS": "labelbox_data/",
+    "TARGET_CASES": "/failed_cases.csv", # Directory of worst performing cases from training. Prepares these cases for instance labeling on Label Box.
+    "EXPORT_DIR": "exports/", # Output directory of all processed export data.
+    "VAL_SPLIT": 0.2, # Validation split ratio for splitting up training data.
+    "DEBUG_DATA_RANGE": [], # Process a reduced set of dicom files (Ex: [0, 1000]).
+}
+```
+## Usage
+The pipeline is operated through a single command-line interface in main.py, which provides several functions. For general purpose, you should perform these commands in this order: 
 
 ### Querying Data
 
 To query breast imaging data:
-`python main.py --query [optional: limit=N]`
+`python main.py --query [optional: --limit=N]`
 
 This will:
 1. Run a query to retrieve breast imaging records
 2. Filter and clean the radiology and pathology data
 3. Create a final dataset for processing
-4. Save results to `output/endpoint_data.csv`
+4. Save results to `query_data/endpoint_data.csv`
 
 Example with a limit:`python main.py --query --limit=100`
 
+#### Query Diagram `--query [optional: limit=N]`
+![CADBUSI Query](/demo/CADBUSI_Query.png)
 
 ### Downloading DICOM Files
 
@@ -67,11 +101,11 @@ python main.py --cleanup
 
 IMPORTANT: After `python main.py --deploy` finishes execution, that does not mean the data transfer is complete. The download requests have been sent to Cloud Run. Check the bucket storage to see when population is finished. Only then should you run `python main.py --cleanup`
 
-### Anonymizing DICOM Files
+### Processing DICOM Files
 
-To anonymize downloaded DICOM files:
+To process the downloaded DICOM files into a complete database:
 
-`python main.py --anon [source-bucket-location]`
+`python main.py --database [source-bucket-location]`
 
 This will:
 1. Generate encryption keys for safely anonymizing patient IDs
@@ -80,26 +114,21 @@ This will:
 
 Example:
 
-`python main.py --anon "2025-04-01_221610"`
+`python main.py --database "2025-04-01_221610"`
 
-## Query Diagram `--query [optional: limit=N]`
-![CADBUSI Query](/demo/CADBUSI_Query.png)
+### Export Database
 
-## Usage / Modes
-- When running `main.py`, you will be presented with 4 modes. Each mode will conduct a specific task.
+To process the downloaded DICOM files into a complete database:
 
-- `DEVELOP_DATABASE`: This process involves many steps and may take a significant amount of time to complete. In case of errors, checkpoints have been added to incrementally prompt the user which steps they need to process. The steps are as follows:
-    - DCM Parsing: Processes the input dicom files by converting metadata to csv and export the images.
-    - OCR: Reads the test description in the images with OCR and organizes the extracted data.
-    - Data Cleaning (Part 1/2): Finds and removes corrupted images. Removes duplicate data. Uses machine learning to find orientations of unlabeled images.
-    - Data Cleaning (Part 2/2): Filters what data will be used in the final export. Uses machine learning to inpaint calipers out of images. Renames all images to a specific format. 
-    - Process Videos: Performs many of the operations we completed with image data with the video data instead.
-- `DEVELOP_LABELBOX_DATA`: This process will prepare data to be uploaded to Label Box. 
-- `RETREIVE_LABELBOX_DATA`: This process will retrieve and organize Label Box data to a directory.
-- `DEVELOP_EXPORT`: This process will export all relevant database data and labeled data into the specified output directory.
+`python main.py --export [database-name]`
 
-After configuring the `config.json` file, run the script to start the program:
-`python main.py`
+This will:
+1. Crop all relevent images / videos into output dir
+2. Create a consolidated label system
+
+Example:
+
+`python main.py --export "database_2025_4_30"`
 
 
 
