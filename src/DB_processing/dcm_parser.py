@@ -441,11 +441,11 @@ def parse_single_dcm(dcm, current_index, parsed_database):
 
 
 
-def parse_files(dcm_files_list, parsed_database):
+def parse_files(dcm_files_list, database_path):
     print("Parsing DCM Data")
 
     # Load the current index from a file
-    index_file = os.path.join(parsed_database, "IndexCounter.txt")
+    index_file = os.path.join(database_path, "IndexCounter.txt")
     if file_exists(index_file):
         content = read_txt(index_file)
         if content:
@@ -458,7 +458,7 @@ def parse_files(dcm_files_list, parsed_database):
     failure_counter = 0  # Initialize failure counter
 
     with ThreadPoolExecutor() as executor:
-        futures = {executor.submit(parse_single_dcm, dcm, i+current_index, parsed_database): dcm for i, dcm in enumerate(dcm_files_list)}
+        futures = {executor.submit(parse_single_dcm, dcm, i+current_index, database_path): dcm for i, dcm in enumerate(dcm_files_list)}
         data_list = []
         for future in tqdm(as_completed(futures), total=len(futures), desc=""):
             try:
@@ -477,8 +477,9 @@ def parse_files(dcm_files_list, parsed_database):
 
     # Print total failures at the end
     if failure_counter > 0:
-        print(f'Skipped {failure_counter} DICOMS from missing or irrelevant data')
-
+        print(f'Skipped {failure_counter} DICOMS from missing data or irrelevant data')
+    
+    append_audit(database_path, f"Removed {failure_counter} DICOMS from missing data or irrelevant data")
     # Create a DataFrame from the list of dictionaries (only successful parses)
     df = pd.DataFrame(data_list)
     return df

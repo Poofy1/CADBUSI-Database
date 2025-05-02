@@ -105,14 +105,11 @@ def main():
         if user_input.lower() == "y":
             analyze_images(CONFIG["DATABASE_DIR"])
         
-        user_input = input("Continue with Data Cleaning step (Part 1/2)? (y/n): ")
+        user_input = input("Continue with Data Cleaning step? (y/n): ")
         if user_input.lower() == "y":
-            Remove_Green_Images(CONFIG["DATABASE_DIR"])
+            # Remove_Green_Images(CONFIG["DATABASE_DIR"]) # probably irrelevent now
             Remove_Duplicate_Data(CONFIG["DATABASE_DIR"])
             Find_Orientation(CONFIG)
-            
-        user_input = input("Continue with Data Cleaning step (Part 2/2)? (y/n): ")
-        if user_input.lower() == "y":
             Select_Data(CONFIG["DATABASE_DIR"], only_labels = False)
             #Inpaint_Dataset(f'{CONFIG["DATABASE_DIR"]}/ImageData.csv', f'{CONFIG["DATABASE_DIR"]}/images/') # OLD and SLOW
             Inpaint_Dataset_N2N(f'{CONFIG["DATABASE_DIR"]}/ImageData.csv', f'{CONFIG["DATABASE_DIR"]}/images/')
