@@ -42,6 +42,7 @@ def parse_arguments():
     
     # Anonymize arguments
     parser.add_argument('--database', type=str, help='Directory name for anonymized DICOM output')
+    parser.add_argument('--skip-inpaint', action='store_true', help='Skip the inpainting step')
     
     # Export arguments
     parser.add_argument('--export', action='store_true', help='Export current databse')
@@ -87,37 +88,44 @@ def main():
         dicom_download_remote_start(dicom_query_file, args.deploy, args.cleanup)
         
     elif args.database:
-        
         anon_file = f'{env}/output/anon_data.csv'
         BUCKET_PATH = f'{CONFIG["storage"]["download_path"]}/{args.database}'
         
+        print(f"Starting database processing for {args.database}...")
+
+        # Step 1: Encrypt IDs
+        print("Step 1/5: Encrypting IDs...")
         key = encrypt_ids(dicom_query_file, anon_file, key_output)
         
-        user_input = input("Continue with DCM parsing/anonymization step? (y/n): ")
-        if user_input.lower() == "y":
-            Parse_Dicom_Files(CONFIG["DATABASE_DIR"], 
-                              anon_file, 
-                              BUCKET_PATH, 
-                              CONFIG["DEBUG_DATA_RANGE"],
-                              encryption_key=key)
+        # Step 2: Parse DICOM files
+        print("Step 2/5: Parsing and anonymizing DICOM files...")
+        Parse_Dicom_Files(CONFIG["DATABASE_DIR"], 
+                        anon_file, 
+                        BUCKET_PATH, 
+                        CONFIG["DEBUG_DATA_RANGE"],
+                        encryption_key=key)
         
-        user_input = input("Continue with OCR step? (y/n): ")
-        if user_input.lower() == "y":
-            analyze_images(CONFIG["DATABASE_DIR"])
+        # Step 3: Run OCR
+        print("Step 3/5: Running OCR analysis...")
+        analyze_images(CONFIG["DATABASE_DIR"])
         
-        user_input = input("Continue with Data Cleaning step? (y/n): ")
-        if user_input.lower() == "y":
-            # Remove_Green_Images(CONFIG["DATABASE_DIR"]) # probably irrelevent now
-            Remove_Duplicate_Data(CONFIG["DATABASE_DIR"])
-            Find_Orientation(CONFIG)
-            Select_Data(CONFIG["DATABASE_DIR"], only_labels = False)
-            #Inpaint_Dataset(f'{CONFIG["DATABASE_DIR"]}/ImageData.csv', f'{CONFIG["DATABASE_DIR"]}/images/') # OLD and SLOW
-            Inpaint_Dataset_N2N(f'{CONFIG["DATABASE_DIR"]}/ImageData.csv', f'{CONFIG["DATABASE_DIR"]}/images/')
-            
-        user_input = input("Process Video Data? (y/n): ")
-        if user_input.lower() == "y":
-            ProcessVideoData(CONFIG["DATABASE_DIR"])
-            Video_Cleanup(CONFIG["DATABASE_DIR"])
+        # Step 4: Clean data
+        print("Step 4/5: Cleaning and processing image data...")
+        Remove_Duplicate_Data(CONFIG["DATABASE_DIR"])
+        Find_Orientation(CONFIG)
+        Select_Data(CONFIG["DATABASE_DIR"], only_labels=False)
+        
+        # Make inpainting optional
+        if not args.skip_inpaint:
+            print("Running inpainting (can be skipped with --skip-inpaint)...")
+            Inpaint_Dataset_N2N(f'{CONFIG["DATABASE_DIR"]}/ImageData.csv', 
+                            f'{CONFIG["DATABASE_DIR"]}/images/')
+        
+        # Step 5: Process video
+        print("Step 5/5: Processing video data...")
+        ProcessVideoData(CONFIG["DATABASE_DIR"])
+        Video_Cleanup(CONFIG["DATABASE_DIR"])
+
         
     elif args.export:
         Export_Database(CONFIG)
