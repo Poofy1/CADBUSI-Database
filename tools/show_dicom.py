@@ -101,4 +101,4 @@ def display_dicom(dicom_file_path):
         traceback.print_exc()
 
 if __name__ == "__main__":
-    display_dicom("D:/DATA/CASBUSI/dicoms/2025-04-16_225753/3379232_17381272/1.2.840.114350.2.451.2.798268.2.2222618735938.1/image_03379232_17381272_186d07eda02e05266693ac3e2d71d894a521df348a561b86a10f69c2f805d7f1.dcm")
+    display_dicom("C:/Users/Tristan/Desktop/1.dcm")

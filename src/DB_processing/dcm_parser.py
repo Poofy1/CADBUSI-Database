@@ -302,6 +302,15 @@ def deidentify_dicom(ds):
 
 
 def parse_video_data(dcm, dcm_data, dataset, current_index, parsed_database):
+    
+    # Extract Software Version
+    software_version = ""
+    if hasattr(dataset, 'SoftwareVersions'):
+        software_version = dataset.SoftwareVersions
+    manufacturer_model = ""
+    if hasattr(dataset, 'ManufacturerModelName'):
+        manufacturer_model = dataset.ManufacturerModelName
+        
     data_dict = {}
     
     for elem in dataset:
@@ -352,6 +361,8 @@ def parse_video_data(dcm, dcm_data, dataset, current_index, parsed_database):
     data_dict['ImagesPath'] = video_path
     data_dict['SavedFrames'] = image_count
     data_dict['DicomHash'] = generate_hash(dcm_data)
+    data_dict['SoftwareVersions'] = str(software_version)
+    data_dict['ManufacturerModelName'] = str(manufacturer_model)
     
     return data_dict
 
@@ -378,9 +389,15 @@ def parse_single_dcm(dcm, current_index, parsed_database):
         return parse_video_data(dcm, dcm_data, dataset, current_index, parsed_database)
 
     
+    # Extract Software Version
+    software_version = ""
+    if hasattr(dataset, 'SoftwareVersions'):
+        software_version = dataset.SoftwareVersions
+    manufacturer_model = ""
+    if hasattr(dataset, 'ManufacturerModelName'):
+        manufacturer_model = dataset.ManufacturerModelName
     
     # Continue with image
-    
     data_dict = {}
     region_count = 0
     
@@ -434,6 +451,8 @@ def parse_single_dcm(dcm, current_index, parsed_database):
     data_dict['ImageName'] = image_name
     data_dict['DicomHash'] = generate_hash(dcm_data)
     data_dict['RegionCount'] = region_count
+    data_dict['SoftwareVersions'] = str(software_version)
+    data_dict['ManufacturerModelName'] = str(manufacturer_model)
     
     return data_dict
 
@@ -494,7 +513,7 @@ def parse_anon_file(anon_location, database_path, image_df, ):
     common_columns = ['Patient_ID', 'Accession_Number', 'RegionSpatialFormat', 'RegionDataType', 
                     'RegionLocationMinX0', 'RegionLocationMinY0', 'RegionLocationMaxX1', 
                     'RegionLocationMaxY1', 'PhotometricInterpretation', 'Rows', 'Columns',
-                    'FileName', 'DicomHash']
+                    'FileName', 'DicomHash', 'SoftwareVersions', 'ManufacturerModelName']
 
     # Keep only necessary columns from dataframes
     if not video_df.empty:
