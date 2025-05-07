@@ -481,8 +481,7 @@ def create_final_dataset(rad_df, path_df, output_path):
     )
     
     # Save the US-only filtered dataset
-    os.makedirs(f'{env}/output', exist_ok=True)
-    final_df_us.to_csv(f'{env}/output/endpoint_data.csv', index=False)
+    final_df_us.to_csv(f'{env}/raw_data/endpoint_data.csv', index=False)
 
     # Print statistics
     print(f"Removed {duplicate_count} rows with duplicate ACCESSION_NUMBER")

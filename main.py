@@ -56,7 +56,7 @@ def main():
     # Main entry point for the script
     args = parse_arguments()
     
-    dicom_query_file = f'{env}/output/endpoint_data.csv'
+    dicom_query_file = f'{env}/raw_data/endpoint_data.csv'
     key_output = f'{env}/encryption_key.pkl'
     output_path = os.path.join(env, "raw_data")
     
@@ -88,7 +88,7 @@ def main():
         dicom_download_remote_start(dicom_query_file, args.deploy, args.cleanup)
         
     elif args.database:
-        anon_file = f'{env}/output/anon_data.csv'
+        anon_file = f'{env}/raw_data/anon_data.csv'
         BUCKET_PATH = f'{CONFIG["storage"]["download_path"]}/{args.database}'
         
         print(f"Starting database processing for {args.database}...")
