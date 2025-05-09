@@ -54,9 +54,37 @@ def append_audit(key, value, new_file=False):
     # Set the value at the deepest level
     current[keys[-1]] = value
     
+    # Custom JSON encoder for compact list representation
+    class CompactListEncoder(json.JSONEncoder):
+        def encode(self, obj):
+            result = super(CompactListEncoder, self).encode(obj)
+            return result
+            
+        def iterencode(self, obj, _one_shot=False):
+            if isinstance(obj, list) and all(not isinstance(item, (dict, list)) for item in obj):
+                yield json.dumps(obj, separators=(',', ':'))
+                return
+            for chunk in super(CompactListEncoder, self).iterencode(obj, _one_shot):
+                yield chunk
+    
     # Write the updated data back to the file
     with open(json_file_path, 'w') as f:
-        json.dump(data, f, indent=4)
+        # Custom JSON formatting
+        json_str = json.dumps(data, indent=4)
+        
+        # Process JSON string to keep lists on a single line
+        import re
+        # Match pattern for simple lists (numbers only)
+        pattern = r'\[\s+(\d+,\s+)*\d+\s+\]'
+        
+        def replace_list(match):
+            list_str = match.group(0)
+            # Remove all whitespace between brackets
+            compact_list = re.sub(r'\s+', '', list_str)
+            return compact_list
+        
+        json_str = re.sub(pattern, replace_list, json_str)
+        f.write(json_str)
     
     return data
 

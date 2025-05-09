@@ -223,9 +223,6 @@ def PerformSplit(CONFIG, df):
     append_audit("export.train_patients", num_train_patients)
     append_audit("export.val_patients", num_val_patients)
     append_audit("export.test_patients", num_test_patients)
-    append_audit("export.train_samples", int(train_samples))
-    append_audit("export.val_samples", int(val_samples))
-    append_audit("export.test_samples", int(test_samples))
     
     return df
     
@@ -315,7 +312,167 @@ def generate_video_images_csv(video_df, root_dir):
     video_images_df = pd.DataFrame(video_image_data)
     video_images_df['images'] = video_images_df['images'].apply(str)  # Convert lists to string
     return video_images_df
+
+def ExportAuditReport(image_df, breast_df, video_df, video_images_df):
+    # -- Basic counts --
+    # Number of patients
+    unique_patients = breast_df['Patient_ID'].nunique()
+    append_audit("export.num_patients", unique_patients)
     
+    # -- Year range --
+    # Convert DATE column to datetime if not already
+    breast_df['DATE'] = pd.to_datetime(breast_df['DATE'], errors='coerce')
+    year_min = breast_df['DATE'].dt.year.min()
+    year_max = breast_df['DATE'].dt.year.max()
+    append_audit("export.year_range_start", int(year_min))
+    append_audit("export.year_range_end", int(year_max))
+    
+    # -- Image statistics per exam --
+    # Group by Accession_Number to get image counts per exam
+    exam_image_counts = image_df.groupby('Accession_Number').size().reset_index(name='image_count')
+    append_audit("export.min_images_per_exam", int(exam_image_counts['image_count'].min()))
+    append_audit("export.max_images_per_exam", int(exam_image_counts['image_count'].max()))
+    append_audit("export.avg_images_per_exam", float(exam_image_counts['image_count'].mean()))
+    
+    # -- Video statistics per exam --
+    if not video_df.empty:
+        exam_video_counts = video_df.groupby('Accession_Number').size().reset_index(name='video_count')
+        min_videos = int(exam_video_counts['video_count'].min()) if not exam_video_counts.empty else 0
+        max_videos = int(exam_video_counts['video_count'].max()) if not exam_video_counts.empty else 0
+        avg_videos = float(exam_video_counts['video_count'].mean()) if not exam_video_counts.empty else 0
+        append_audit("export.min_videos_per_exam", min_videos)
+        append_audit("export.max_videos_per_exam", max_videos)
+        append_audit("export.avg_videos_per_exam", avg_videos)
+    else:
+        append_audit("export.min_videos_per_exam", 0)
+        append_audit("export.max_videos_per_exam", 0)
+        append_audit("export.avg_videos_per_exam", 0)
+    
+    # -- Patient age statistics --
+    # Filter out any non-numeric ages
+    valid_ages = pd.to_numeric(breast_df['AGE_AT_EVENT'], errors='coerce').dropna()
+    append_audit("export.min_patient_age", float(valid_ages.min()))
+    append_audit("export.max_patient_age", float(valid_ages.max()))
+    append_audit("export.avg_patient_age", float(valid_ages.mean()))
+
+    # -- Image dimensions --
+    # Calculate average image dimensions if crop_w and crop_h are available
+    append_audit("export.avg_image_width", float(image_df['crop_w'].mean()))
+    append_audit("export.avg_image_height", float(image_df['crop_h'].mean()))
+    
+    # -- Video dimensions and frames --
+    append_audit("export.avg_video_width", float(video_df['crop_w'].mean()))
+    append_audit("export.avg_video_height", float(video_df['crop_h'].mean()))
+    
+    # -- Video frames calculation --
+    # If video_images_df is provided and not empty
+    if video_images_df is not None and not video_images_df.empty:
+        # Calculate the frame count for each video
+        video_images_df['frame_count'] = video_images_df['images'].apply(lambda x: len(x) if isinstance(x, list) else len(eval(x)))
+        append_audit("export.avg_video_frames", float(video_images_df['frame_count'].mean()))
+        
+        # Also add min and max frame counts
+        append_audit("export.min_video_frames", int(video_images_df['frame_count'].min()))
+        append_audit("export.max_video_frames", int(video_images_df['frame_count'].max()))
+
+    # -- Laterality counts --
+    # Count left and right breasts
+    laterality_counts = breast_df['Study_Laterality'].value_counts()
+    append_audit("export.num_left_breasts", int(laterality_counts.get('LEFT', 0)))
+    append_audit("export.num_right_breasts", int(laterality_counts.get('RIGHT', 0)))
+    append_audit("export.num_bilateral_breasts", int(laterality_counts.get('BILATERAL', 0)))
+    
+    # -- Training counts by laterality and diagnosis --
+    # Initialize a dictionary to store all counts
+    breast_counts = {
+        f"{lat.lower()}_{diag.lower()}": [0, 0, 0]  # [train, val, test]
+        for lat in ['RIGHT', 'LEFT']
+        for diag in ['MALIGNANT', 'BENIGN']
+    }
+    
+    # Process each split
+    for split_num in [0, 1, 2]:  # 0->train, 1->val, 2->test
+        # Filter data by split
+        split_data = breast_df[breast_df['valid'] == split_num]
+        
+        # Count for each combination
+        for laterality in ['RIGHT', 'LEFT']:
+            for diagnosis in ['MALIGNANT', 'BENIGN']:
+                # Create diagnosis condition
+                diagnosis_condition = split_data['final_interpretation'].isin([diagnosis])
+                
+                # Count and store in the appropriate array position
+                key = f"{laterality.lower()}_{diagnosis.lower()}"
+                breast_counts[key][split_num] = len(
+                    split_data[(split_data['Study_Laterality'] == laterality) & diagnosis_condition]
+                )
+    
+    # Save all arrays to audit
+    for key, counts in breast_counts.items():
+        append_audit(f'export.{key}_breasts', counts)
+        
+    
+    
+    # -- BI-RADS distribution counts by split --
+    # Define all possible BI-RADS values to check
+    birad_values = ['0', '1', '2', '3', '4', '4A', '4B', '4C', '5', '6']
+    
+    # Initialize a dictionary to store counts for each BI-RADS value
+    birad_counts = {
+        birad: [0, 0, 0]  # [train, val, test]
+        for birad in birad_values
+    }
+    
+    # Process each split
+    for split_num in [0, 1, 2]:  # 0->train, 1->val, 2->test
+        # Filter data by split
+        split_data = breast_df[breast_df['valid'] == split_num]
+        
+        # Count each BI-RADS value
+        for birad in birad_values:
+            birad_counts[birad][split_num] = len(split_data[split_data['BI-RADS'] == birad])
+    
+    # Save all arrays to audit
+    for birad, counts in birad_counts.items():
+        # Use a safe key name by replacing characters that might cause issues
+        safe_birad = birad.replace('-', '_').replace('/', '_')
+        append_audit(f'export.birad_{safe_birad}', counts)
+        
+        
+    # -- Images per split --
+    # First, merge image_df with breast_df to get split information for each image
+    merged_df = image_df.merge(breast_df[['Patient_ID', 'Accession_Number', 'Study_Laterality', 'valid']], 
+                            on=['Patient_ID', 'Accession_Number'], how='left')
+
+    # Create mapping for numeric codes to split names
+    split_mapping = {
+        0: 'train',
+        1: 'val',
+        2: 'test'
+    }
+
+    # Count images by valid value (0, 1, 2)
+    valid_counts = merged_df.groupby('valid').size()
+
+    # Map the counts to the correct split names and log them
+    for valid_code, split_name in split_mapping.items():
+        count = int(valid_counts.get(valid_code, 0))
+        append_audit(f'export.images_in_{split_name}', count)
+        
+    # -- Detailed counts per case --
+    # Get image counts for every case (just the counts, not the IDs)
+    case_image_counts = image_df.groupby('Accession_Number').size().tolist()
+    append_audit("export.img_per_case", case_image_counts)
+    
+    # Get video counts for every case (just the counts, not the IDs)
+    if not video_df.empty:
+        case_video_counts = video_df.groupby('Accession_Number').size().tolist()
+        append_audit("export.vid_per_case", case_video_counts)
+    else:
+        # If no videos, return empty list
+        append_audit("export.vid_per_case", [])
+        
+        
 def Export_Database(CONFIG, reparse_images = True):
     #Debug Tools
     use_reject_system = True # True = removes rejects from trianing
@@ -431,32 +588,6 @@ def Export_Database(CONFIG, reparse_images = True):
         Crop_Images(image_df, parsed_database, output_dir)
         Crop_Videos(video_df, parsed_database, output_dir)
     
-    # Filter DFs
-    image_columns = ['Patient_ID', 
-                          'Accession_Number', 
-                          'ImageName',
-                          'FileName',
-                          'PhotometricInterpretation',
-                          'labeled',
-                          'nipple_dist',
-                          'orientation',
-                          'laterality',
-                          'reparsed_orientation',
-                          'label_cat',
-                          'Inpainted',
-                          'crop_aspect_ratio']
-    image_df = image_df[image_columns]
-    video_columns = ['Patient_ID', 
-                          'Accession_Number', 
-                          'ImagesPath',
-                          'FileName',
-                          'area',
-                          'nipple_dist',
-                          'orientation',
-                          'laterality',
-                          'crop_aspect_ratio']
-    video_df = video_df[video_columns]
-    
     # Convert 'Patient_ID' columns to integers
     labeled_df['Patient_ID'] = labeled_df['Patient_ID'].astype(str)
     image_df['Accession_Number'] = image_df['Accession_Number'].astype(str)
@@ -510,4 +641,5 @@ def Export_Database(CONFIG, reparse_images = True):
     save_data(train_data, os.path.join(output_dir, 'TrainData.csv'))
     save_data(instance_data, os.path.join(output_dir, 'InstanceData.csv'))
     
-    
+    # Generate and save audit report
+    ExportAuditReport(image_df, breast_df, video_df, video_images_df if reparse_images else None)
