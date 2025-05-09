@@ -368,27 +368,26 @@ def analyze_images(database_path):
     # Only keep rows where 'processed' is False
     db_to_process = image_df[image_df['processed'] != True]
     db_to_process['processed'] = False
-    append_audit(database_path, f"Processing {len(db_to_process)} unprocessed images")
+    append_audit("image_processing.input_images", len(db_to_process))
 
     print("Finding OCR Masks")
     _, description_masks = find_masks(image_folder_path, 'mask_model', db_to_process, 1920, 1080)
-    append_audit(database_path, f"Extracted {len(description_masks)} description masks")
+    append_audit("image_processing.extracted_description_masks", len(description_masks))
     
     print("Performing OCR")  
     descriptions = get_OCR(image_folder_path, description_masks)
     valid_descriptions = sum(1 for desc in descriptions.values() if desc)
-    append_audit(database_path, f"Extracted {valid_descriptions} descriptions (OCR)")
-    
+    append_audit("image_processing.extracted_ocr_descriptions", valid_descriptions)
     
     print("Finding Darkness and Image Masks")
     image_masks, darknesses = process_images_combined(image_folder_path, db_to_process)
-    append_audit(database_path, f"Extracted {len(image_masks)} image crop regions")
-    append_audit(database_path, f"Extracted {len(darknesses)} darkness measurements")
+    append_audit("image_processing.extracted_crop_regions", len(image_masks))
+    append_audit("image_processing.extracted_darkness_measurements", len(darknesses))
 
     print("Finding Calipers")
     caliper_results = find_calipers(image_folder_path, 'caliper_model', db_to_process)
     caliper_count = sum(1 for _, bool_val, _ in caliper_results if bool_val)
-    append_audit(database_path, f"Found {caliper_count} images with calipers")
+    append_audit("image_processing.images_with_calipers", caliper_count)
     
     # Convert lists of tuples to dictionaries
     has_calipers_dict = {filename: bool_val for filename, bool_val, _ in caliper_results}
@@ -422,7 +421,7 @@ def analyze_images(database_path):
     
     # Count unknown lateralities after correction
     unknown_after = db_to_process[db_to_process['laterality'] == 'unknown'].shape[0]
-    append_audit(database_path, f"Images with unknown lateralities (Bilateral only): {unknown_after}")
+    append_audit("image_processing.bilateral_with_missing_lat", unknown_after)
 
     image_df.update(db_to_process, overwrite=True)
     

@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 from tqdm import tqdm
-from tools.audit import append_audit
+from src.DB_processing.tools import append_audit
 # Get the current script directory and go back one directory
 env = os.path.dirname(os.path.abspath(__file__))
 env = os.path.dirname(env)  # Go back one directory
@@ -365,15 +365,14 @@ def determine_final_interpretation(final_df, output_path, rad_df_length):
     malignant2_count = sum(final_df['final_interpretation'] == 'MALIGNANT2')
     
     # Create audit log with counts for each category
-    append_audit(output_path, f"Labeled Radiology Records (Ultrasound only):")
-    append_audit(output_path, f"BENIGN1: {benign1_count} ({benign1_count/rad_df_length*100:.1f}%) - Assumed Benign")
-    append_audit(output_path, f"BENIGN2: {benign2_count} ({benign2_count/rad_df_length*100:.1f}%) - Pathology Confirmed")
-    append_audit(output_path, f"BENIGN3: {benign3_count} ({benign3_count/rad_df_length*100:.1f}%) - BIRADS 3 with adequate follow ups")
-    append_audit(output_path, f"MALIGNANT1: {malignant1_count} ({malignant1_count/rad_df_length*100:.1f}%) - BIRADS 6 + >=1 Malignant Pathology")
-    append_audit(output_path, f"MALIGNANT2: {malignant2_count} ({malignant2_count/rad_df_length*100:.1f}%) - Pathology Confirmed")
+    append_audit("query_clean.assumed_benign", benign1_count)
+    append_audit("query_clean.birads3_benign", benign3_count)
+    append_audit("query_clean.path_confirmed_benign", benign2_count)
+    append_audit("query_clean.path_confirmed_malignant", malignant2_count)
+    append_audit("query_clean.birads6_malignant", malignant1_count)
+    
     
     return final_df
-
 
 
 
@@ -451,7 +450,7 @@ def create_final_dataset(rad_df, path_df, output_path):
     final_df_us = final_df[final_df['MODALITY'].str.contains('US', na=False, case=False)]
     filtered_count = initial_count - len(final_df_us)
 
-    append_audit(output_path, f"Removed {filtered_count - path_df_length} radiology records - non-US records")  # path_df_length were removed here but lets keep radiology context
+    append_audit("query_clean.rad_non_US_removed", {filtered_count - path_df_length}) # path_df_length were removed here but lets keep radiology context
 
     # Remove rows with empty ENDPOINT_ADDRESS or empty final_interpretation
     empty_endpoint_count = sum(final_df_us['ENDPOINT_ADDRESS'].isna())
@@ -462,13 +461,13 @@ def create_final_dataset(rad_df, path_df, output_path):
         final_df_us['final_interpretation'].notna()
     ]
 
-    append_audit(output_path, f"Removed {empty_endpoint_count} radiology records - missing pixel addresses")
-    append_audit(output_path, f"Removed {empty_interpretation_count} radiology records - missing final label")
+    append_audit("query_clean.rad_missing_address_removed", empty_endpoint_count)
+    append_audit("query_clean.rad_missing_final_interp", empty_interpretation_count)
     
     # Remove rows with 'incomplete' in the Biopsy column
     incomplete_count = sum(final_df_us['Biopsy'].str.contains('incomplete', case=False, na=False))
     final_df_us = final_df_us[~(final_df_us['Biopsy'].str.contains('incomplete', case=False, na=False))]
-    append_audit(output_path, f"Removed {incomplete_count} radiology records - biopsies marked as 'incomplete'")
+    append_audit("query_clean.rad_incomplete_biospy_removed", incomplete_count)
     
     # Remove duplicate rows based on Accession_Number
     duplicate_accessions = final_df_us[final_df_us.duplicated(subset=['ACCESSION_NUMBER'], keep=False)]['ACCESSION_NUMBER']
@@ -485,9 +484,9 @@ def create_final_dataset(rad_df, path_df, output_path):
 
     # Print statistics
     print(f"Removed {duplicate_count} rows with duplicate ACCESSION_NUMBER")
-    append_audit(output_path, f"Removed {duplicate_count} radiology records - duplicate ACCESSION_NUMBER")
     print(f"Dataset passed with {len(final_df_us)} results")
-    append_audit(output_path, f"Final dataset passed with {len(final_df_us)} radiology records")
+    append_audit("query_clean.rad_duplicates_removed", duplicate_count)
+    append_audit("query_clean.final_case_count", len(final_df_us))
     
     return final_df
 

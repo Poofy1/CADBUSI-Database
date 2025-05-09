@@ -124,7 +124,6 @@ def main():
         # Step 5: Process video
         print("Step 5/5: Processing video data...")
         ProcessVideoData(CONFIG["DATABASE_DIR"])
-        Video_Cleanup(CONFIG["DATABASE_DIR"])
 
         
     elif args.export:

@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 import re
-from tools.audit import append_audit
+from src.DB_processing.tools import append_audit
 
 # Get the current script directory and go back one directory
 env = os.path.dirname(os.path.abspath(__file__))
@@ -289,7 +289,7 @@ def filter_path_data(pathology_df, output_path):
     
     # Split cases into separate rows via lesions
     expanded_df = split_lesions(pathology_df)
-    append_audit(output_path, f"{len(pathology_df)} pathology records had {len(expanded_df)} lesions")
+    append_audit("query_clean.path_lesion_count", len(expanded_df))
     
     # Re-determine laterality after splitting (for rows that didn't have it set during splitting)
     expanded_df['Pathology_Laterality'] = expanded_df.apply(determine_laterality, axis=1)
@@ -327,8 +327,8 @@ def filter_path_data(pathology_df, output_path):
     duplicates_removed = rows_before - rows_after
     
     print(f"Removed {duplicates_removed} exact duplicate rows.")
-    append_audit(output_path, f"Removed {duplicates_removed} pathology lesions - Duplicates")
-    append_audit(output_path, f"Pathology lesion count: {rows_after}")
+    append_audit("query_clean.path_duplicated_removed", duplicates_removed)
+    append_audit("query_clean.path_lesion_count_final", rows_after)
 
     
     # Save to CSV

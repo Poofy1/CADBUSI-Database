@@ -498,7 +498,7 @@ def parse_files(dcm_files_list, database_path):
     if failure_counter > 0:
         print(f'Skipped {failure_counter} DICOMS from missing data or irrelevant data')
     
-    append_audit(database_path, f"Removed {failure_counter} DICOMS from missing data or irrelevant data")
+    append_audit("dicom_parsing.failed_dicoms", failure_counter)
     # Create a DataFrame from the list of dictionaries (only successful parses)
     df = pd.DataFrame(data_list)
     return df
@@ -576,7 +576,10 @@ def parse_anon_file(anon_location, database_path, image_df, ):
     save_data(image_combined_df, image_csv_file)
     save_data(video_df, video_csv_file)
     save_data(breast_csv, breast_csv_file)
-    append_audit(database_path, f"Saved data: {len(image_combined_df)} images, {len(video_df)} videos, {len(breast_csv)} breast records")
+    append_audit("dicom_parsing.images_success", len(image_combined_df))
+    append_audit("dicom_parsing.video_success", len(video_df))
+    append_audit("dicom_parsing.breast_success", len(breast_csv))
+    
     
 
 # Main Method
@@ -601,14 +604,14 @@ def Parse_Dicom_Files(database_path, anon_location, raw_storage_database, data_r
 
     # Get every Dicom File
     dcm_files_list = get_files_by_extension(raw_storage_database, '.dcm')
-    append_audit(database_path, f"Found {len(dcm_files_list)} total DICOM files")
+    append_audit("dicom_parsing.input_dicoms", len(dcm_files_list))
     print(f'Total Dicoms in Input: {len(dcm_files_list)}')
 
     # Apply data range only if it's specified
     if data_range and len(data_range) == 2:
         dcm_files_list = dcm_files_list[data_range[0]:data_range[1]]
         print(f'Applied Data Range: {len(dcm_files_list)}')
-        append_audit(database_path, f"Applied data limit: processing {len(dcm_files_list)} of {len(dcm_files_list)} files")
+        append_audit("dicom_parsing.data_range", [data_range[0], data_range[1]])
         
         
     # Filter out already processed files
@@ -616,7 +619,7 @@ def Parse_Dicom_Files(database_path, anon_location, raw_storage_database, data_r
     parsed_files_set = set(parsed_files_list)
     dcm_files_list = [file for file in dcm_files_list if file not in parsed_files_set]
     files_skipped = files_before_filter - len(dcm_files_list)
-    append_audit(database_path, f"Skipped {files_skipped} previously processed files")
+    append_audit("dicom_parsing.skipped_already_processed", files_skipped)
 
     
     # Update the list of parsed files and save it
@@ -638,7 +641,7 @@ def Parse_Dicom_Files(database_path, anon_location, raw_storage_database, data_r
     new_row_count = len(image_df)
     removed_rows = original_row_count - new_row_count
     print(f"Removed {removed_rows} rows with empty values.")
-    append_audit(database_path, f"Removed {removed_rows} DICOMs - Missing Patient_ID or Accession_Number")
+    append_audit("dicom_parsing.missing_ID_removed", removed_rows)
     
     
     parse_anon_file(anon_location, database_path, image_df)

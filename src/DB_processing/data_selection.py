@@ -85,9 +85,16 @@ def choose_images_to_label(db, breast_df, database_path):
     append_audit(database_path, f"Removed {caliper_removed} images - Caliper issues")
     append_audit(database_path, f"Removed {area_removed} images - Non-breast")
     append_audit(database_path, f"Removed {lat_removed} images - Unknown laterality")
-    append_audit(database_path, f"Removed {chest_removed} images - Chest/Mastectomy")
     append_audit(database_path, f"Removed {region_removed} images - Multi-region")
     append_audit(database_path, f"Usable images: {len(db[db['label']])}")
+    
+    append_audit("image_processing.too_dark_removed", dark_removed)
+    append_audit("image_processing.caliper_issues_removed", caliper_removed)
+    append_audit("image_processing.non_breast_removed", area_removed)
+    append_audit("image_processing.unknown_lat_removed", lat_removed)
+    append_audit("image_processing.multi_region_removed", region_removed)
+    append_audit("image_processing.usable_images", len(db[db['label']]))
+    
     
     return db
 
@@ -205,7 +212,7 @@ def Remove_Green_Images(database_dir):
 
     # Drop rows from the DataFrame
     df = df.drop(drop_indices)
-    append_audit(database_dir, f"Removed {len(drop_indices)} images - Corrupted / Incorrect coloring")
+    append_audit("image_processing.corrupted_removed", len(drop_indices))
     save_data(df, input_file)  # Save the updated DataFrame back to the CSV
     
 
@@ -224,7 +231,7 @@ def Select_Data(database_path, only_labels):
     rows_before = len(db_out)
     db_out.dropna(subset=['crop_x', 'crop_y', 'crop_w', 'crop_h'], inplace=True)
     rows_after = len(db_out)
-    append_audit(database_path, f"Removed {rows_before - rows_after} images - Missing crop data")
+    append_audit("image_processing.missing_crop_removed", rows_before - rows_after)
 
     if only_labels:
         db_to_process = db_out
@@ -290,7 +297,7 @@ def Remove_Duplicate_Data(database_path):
     
     # Save the cleaned dataframe back to the CSV file
     save_data(df, input_file)
-    append_audit(database_path, f"Removed {duplicate_count} images - Duplicates")
+    append_audit("image_processing.duplicates_removed", duplicate_count)
     
     # Delete the duplicate images
     for image_name in tqdm(duplicate_image_names):

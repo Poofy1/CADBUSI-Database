@@ -2,7 +2,7 @@
 import os
 import pandas as pd
 import re
-from tools.audit import append_audit
+from src.DB_processing.tools import append_audit
 # Get the current script directory and go back one directory
 env = os.path.dirname(os.path.abspath(__file__))
 env = os.path.dirname(env)  # Go back one directory
@@ -338,8 +338,8 @@ def remove_bad_data(radiology_df, output_path):
     
     print(f"Removed {birads_zero_count} rows with BI-RADS = '0'")
     print(f"Removed {patients_removed_count} patients without any 'US' modality exams (after previous removals)")
-    append_audit(output_path, f"Removed {birads_zero_count} radiology records - with BI-RADS = '0'")
-    append_audit(output_path, f"Removed {patients_removed_count} radiology patients - missing >=1 'US' modality exam (after previous removals)")
+    append_audit("query_clean.birads_0_removed", birads_zero_count)
+    append_audit("query_clean.missing_>=1_US_removed", patients_removed_count)
     
     return radiology_df
     
@@ -361,7 +361,7 @@ def filter_rad_data(radiology_df, output_path):
     count_before = len(radiology_df)
     radiology_df = remove_outside_records(radiology_df)
     outside_removed = count_before - len(radiology_df)
-    append_audit(output_path, f"Removed {outside_removed} radiology records - Labeled as 'outside'")
+    append_audit("query_clean.outside_removed", outside_removed)
     
     # Apply the extraction functions and create new columns
     radiology_df['Density_Desc'] = radiology_df['RADIOLOGY_REPORT'].apply(extract_density)
@@ -395,7 +395,7 @@ def filter_rad_data(radiology_df, output_path):
     
     # Print final length
     final_count = len(radiology_df)
-    append_audit(output_path, f"Total radiology record count: {final_count}")
+    append_audit("query_clean.remining_rad_records", final_count)
     print(f"Final dataframe length: {len(radiology_df)} rows")
     
     # Save output

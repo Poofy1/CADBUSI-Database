@@ -111,8 +111,8 @@ def Crop_Images(df, input_dir, output_dir):
             print(error)
             
     print(f"\nProcessing Complete: Success={results['success']}, Failed={results['failed']}")
-    append_audit(output_dir, f"{results['failed']} images failed")
-    append_audit(output_dir, f"Exported {results['success']} images")
+    append_audit("export.failed_crops_removed", results['failed'])
+    append_audit("export.exported_images", results['success'])
     
                 
                 
@@ -173,32 +173,59 @@ def Crop_Videos(df, input_dir, output_dir):
                 except Exception as e:
                     print(f"Error processing video: {e}")
                 
-    append_audit(output_dir, f"Exported {processed_videos} videos")
+    append_audit("export.exported_videos", processed_videos)
 
 
-def PerformVal(val_split, df, output_dir):
-    if 'valid' not in df.columns:
-        df['valid'] = None
+def PerformSplit(CONFIG, df):
+    val_split = CONFIG["VAL_SPLIT"]
+    test_split = CONFIG["TEST_SPLIT"]
+    
+    if 'split' not in df.columns:
+        df['split'] = None
     
     # Get unique patient IDs
     unique_patients = df['Patient_ID'].unique()
+    total_patients = len(unique_patients)
     
-    # Calculate how many patients should be in validation set
-    num_val_patients = int(len(unique_patients) * val_split)
+    # Calculate how many patients should be in each set
+    num_test_patients = int(total_patients * test_split)
+    num_val_patients = int(total_patients * val_split)
+    num_train_patients = total_patients - num_val_patients - num_test_patients
     
-    # Randomly select patients for validation
-    val_patients = np.random.choice(unique_patients, size=num_val_patients, replace=False)
+    # Randomly shuffle the patient IDs
+    np.random.shuffle(unique_patients)
     
-    # Assign validation status based on patient ID
-    df['valid'] = df['Patient_ID'].apply(lambda x: 1 if x in val_patients else 0)
+    # Split into three groups
+    test_patients = unique_patients[:num_test_patients]
+    val_patients = unique_patients[num_test_patients:num_test_patients + num_val_patients]
+    
+    # Assign split status based on patient ID (0=train, 1=val, 2=test)
+    def assign_split(patient_id):
+        if patient_id in test_patients:
+            return 2  # Test
+        elif patient_id in val_patients:
+            return 1  # Validation
+        else:
+            return 0  # Training
+    
+    df['split'] = df['Patient_ID'].apply(assign_split)
+    
+    # Count samples in each split
+    train_samples = (df['split'] == 0).sum()
+    val_samples = (df['split'] == 1).sum()
+    test_samples = (df['split'] == 2).sum()
     
     # Print split statistics
-    train_count = (df['valid'] == 0).sum()
-    val_count = (df['valid'] == 1).sum()
-    print(f"Split completed: {train_count} training samples, {val_count} validation samples")
-    print(f"Patient split: {len(unique_patients) - num_val_patients} training patients, {num_val_patients} validation patients")
-    append_audit(output_dir, f"{len(unique_patients) - num_val_patients} Training patients")
-    append_audit(output_dir, f"{num_val_patients} Validation patients")
+    print(f"Split completed: {train_samples} training, {val_samples} validation, {test_samples} test samples")
+    print(f"Patient split: {num_train_patients} training, {num_val_patients} validation, {num_test_patients} test patients")
+    
+    # Log statistics to audit file
+    append_audit("export.train_patients", num_train_patients)
+    append_audit("export.val_patients", num_val_patients)
+    append_audit("export.test_patients", num_test_patients)
+    append_audit("export.train_samples", int(train_samples))
+    append_audit("export.val_samples", int(val_samples))
+    append_audit("export.test_samples", int(test_samples))
     
     return df
     
@@ -222,7 +249,7 @@ def Fix_CM_Data(df):
 
 
 
-def format_data(breast_data, image_data, num_of_tests):
+def format_data(breast_data, image_data):
     # Join breast_data and image_data on Accession_Number and Breast/laterality
     data = pd.merge(breast_data, image_data, left_on=['Accession_Number', 'Study_Laterality'], 
                     right_on=['Accession_Number', 'laterality'], suffixes=('', '_image_data'))
@@ -254,13 +281,7 @@ def format_data(breast_data, image_data, num_of_tests):
 
     # Rename columns
     data.rename(columns={'ImageName': 'Images', 'valid': 'Valid'}, inplace=True)
-
-    # Randomly select a specified number of rows and change their 'Valid' status to '2'
-    valid_indices = data.index[data['Valid'].isin([0, 1])].tolist()
-    if num_of_tests > 0:
-        selected_indices = np.random.choice(valid_indices, num_of_tests, replace=False)
-        data.loc[selected_indices, 'Valid'] = 2
-
+    
     # Add a new column 'ID' that counts up from 0
     data['ID'] = range(len(data))
 
@@ -295,12 +316,11 @@ def generate_video_images_csv(video_df, root_dir):
     video_images_df['images'] = video_images_df['images'].apply(str)  # Convert lists to string
     return video_images_df
     
-def Export_Database(CONFIG, reparse_images = True, num_of_tests = 10):
+def Export_Database(CONFIG, reparse_images = True):
     #Debug Tools
     use_reject_system = True # True = removes rejects from trianing
     
     output_dir = CONFIG["EXPORT_DIR"]
-    val_split = CONFIG["VAL_SPLIT"]
     parsed_database = CONFIG["DATABASE_DIR"]
     labelbox_path = CONFIG["LABELBOX_LABELS"]
     
@@ -310,7 +330,6 @@ def Export_Database(CONFIG, reparse_images = True, num_of_tests = 10):
     
     print("Exporting Data:")
     make_dirs(output_dir)
-    append_audit(output_dir, "STARTING EXPORT...")
     
     # Save the config to the export location
     export_config_path = os.path.join(output_dir, 'export_config.json')
@@ -354,7 +373,7 @@ def Export_Database(CONFIG, reparse_images = True, num_of_tests = 10):
             # Calculate how many were removed
             removed_count = before_count - len(image_df)
             
-            append_audit(output_dir, f"Removed {removed_count} images - Marked as rejected")
+            append_audit("export.labeled_reject_removed", removed_count)
         
         # If not using reject system, keep 'Reject Image' as a column
         if not use_reject_system:
@@ -381,8 +400,8 @@ def Export_Database(CONFIG, reparse_images = True, num_of_tests = 10):
     
     initial_image_count = len(image_df)
     initial_video_count = len(video_df)
-    append_audit(output_dir, f"Images available: {initial_image_count}")
-    append_audit(output_dir, f"Videos available: {initial_video_count}")
+    append_audit("export.init_images", initial_image_count)
+    append_audit("export.init_videos", initial_video_count)
     
     #Remove bad aspect ratios
     min_aspect_ratio = 0.5
@@ -396,6 +415,8 @@ def Export_Database(CONFIG, reparse_images = True, num_of_tests = 10):
     intermediate_video_count = len(video_df_after_aspect)
     append_audit(output_dir, f"Removed {initial_image_count - intermediate_image_count} images - Bad aspect ratio")
     append_audit(output_dir, f"Removed {initial_video_count - intermediate_video_count} videos - Bad aspect ratio")
+    append_audit("export.bad_aspect_image_removed", initial_image_count - intermediate_image_count)
+    append_audit("export.bad_aspect_video_removed", initial_video_count - intermediate_video_count)
 
     # Remove images with crop width or height less than 200 pixels
     min_dimension = 200
@@ -404,8 +425,8 @@ def Export_Database(CONFIG, reparse_images = True, num_of_tests = 10):
     video_df = video_df_after_aspect[(video_df_after_aspect['crop_w'] >= min_dimension) & 
                         (video_df_after_aspect['crop_h'] >= min_dimension)]
     
-    append_audit(output_dir, f"Removed {intermediate_image_count - len(image_df)} images - Small dimensions")
-    append_audit(output_dir, f"Removed {intermediate_video_count - len(video_df)} videos - Small dimensions")
+    append_audit("export.too_small_image_removed", intermediate_image_count - len(image_df))
+    append_audit("export.too_small_video_removed", intermediate_video_count - len(video_df))
 
     if reparse_images:   
         # Crop the images for the relevant studies
@@ -461,8 +482,8 @@ def Export_Database(CONFIG, reparse_images = True, num_of_tests = 10):
     breast_df = breast_df[breast_df['Patient_ID'].isin(image_patient_ids)]
     remaining_breast_count = len(breast_df)
     removed_breast_count = initial_breast_count - remaining_breast_count
-    append_audit(output_dir, f"Removed {removed_breast_count} breasts - No remaining image data - {remaining_breast_count} remain")
-    append_audit(output_dir, f"{remaining_breast_count} Total breasts remain")
+    append_audit("export.breasts_no_data_removed", removed_breast_count)
+    append_audit("export.final_breasts", remaining_breast_count)
         
     # Fix cm data
     image_df = Fix_CM_Data(image_df)
@@ -470,10 +491,10 @@ def Export_Database(CONFIG, reparse_images = True, num_of_tests = 10):
     
 
     # Val split for case data
-    breast_df = PerformVal(val_split, breast_df, output_dir)
+    breast_df = PerformSplit(CONFIG, breast_df)
     
     # Create trainable csv data
-    train_data = format_data(breast_df, image_df, num_of_tests)
+    train_data = format_data(breast_df, image_df)
     
     # Create a mapping of (Accession_Number, laterality) to list of ImagesPath
     video_paths = video_df.groupby(['Accession_Number', 'laterality'])['ImagesPath'].agg(list).to_dict()

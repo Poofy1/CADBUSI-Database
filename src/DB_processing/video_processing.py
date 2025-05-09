@@ -67,11 +67,11 @@ def ProcessVideoData(database_path):
     # Only keep rows where 'processed' is False
     db_to_process = video_df[video_df['processed'] != True]
     db_to_process['processed'] = False
-    append_audit(database_path, f"Processing {len(db_to_process)} unprocessed videos")
+    append_audit("video_processing.input_videos", len(db_to_process))
     
     print("Finding OCR Masks")
     _, description_masks = find_masks(video_folder_path, 'mask_model', db_to_process, 1920, 1080, video_format=True)
-    append_audit(database_path, f"Extracted {len(description_masks)} description masks")
+    append_audit("video_processing.extracted_description_masks", len(description_masks))
 
     print("Performing OCR")
     first_images = get_first_image_in_each_folder(video_folder_path)
@@ -94,12 +94,12 @@ def ProcessVideoData(database_path):
         progress.close()
     
     valid_descriptions = sum(1 for desc in descriptions.values() if desc)
-    append_audit(database_path, f"Extracted {valid_descriptions} descriptions (OCR)")
+    append_audit("video_processing.extracted_ocr_descriptions", valid_descriptions)
 
     print("Finding Image Masks")
     image_masks_dict = get_video_ultrasound_region(video_folder_path, first_images)
     valid_masks = sum(1 for mask in image_masks_dict.values() if mask is not None)
-    append_audit(database_path, f"Extracted {valid_masks} video crop regions")
+    append_audit("video_processing.extracted_crop_regions", valid_masks)
     
     db_to_process['processed'] = True
     
@@ -132,25 +132,16 @@ def ProcessVideoData(database_path):
     
     # Count unknown lateralities after correction
     unknown_lateralities = db_to_process[db_to_process['laterality'] == 'unknown'].shape[0]
-    append_audit(database_path, f"Videos with unknown lateralities (Bilateral only): {unknown_lateralities}")
-
-    video_df.update(db_to_process, overwrite=True)
-    save_data(video_df, video_data_file)
-
-
-def Video_Cleanup(database_path):
+    append_audit("video_processing.bilateral_with_unknown_lat", unknown_lateralities)
     
-    print("Video Data Clean Up")
     
-    input_file = f'{database_path}/VideoData.csv'
-    db = read_csv(input_file)
-    
-    #Replace unknown areas with breast
+    # Remove rows where area is unknown or NaN
     unknown_areas_count = len(db[(db['area'] == 'unknown') | (db['area'].isna())])
-    db.loc[(db['area'] == 'unknown') | (db['area'].isna()), 'area'] = 'breast'  # ??? Why are we assuming this?
-    #append_audit(database_path, f"Set {unknown_areas_count} unknown areas to 'breast'")
+    append_audit("video_processing.unknown_areas_removed", unknown_areas_count)
+    db = db[~((db['area'] == 'unknown') | (db['area'].isna()))]
     
     # Find crop ratio
     db['crop_aspect_ratio'] = (db['crop_w'] / db['crop_h']).round(2)
-    
-    save_data(db, input_file)
+
+    video_df.update(db_to_process, overwrite=True)
+    save_data(video_df, video_data_file)
