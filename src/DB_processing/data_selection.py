@@ -81,13 +81,6 @@ def choose_images_to_label(db, breast_df, database_path):
     db['crop_aspect_ratio'] = (db['crop_w'] / db['crop_h']).round(2)
     
     # Create an audit log for all the filtering operations
-    append_audit(database_path, f"Removed {dark_removed} images - Too dark")
-    append_audit(database_path, f"Removed {caliper_removed} images - Caliper issues")
-    append_audit(database_path, f"Removed {area_removed} images - Non-breast")
-    append_audit(database_path, f"Removed {lat_removed} images - Unknown laterality")
-    append_audit(database_path, f"Removed {region_removed} images - Multi-region")
-    append_audit(database_path, f"Usable images: {len(db[db['label']])}")
-    
     append_audit("image_processing.too_dark_removed", dark_removed)
     append_audit("image_processing.caliper_issues_removed", caliper_removed)
     append_audit("image_processing.non_breast_removed", area_removed)

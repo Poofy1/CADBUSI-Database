@@ -413,8 +413,6 @@ def Export_Database(CONFIG, reparse_images = True):
     
     intermediate_image_count = len(image_df_after_aspect)
     intermediate_video_count = len(video_df_after_aspect)
-    append_audit(output_dir, f"Removed {initial_image_count - intermediate_image_count} images - Bad aspect ratio")
-    append_audit(output_dir, f"Removed {initial_video_count - intermediate_video_count} videos - Bad aspect ratio")
     append_audit("export.bad_aspect_image_removed", initial_image_count - intermediate_image_count)
     append_audit("export.bad_aspect_video_removed", initial_video_count - intermediate_video_count)
 
