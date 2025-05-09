@@ -450,7 +450,7 @@ def create_final_dataset(rad_df, path_df, output_path):
     final_df_us = final_df[final_df['MODALITY'].str.contains('US', na=False, case=False)]
     filtered_count = initial_count - len(final_df_us)
 
-    append_audit("query_clean.rad_non_US_removed", {filtered_count - path_df_length}) # path_df_length were removed here but lets keep radiology context
+    append_audit("query_clean.rad_non_US_removed", filtered_count - path_df_length) # path_df_length were removed here but lets keep radiology context
 
     # Remove rows with empty ENDPOINT_ADDRESS or empty final_interpretation
     empty_endpoint_count = sum(final_df_us['ENDPOINT_ADDRESS'].isna())

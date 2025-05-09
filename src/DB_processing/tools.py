@@ -5,9 +5,11 @@ thread_local = threading.local()
 import os
 from storage_adapter import *
 import json
+import numpy as np
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
+parent_dir = os.path.dirname(parent_dir) # 2 dirs back
 
 def append_audit(key, value, new_file=False):
     """
@@ -36,6 +38,9 @@ def append_audit(key, value, new_file=False):
             # If file exists but isn't valid JSON, initialize empty
             data = {}
     
+    # Convert NumPy data types to Python native types
+    value = convert_numpy_types(value)
+    
     # Handle nested keys with dot notation (e.g., "general.num_patients")
     keys = key.split('.')
     current = data
@@ -54,6 +59,25 @@ def append_audit(key, value, new_file=False):
         json.dump(data, f, indent=4)
     
     return data
+
+def convert_numpy_types(obj):
+    """
+    Convert NumPy data types and other non-JSON serializable types to Python native types.
+    """
+    if isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, set):
+        return list(obj)  # Convert sets to lists
+    elif isinstance(obj, (list, tuple)):
+        return [convert_numpy_types(item) for item in obj]
+    elif isinstance(obj, dict):
+        return {key: convert_numpy_types(value) for key, value in obj.items()}
+    else:
+        return obj
 
 def get_reader():
     # Check if this thread already has a reader

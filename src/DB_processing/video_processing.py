@@ -136,12 +136,13 @@ def ProcessVideoData(database_path):
     
     
     # Remove rows where area is unknown or NaN
-    unknown_areas_count = len(db[(db['area'] == 'unknown') | (db['area'].isna())])
+    unknown_areas_count = len(db_to_process[(db_to_process['area'] == 'unknown') | (db_to_process['area'].isna())])
     append_audit("video_processing.unknown_areas_removed", unknown_areas_count)
-    db = db[~((db['area'] == 'unknown') | (db['area'].isna()))]
+    db_to_process = db_to_process[~((db_to_process['area'] == 'unknown') | (db_to_process['area'].isna()))]
+    
+    video_df.update(db_to_process, overwrite=True)
     
     # Find crop ratio
-    db['crop_aspect_ratio'] = (db['crop_w'] / db['crop_h']).round(2)
+    video_df['crop_aspect_ratio'] = (video_df['crop_w'] / video_df['crop_h']).round(2)
 
-    video_df.update(db_to_process, overwrite=True)
     save_data(video_df, video_data_file)

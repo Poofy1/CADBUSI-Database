@@ -180,8 +180,8 @@ def PerformSplit(CONFIG, df):
     val_split = CONFIG["VAL_SPLIT"]
     test_split = CONFIG["TEST_SPLIT"]
     
-    if 'split' not in df.columns:
-        df['split'] = None
+    if 'valid' not in df.columns:
+        df['valid'] = None
     
     # Get unique patient IDs
     unique_patients = df['Patient_ID'].unique()
@@ -208,12 +208,12 @@ def PerformSplit(CONFIG, df):
         else:
             return 0  # Training
     
-    df['split'] = df['Patient_ID'].apply(assign_split)
+    df['valid'] = df['Patient_ID'].apply(assign_split)
     
     # Count samples in each split
-    train_samples = (df['split'] == 0).sum()
-    val_samples = (df['split'] == 1).sum()
-    test_samples = (df['split'] == 2).sum()
+    train_samples = (df['valid'] == 0).sum()
+    val_samples = (df['valid'] == 1).sum()
+    test_samples = (df['valid'] == 2).sum()
     
     # Print split statistics
     print(f"Split completed: {train_samples} training, {val_samples} validation, {test_samples} test samples")

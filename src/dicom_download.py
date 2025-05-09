@@ -286,6 +286,7 @@ def process_csv_file(csv_file):
         pbar.close()
     
     print(f"Processed {num_processed} URLs from {csv_file}")
+    print(f"Wait for bucket storge to fill up to {num_processed} folders, then cleanup with: python main.py --cleanup")
 
 
 def cleanup_resources(delete_cloud_run=False):

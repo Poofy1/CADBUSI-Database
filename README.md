@@ -121,15 +121,11 @@ Example:
 
 To process the downloaded DICOM files into a complete database:
 
-`python main.py --export [database-name]`
+`python main.py --export`
 
 This will:
 1. Crop all relevent images / videos into output dir
 2. Create a consolidated label system
-
-Example:
-
-`python main.py --export "database_2025_4_30"`
 
 
 

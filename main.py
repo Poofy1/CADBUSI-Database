@@ -12,7 +12,7 @@ from src.DB_processing.image_processing import analyze_images
 from src.DB_processing.data_selection import Select_Data, Remove_Duplicate_Data, Remove_Green_Images
 from src.DB_processing.export import Export_Database
 from src.DB_processing.dcm_parser import Parse_Dicom_Files
-from src.DB_processing.video_processing import ProcessVideoData, Video_Cleanup
+from src.DB_processing.video_processing import ProcessVideoData
 from src.ML_processing.inpaint import Inpaint_Dataset
 from src.ML_processing.inpaint_N2N import Inpaint_Dataset_N2N
 from src.ML_processing.orientation_detection import Find_Orientation
