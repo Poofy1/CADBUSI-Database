@@ -75,7 +75,7 @@ def append_audit(key, value, new_file=False):
         # Process JSON string to keep lists on a single line
         import re
         # Match pattern for simple lists (numbers only)
-        pattern = r'\[\s+(\d+,\s+)*\d+\s+\]'
+        pattern = r'\[\s+((\d+(\.\d+)?),\s+)*(\d+(\.\d+)?)\s+\]'
         
         def replace_list(match):
             list_str = match.group(0)
