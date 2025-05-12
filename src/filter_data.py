@@ -371,6 +371,19 @@ def determine_final_interpretation(final_df, output_path, rad_df_length):
     append_audit("query_clean.path_confirmed_malignant", malignant2_count)
     append_audit("query_clean.birads6_malignant", malignant1_count)
     
+    # Calculate total benign (all benign categories)
+    total_benign = benign1_count + benign2_count + benign3_count
+    append_audit("query_clean.final_benign_count", total_benign)
+    
+    # Calculate total malignant (all malignant categories)
+    total_malignant = malignant1_count + malignant2_count
+    append_audit("query_clean.final_malignant_count", total_malignant)
+    
+    # Calculate unknown (cases without a final interpretation)
+    total_rows = len(final_df)
+    total_known = total_benign + total_malignant
+    unknown_count = total_rows - total_known
+    append_audit("query_clean.final_unknown_count", unknown_count)
     
     return final_df
 
@@ -424,7 +437,87 @@ def combine_dataframes(rad_df, path_df):
     
     return final_df
 
-
+def audit_pathology_dates(df):
+    """
+    Calculate days from biopsy to pathology for each patient and record in the audit.
+    
+    Args:
+        df: The combined dataframe with biopsy and pathology records
+    """
+    print("Auditing pathology dates from biopsies")
+    
+    # Ensure DATE column is in datetime format
+    df['DATE'] = pd.to_datetime(df['DATE'], errors='coerce')
+    
+    # Create empty list to store days difference data
+    days_differences = []
+    
+    # Get unique patients
+    unique_patients = df['PATIENT_ID'].unique()
+    
+    for patient_id in unique_patients:
+        # Get all records for this patient
+        patient_records = df[df['PATIENT_ID'] == patient_id].copy()
+        
+        # Find biopsy records
+        biopsy_records = patient_records[patient_records['is_biopsy'] == 'T']
+        
+        # Find pathology records (where path_interpretation is not null)
+        pathology_records = patient_records[pd.notna(patient_records['path_interpretation'])]
+        
+        # Skip if patient doesn't have both biopsy and pathology
+        if biopsy_records.empty or pathology_records.empty:
+            continue
+        
+        # For each biopsy, find the closest pathology record
+        for _, biopsy in biopsy_records.iterrows():
+            biopsy_date = biopsy['DATE']
+            
+            if pd.isna(biopsy_date):
+                continue
+                
+            # Initialize variables to find closest pathology
+            closest_pathology_date = None
+            closest_days_diff = float('inf')
+            
+            # Look for the closest pathology date (preferably after biopsy)
+            for _, pathology in pathology_records.iterrows():
+                pathology_date = pathology['DATE']
+                
+                if pd.isna(pathology_date):
+                    continue
+                
+                # Calculate days difference
+                days_diff = (pathology_date - biopsy_date).days
+                
+                # Prefer pathology after biopsy (positive days)
+                if days_diff >= 0 and days_diff < closest_days_diff:
+                    closest_pathology_date = pathology_date
+                    closest_days_diff = days_diff
+            
+            # If no pathology after biopsy found, look for closest one before
+            if closest_pathology_date is None:
+                for _, pathology in pathology_records.iterrows():
+                    pathology_date = pathology['DATE']
+                    
+                    if pd.isna(pathology_date):
+                        continue
+                    
+                    # Calculate days difference (will be negative for before biopsy)
+                    days_diff = (pathology_date - biopsy_date).days
+                    
+                    # Find the closest one before biopsy (least negative)
+                    if days_diff < 0 and days_diff > closest_days_diff:
+                        closest_pathology_date = pathology_date
+                        closest_days_diff = days_diff
+            
+            # If we found a pathology record, add the days difference to our list
+            if closest_pathology_date is not None:
+                days_differences.append(closest_days_diff)
+    
+    # Record the array of days differences in the audit
+    append_audit("query_clean.pathology_date_from_biopsy", days_differences)
+                
 def create_final_dataset(rad_df, path_df, output_path):
     """Main function to create the final dataset with pathology records on separate rows."""
     print("Creating Final Dataset")
@@ -442,8 +535,8 @@ def create_final_dataset(rad_df, path_df, output_path):
     
     # Save to CSV
     final_df.to_csv(f'{output_path}/combined_dataset_debug.csv', index=False)
-    
-    
+
+    audit_pathology_dates(final_df)
     
     # Filter to keep only rows with 'US' in MODALITY
     initial_count = len(final_df)

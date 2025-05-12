@@ -266,49 +266,46 @@ def ocr_image(image_file, description_mask, image_folder_path, reader, kw_list):
 
     try:
         image = read_image(os.path.join(image_folder_path, image_file), use_pil=True).convert('L')
+
+        width, height = image.size
+        expand_ratio = 0.025  # Change this to control the crop expansion
+
+        if description_mask:
+            x0, y0, x1, y1 = description_mask
+        else:  # if description_mask is empty, crop upper 2/3 and 1/4 on both sides
+            x0 = width // 8
+            y0 = (2 * height) // 3
+            x1 = width - (width // 8)
+            y1 = height
+
+        # Calculate expanded coordinates, while ensuring they are within image bounds
+        x0_exp = max(0, x0 - int(width * expand_ratio))
+        y0_exp = max(0, y0 - int(height * expand_ratio))
+        x1_exp = min(width, x1 + int(width * expand_ratio))
+        y1_exp = min(height, y1 + int(height * expand_ratio))
+
+        cropped_image = image.crop((x0_exp, y0_exp, x1_exp, y1_exp))
+
+        # Convert the PIL Image to a numpy array
+        cropped_image_np = np.array(cropped_image)
+
+        # Apply blur to help OCR
+        img_focused = cv2.GaussianBlur(cropped_image_np, (3, 3), 0)
+
+        result = reader_thread.readtext(img_focused,paragraph=True)
+
+        #Fix OCR miss read
+        result = [[r[0], 'logiq' if r[1].lower() == 'loc' or r[1].lower() == 'lo' else r[1].lower()] for r in result]
+        result = [ [r[0], r[1].lower()] for r in result]
+        
+        # now loop over the remaining strings and get the total string and the bounding box
+        text = ''
+        for r in result:
+            text = text + r[1] + ' '
+
+        return [image_file, text]
     except:
-        return [image_file, None]
-    
-    
-
-    width, height = image.size
-    expand_ratio = 0.025  # Change this to control the crop expansion
-
-    if description_mask:
-        x0, y0, x1, y1 = description_mask
-    else:  # if description_mask is empty, crop upper 2/3 and 1/4 on both sides
-        x0 = width // 8
-        y0 = (2 * height) // 3
-        x1 = width - (width // 8)
-        y1 = height
-
-    # Calculate expanded coordinates, while ensuring they are within image bounds
-    x0_exp = max(0, x0 - int(width * expand_ratio))
-    y0_exp = max(0, y0 - int(height * expand_ratio))
-    x1_exp = min(width, x1 + int(width * expand_ratio))
-    y1_exp = min(height, y1 + int(height * expand_ratio))
-
-    cropped_image = image.crop((x0_exp, y0_exp, x1_exp, y1_exp))
-
-    # Convert the PIL Image to a numpy array
-    cropped_image_np = np.array(cropped_image)
-
-    # Apply blur to help OCR
-    img_focused = cv2.GaussianBlur(cropped_image_np, (3, 3), 0)
-
-    result = reader_thread.readtext(img_focused,paragraph=True)
-
-    #Fix OCR miss read
-    result = [[r[0], 'logiq' if r[1].lower() == 'loc' or r[1].lower() == 'lo' else r[1].lower()] for r in result]
-    result = [ [r[0], r[1].lower()] for r in result]
-    
-    # now loop over the remaining strings and get the total string and the bounding box
-    text = ''
-    for r in result:
-        text = text + r[1] + ' '
-
-    return [image_file, text]
-
+        return [image_file, None] # Crop failed
 
 def get_OCR(image_folder_path, description_masks):
     # Create new description_masks with just the basenames

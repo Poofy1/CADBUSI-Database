@@ -36,10 +36,17 @@ def choose_images_to_label(db, breast_df, database_path):
     db['label'] = True
     
     #Remove images that are too dark
+    darkness_thresh = 65
+    # Extract all darkness values rounded to 2 decimals
+    darkness_values = db['darkness'].round(2).tolist()
+    append_audit("image_processing.darkness_values", darkness_values)
+    append_audit("image_processing.darkness_thresh", darkness_thresh)
+    
     dark_count_before = len(db[db['label']])
     db.loc[db['darkness'] > 65, 'label'] = False
     dark_count_after = len(db[db['label']])
     dark_removed = dark_count_before - dark_count_after
+    
     
     # loop over caliper rows and tag twin images
     caliper_count_before = len(db[db['label']])
@@ -63,13 +70,6 @@ def choose_images_to_label(db, breast_df, database_path):
     db.loc[(db['laterality'] == 'unknown') | (db['laterality'].isna()), 'label'] = False
     lat_count_after = len(db[db['label']])
     lat_removed = lat_count_before - lat_count_after
-    
-    # Check for chest or mastectomy
-    chest_count_before = len(db[db['label']])
-    chest_or_mastectomy_studies = breast_df[breast_df['DESCRIPTION'].fillna('').str.contains('chest|mastectomy', case=False)]['Patient_ID'].values
-    db.loc[db['Patient_ID'].isin(chest_or_mastectomy_studies), 'label'] = False
-    chest_count_after = len(db[db['label']])
-    chest_removed = chest_count_before - chest_count_after
     
     # Set label = False for all images with 'RegionCount' > 1
     region_count_before = len(db[db['label']])

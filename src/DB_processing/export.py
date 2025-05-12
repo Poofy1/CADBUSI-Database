@@ -412,6 +412,99 @@ def ExportAuditReport(image_df, breast_df, video_df, video_images_df):
         append_audit(f'export.{key}_breasts', counts)
         
     
+    # -- Machine model distribution counts by split --
+    if 'ManufacturerModelName' in image_df.columns:
+        # Merge dataframes to get valid split information with the machine models
+        model_df = image_df.merge(breast_df[['Patient_ID', 'Accession_Number', 'valid']], 
+                              on=['Patient_ID', 'Accession_Number'], how='left')
+        
+        # Get the unique machine models
+        unique_models = model_df['ManufacturerModelName'].unique().tolist()
+        
+        # Create three dictionaries for train, val, test splits
+        train_models = {}
+        val_models = {}
+        test_models = {}
+        
+        # Process each split and model
+        for model in unique_models:
+            # Create a safe key by replacing any characters that might cause issues
+            safe_model = str(model).replace(' ', '_').replace('-', '_').replace('.', '_').replace("'", "")
+            
+            # Count each model in each split
+            train_count = len(model_df[(model_df['valid'] == 0) & (model_df['ManufacturerModelName'] == model)])
+            val_count = len(model_df[(model_df['valid'] == 1) & (model_df['ManufacturerModelName'] == model)])
+            test_count = len(model_df[(model_df['valid'] == 2) & (model_df['ManufacturerModelName'] == model)])
+            
+            # Only add to dictionaries if count > 0
+            if train_count > 0:
+                train_models[safe_model] = train_count
+            if val_count > 0:
+                val_models[safe_model] = val_count
+            if test_count > 0:
+                test_models[safe_model] = test_count
+        
+        # Save the dictionaries to audit
+        append_audit("export.train_machine_models", train_models)
+        append_audit("export.val_machine_models", val_models)
+        append_audit("export.test_machine_models", test_models)
+    else:
+        # Log that the ManufacturerModelName column wasn't found
+        append_audit("export.machine_models", "Column 'ManufacturerModelName' not found in image_df")
+    
+    # -- Breast density distribution counts by split --
+    if 'Density_Desc' in breast_df.columns:
+        # Define the density categories and their keywords
+        density_categories = {
+            'entirely_fatty': ['entirely fatty'],
+            'fibroglandular': ['fibroglandular'],
+            'heterogeneously': ['heterogeneously'],
+            'extremely_dense': ['extremely dense'],
+            'unknown': []  # Default category if no match found
+        }
+        
+        # Create three dictionaries for train, val, test splits
+        train_densities = {cat: 0 for cat in density_categories.keys()}
+        val_densities = {cat: 0 for cat in density_categories.keys()}
+        test_densities = {cat: 0 for cat in density_categories.keys()}
+        
+        # Function to classify a density description
+        def classify_density(desc):
+            if pd.isna(desc):
+                return 'unknown'
+                
+            desc = str(desc).lower()
+            
+            for category, keywords in density_categories.items():
+                for keyword in keywords:
+                    if keyword in desc:
+                        return category
+                        
+            return 'unknown'  # Default if no match found
+        
+        # Add a new column with the classified density
+        breast_df['density_category'] = breast_df['Density_Desc'].apply(classify_density)
+        
+        # Count densities by split
+        for split_num, density_dict in [(0, train_densities), (1, val_densities), (2, test_densities)]:
+            # Filter by split
+            split_data = breast_df[breast_df['valid'] == split_num]
+            
+            # Count occurrences of each density category
+            density_counts = split_data['density_category'].value_counts().to_dict()
+            
+            # Update the dictionary with counts
+            for category in density_categories.keys():
+                density_dict[category] = density_counts.get(category, 0)
+        
+        # Save the dictionaries to audit
+        append_audit("export.train_breast_densities", train_densities)
+        append_audit("export.val_breast_densities", val_densities)
+        append_audit("export.test_breast_densities", test_densities)
+    else:
+        # Log that the Density_Desc column wasn't found
+        append_audit("export.breast_densities", "Column 'Density_Desc' not found in breast_df")
+        
     
     # -- BI-RADS distribution counts by split --
     # Define all possible BI-RADS values to check
