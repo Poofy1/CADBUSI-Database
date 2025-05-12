@@ -290,14 +290,30 @@ def filter_path_data(pathology_df, output_path):
     
     # Split cases into separate rows via lesions
     expanded_df = split_lesions(pathology_df)
-    append_audit("query_clean.path_pre_lesion_count", len(pathology_df.drop_duplicates(keep='first')))
-    append_audit("query_clean.path_post_lesion_count", len(expanded_df.drop_duplicates(keep='first')))
+    append_audit("query_clean_path.path_pre_lesion_count", len(pathology_df.drop_duplicates(keep='first')))
+    append_audit("query_clean_path.path_post_lesion_count", len(expanded_df.drop_duplicates(keep='first')))
     
     # Re-determine laterality after splitting (for rows that didn't have it set during splitting)
     expanded_df['Pathology_Laterality'] = expanded_df.apply(determine_laterality, axis=1)
     
     # Apply diagnosis classification
     expanded_df['path_interpretation'] = expanded_df['final_diag'].apply(categorize_pathology)
+    
+    # Audit laterality counts
+    lat_left_count = len(expanded_df[expanded_df['Pathology_Laterality'] == 'LEFT'])
+    lat_right_count = len(expanded_df[expanded_df['Pathology_Laterality'] == 'RIGHT'])
+    lat_unknown_count = len(expanded_df[expanded_df['Pathology_Laterality'].isin(['UNKNOWN', None, ''])])
+    append_audit("query_clean_path.lat_left", lat_left_count)
+    append_audit("query_clean_path.lat_right", lat_right_count)
+    append_audit("query_clean_path.lat_unknown", lat_unknown_count)
+    
+    # Audit interpretation counts
+    interp_benign_count = len(expanded_df[expanded_df['path_interpretation'] == 'BENIGN'])
+    interp_malignant_count = len(expanded_df[expanded_df['path_interpretation'] == 'MALIGNANT'])
+    interp_unknown_count = len(expanded_df[expanded_df['path_interpretation'].isin(['UNKNOWN', None, ''])])
+    append_audit("query_clean_path.interp_benign", interp_benign_count)
+    append_audit("query_clean_path.interp_malignant", interp_malignant_count)
+    append_audit("query_clean_path.interp_unknown", interp_unknown_count)
     
     # Extract Modality from SPECIMEN_COMMENT
     expanded_df['Modality'] = expanded_df['SPECIMEN_COMMENT'].apply(extract_modality)
@@ -329,8 +345,8 @@ def filter_path_data(pathology_df, output_path):
     duplicates_removed = rows_before - rows_after
     
     print(f"Removed {duplicates_removed} exact duplicate rows.")
-    append_audit("query_clean.path_duplicated_removed", duplicates_removed)
-    append_audit("query_clean.path_lesion_count_final", rows_after)
+    append_audit("query_clean_path.path_duplicated_removed", duplicates_removed)
+    append_audit("query_clean_path.path_lesion_count_final", rows_after)
 
     
     # Save to CSV
