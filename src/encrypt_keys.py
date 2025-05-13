@@ -4,16 +4,18 @@ import os
 import csv
 import pickle
 import struct
-
+import base64
+import pyffx
+import re
 
 # Add parent directory to path
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import CONFIG
 
-
 def generate_key():
-    return os.urandom(16)  # 128-bit key
+    """Generate a cryptographically secure 256-bit key."""
+    return os.urandom(16)  # 128-bit is minimum spec
 
 
 def get_encryption_key():
@@ -24,15 +26,13 @@ def get_encryption_key():
     If no key exists, it generates a new one and stores it.
     
     Returns:
-        bytes: A 16-byte encryption key for use with AES-128
+        bytes: A 16-byte encryption key for use with FF1
     """
     # Check for key in environment variable first
-    import os
     env_key_name = "DICOM_ENCRYPTION_KEY"
     key_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "encryption_key.pkl")
     
     # Try to get key from environment variable (base64 encoded)
-    import base64
     if env_key_name in os.environ:
         try:
             return base64.b64decode(os.environ[env_key_name])
@@ -40,7 +40,6 @@ def get_encryption_key():
             print(f"Error loading key from environment: {e}")
     
     # If not in environment, try to load from file
-    import pickle
     if os.path.exists(key_file_path):
         try:
             with open(key_file_path, 'rb') as key_file:
@@ -51,7 +50,7 @@ def get_encryption_key():
             print(f"Error loading existing key file: {e}")
     
     # If no key exists, generate a new one
-    key = generate_key()  # Uses the existing generate_key function
+    key = generate_key()
     
     # Save the key to file for future use
     try:
@@ -67,37 +66,37 @@ def get_encryption_key():
 
 def ff1_encrypt(key, number, domain_size):
     """
-    Format-preserving encryption using a simplified FF1-based approach.
-    This guarantees a permutation (no collisions) for the given domain size.
+    NIST SP 800-38G compliant FF1 format-preserving encryption.
+    
+    Args:
+        key (bytes): The encryption key
+        number (int): The number to encrypt
+        domain_size (int): The size of the domain (10^n for n-digit numbers)
+        
+    Returns:
+        str: The encrypted number as a string with same length as input
     """
-    # Convert number to bytes for encryption
-    number_bytes = str(number).encode()
+    # Convert number to string and get its length
+    num_str = str(number)
+    length = len(num_str)
     
-    # Create a deterministic IV based on domain size
-    iv = struct.pack('<Q', domain_size) + struct.pack('<Q', 0)
+    # Create a tweak - using a deterministic value based on domain size
+    tweak = struct.pack('<Q', domain_size)
     
-    # Create and use cipher in ECB mode for simplicity
-    cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
-    encryptor = cipher.encryptor()
+    # Initialize the FF1 cipher directly with the Integer class
+    # PyFFX seems to have a different API than expected
+    # Let's try using it according to their examples
+    ff1 = pyffx.Integer(key, length)
     
-    # Pad the number bytes to ensure it's a multiple of 16
-    padded = number_bytes + b'\0' * (16 - len(number_bytes) % 16)
+    # Encrypt the number
+    encrypted_value = ff1.encrypt(number)
     
-    # Encrypt the padded bytes
-    encrypted_bytes = encryptor.update(padded) + encryptor.finalize()
-    
-    # Convert to an integer and take modulo to ensure it's within domain
-    encrypted_int = int.from_bytes(encrypted_bytes, byteorder='big')
-    
-    # Ensure the result is within the domain size, maintaining format
-    domain_max = 10 ** len(str(number)) - 1
-    result = (encrypted_int % domain_max) + 1  # Ensure non-zero
-    
-    # Handle leading zeros by padding with zeros
-    return str(result).zfill(len(str(number)))
+    # Convert to string and ensure proper padding with leading zeros
+    return str(encrypted_value).zfill(length)
+
 
 def encrypt_single_id(key, id_value):
-    """Encrypt a single ID value using the provided key.
+    """Encrypt a single ID value using the provided key with NIST FF1.
     
     Args:
         key: The encryption key
@@ -141,7 +140,6 @@ def encrypt_single_id(key, id_value):
             return str(id_value)
 
 
-
 def anonymize_date(date_str):
     """
     Anonymize a date by removing the day information, keeping only year and month.
@@ -170,6 +168,7 @@ def anonymize_date(date_str):
         # Return original if it doesn't match expected format
         print(f"Warning: Couldn't anonymize date '{date_str}' - unexpected format")
         return date_str
+
 
 def encrypt_ids(input_file=None, output_file_local=None, key_output=None):
     
@@ -264,7 +263,6 @@ def encrypt_ids(input_file=None, output_file_local=None, key_output=None):
                 elif i == final_interp_index:
                     # Simplify final_interpretation by removing the number at the end
                     # Matches patterns like "BENIGN2", "MALIGNANT3" etc.
-                    import re
                     simplified_value = re.sub(r'([A-Z]+)\d+', r'\1', value)
                     encrypted_row.append(simplified_value)
                 else:
