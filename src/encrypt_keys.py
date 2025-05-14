@@ -79,13 +79,8 @@ def ff1_encrypt(key, number, domain_size):
     # Convert number to string and get its length
     num_str = str(number)
     length = len(num_str)
-    
-    # Create a tweak - using a deterministic value based on domain size
-    tweak = struct.pack('<Q', domain_size)
-    
+
     # Initialize the FF1 cipher directly with the Integer class
-    # PyFFX seems to have a different API than expected
-    # Let's try using it according to their examples
     ff1 = pyffx.Integer(key, length)
     
     # Encrypt the number
