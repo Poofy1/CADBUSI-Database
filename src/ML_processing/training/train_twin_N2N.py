@@ -140,7 +140,7 @@ class N2N_Original_Used_UNet(nn.Module):
     
     
 class CaliperDataset(Dataset):
-    def __init__(self, csv_file, img_dir, caliper_dir=None, val=False, transform=None):
+    def __init__(self, csv_file, img_dir, caliper_dir=None, val=False, transform=None, subset_limit=None):
         self.data = pd.read_csv(csv_file)
         self.img_dir = img_dir
         self.caliper_dir = caliper_dir
@@ -157,6 +157,10 @@ class CaliperDataset(Dataset):
             self.data = self.data[self.data['val'] == 1]
         else:
             self.data = self.data[self.data['val'] == 0]
+            
+        # Limit the dataset to a subset if specified
+        if subset_limit is not None and subset_limit > 0:
+            self.data = self.data.iloc[:subset_limit]
 
     def __len__(self):
         return len(self.data)
@@ -474,24 +478,91 @@ def show_validation_examples(model, data_dir, csv_file, img_dir, num_examples=5)
 
 
 
+
+def evaluate_metrics(model, data_dir, csv_file, img_dir):
+    """
+    Evaluate PSNR and SSIM metrics on the validation set.
+    """
+    from skimage.metrics import peak_signal_noise_ratio as psnr
+    from skimage.metrics import structural_similarity as ssim
+    
+    val_dataset = CaliperDataset(csv_file, img_dir, val=True, subset_limit = 1000)
+    val_loader = DataLoader(val_dataset, batch_size=1, collate_fn=collate_fn)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+    model.eval()
+    
+    total_psnr = 0.0
+    total_ssim = 0.0
+    count = 0
+    
+    print("Calculating PSNR and SSIM metrics...")
+    with torch.no_grad():
+        for caliper_images, ground_truth_images in tqdm(val_loader, desc="Evaluating metrics"):
+            # Move to device
+            caliper_images = caliper_images.to(device)
+            ground_truth_images = ground_truth_images.to(device)
+            
+            # Get model predictions
+            outputs = model(caliper_images)
+            
+            # Move to CPU and convert to numpy for metric calculation
+            output_np = outputs.squeeze(0).cpu().numpy() * 0.5 + 0.5  # Denormalize
+            output_np = np.clip(output_np, 0, 1)
+            
+            gt_np = ground_truth_images.squeeze(0).cpu().numpy() * 0.5 + 0.5  # Denormalize
+            gt_np = np.clip(gt_np, 0, 1)
+            
+            # Calculate metrics (convert to range [0, 255] for standard calculation)
+            output_255 = (output_np[0] * 255).astype(np.uint8)
+            gt_255 = (gt_np[0] * 255).astype(np.uint8)
+            
+            # Calculate PSNR
+            curr_psnr = psnr(gt_255, output_255, data_range=255)
+            
+            # Calculate SSIM
+            curr_ssim = ssim(gt_255, output_255, data_range=255)
+            
+            total_psnr += curr_psnr
+            total_ssim += curr_ssim
+            count += 1
+    
+    # Calculate averages
+    average_psnr = total_psnr / count if count > 0 else 0
+    average_ssim = total_ssim / count if count > 0 else 0
+    
+    print(f"Evaluation Results:")
+    print(f"Average PSNR: {average_psnr:.2f} dB")
+    print(f"Average SSIM: {average_ssim:.4f}")
+    
+    return average_psnr, average_ssim
+
+
 if __name__ == "__main__":
     data_dir = "D:/DATA/CASBUSI/PairExport"
     csv_file = os.path.join(data_dir, "PairData.csv")
     img_dir = os.path.join(data_dir, "images")
     caliper_dir = "D:/DATA/CASBUSI/PairExport/unique_caliper_shapes"
-    model_path = os.path.join(data_dir, "caliper_removal_unet_l1loss_N2N_6.pth")
+    model_path = os.path.join(data_dir, "caliper_removal_unet_l1loss_N2N_5.pth")
 
-    choice = input("Do you want to (1) train the model or (2) show validation examples? Enter 1 or 2: ")
+    choice = input("Do you want to (1) train the model, (2) show validation examples, or (3) evaluate PSNR and SSIM? Enter 1, 2, or 3: ")
 
     if choice == '1':
         train_model(csv_file, img_dir, caliper_dir, model_path)
     elif choice == '2':
         if os.path.exists(model_path):
-            #model = Unet(encoder_name="resnet18", encoder_weights="imagenet", in_channels=1, classes=1)
             model = N2N_Original_Used_UNet(in_channels=1, out_channels=1)
             model.load_state_dict(torch.load(model_path))
             show_validation_examples(model, data_dir, csv_file, img_dir)
         else:
             print("No pre-trained model found. Please train the model first.")
+    elif choice == '3':
+        if os.path.exists(model_path):
+            model = N2N_Original_Used_UNet(in_channels=1, out_channels=1)
+            model.load_state_dict(torch.load(model_path))
+            evaluate_metrics(model, data_dir, csv_file, img_dir)
+        else:
+            print("No pre-trained model found. Please train the model first.")
     else:
-        print("Invalid choice. Please run the script again and enter 1 or 2.")
+        print("Invalid choice. Please run the script again and enter 1, 2, or 3.")

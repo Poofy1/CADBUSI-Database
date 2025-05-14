@@ -6,6 +6,7 @@ import os
 from storage_adapter import *
 import json
 import numpy as np
+import re
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
@@ -54,36 +55,48 @@ def append_audit(key, value, new_file=False):
     # Set the value at the deepest level
     current[keys[-1]] = value
     
-    # Custom JSON encoder for compact list representation
-    class CompactListEncoder(json.JSONEncoder):
-        def encode(self, obj):
-            result = super(CompactListEncoder, self).encode(obj)
-            return result
-            
-        def iterencode(self, obj, _one_shot=False):
-            if isinstance(obj, list) and all(not isinstance(item, (dict, list)) for item in obj):
-                yield json.dumps(obj, separators=(',', ':'))
-                return
-            for chunk in super(CompactListEncoder, self).iterencode(obj, _one_shot):
-                yield chunk
-    
-    # Write the updated data back to the file
+    # Write the updated data back to the file with custom formatting
     with open(json_file_path, 'w') as f:
-        # Custom JSON formatting
+        # First get the standard JSON formatting
         json_str = json.dumps(data, indent=4)
         
-        # Process JSON string to keep lists on a single line
-        import re
-        # Match pattern for simple lists (numbers only)
-        pattern = r'\[\s+((\d+(\.\d+)?),\s+)*(\d+(\.\d+)?)\s+\]'
+        def compact_numeric_lists(json_text):
+            # This function handles finding lists of numbers and compacting them
+            lines = json_text.split('\n')
+            result = []
+            i = 0
+            while i < len(lines):
+                line = lines[i]
+                # Check if this line starts a list
+                if '[' in line and ']' not in line:
+                    # Start collecting the list
+                    list_str = line
+                    j = i + 1
+                    # Continue collecting until we find the closing bracket
+                    while j < len(lines) and ']' not in lines[j]:
+                        list_str += lines[j]
+                        j += 1
+                    if j < len(lines):
+                        list_str += lines[j]
+                        
+                    # Check if this is a numeric list (contains only numbers)
+                    if re.search(r'\[\s*(-?\d+(\.\d+)?)(,\s*(-?\d+(\.\d+)?))*\s*\]', list_str):
+                        # Compact the list by removing newlines and extra spaces
+                        compact_list = re.sub(r'\s+', ' ', list_str)
+                        compact_list = re.sub(r'\[\s+', '[', compact_list)
+                        compact_list = re.sub(r'\s+\]', ']', compact_list)
+                        compact_list = re.sub(r',\s+', ',', compact_list)  # Changed from ', ' to just ','
+                        result.append(compact_list)
+                        i = j + 1
+                        continue
+                        
+                result.append(line)
+                i += 1
+                
+            return '\n'.join(result)
         
-        def replace_list(match):
-            list_str = match.group(0)
-            # Remove all whitespace between brackets
-            compact_list = re.sub(r'\s+', '', list_str)
-            return compact_list
-        
-        json_str = re.sub(pattern, replace_list, json_str)
+        # Apply the compacting function
+        json_str = compact_numeric_lists(json_str)
         f.write(json_str)
     
     return data

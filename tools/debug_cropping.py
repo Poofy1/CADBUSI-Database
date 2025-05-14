@@ -1,7 +1,6 @@
 
 import cv2, sys, csv
 import numpy as np
-import pandas as pd
 import os
 from tqdm import tqdm
 import traceback
@@ -12,9 +11,9 @@ sys.path.append(parent_dir)
 
 from src.DB_processing.image_processing import *
 
-current_dir = f'{parent_dir}/debug_tools/'
-
-
+parent_dir = os.path.dirname(parent_dir)
+current_dir = f'{parent_dir}/tools/'
+print(current_dir)
 
 image_output = f"{current_dir}/debug_output/"
 os.makedirs(image_output, exist_ok=True)
@@ -86,8 +85,8 @@ def process_single_image(image_path):
     
     # Remove caliper box
     reader_thread = get_reader()
-        
     output = reader_thread.readtext(image[start_row:end_row, :])
+    
     for detection in output:
         top_left = tuple(map(int, detection[0][0]))
         bottom_right = tuple(map(int, detection[0][2]))
@@ -96,9 +95,7 @@ def process_single_image(image_path):
         cv2.rectangle(image, top_left, bottom_right, (0, 0, 0), -1)
         
         
-    # Create binary mask of nonzero pixels
     _, binary_mask = cv2.threshold(image, 0, 255, cv2.THRESH_BINARY)
-    
     kernel = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=np.uint8)
     eroded_mask = cv2.erode(binary_mask, kernel, iterations=5)
 
@@ -108,10 +105,7 @@ def process_single_image(image_path):
         return None
     
     largest_contour = max(contours, key=cv2.contourArea)
-    
     convex_hull = cv2.convexHull(largest_contour)
-    
-    # Use the function to find the top edge points
     top_left, top_right = find_top_edge_points(convex_hull, vertical_range=20)
 
     # Now you have the top left and top right points, use them to find x, y, w, h

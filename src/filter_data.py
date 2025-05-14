@@ -422,7 +422,7 @@ def prepare_dataframes(rad_df, path_df):
 def combine_dataframes(rad_df, path_df):
     """Combine radiology and pathology dataframes, keeping pathology on separate rows."""
     # Select only needed columns from path_df to reduce memory usage
-    needed_columns = ['PATIENT_ID', 'DATE', 'Pathology_Laterality', 'final_diag', 'path_interpretation']
+    needed_columns = ['PATIENT_ID', 'DATE', 'SPECIMEN_RESULT_DTM', 'Pathology_Laterality', 'final_diag', 'path_interpretation']
     path_needed = path_df[needed_columns] if all(col in path_df.columns for col in needed_columns) else path_df
     
     # Create a copy of path_needed with the same columns as rad_df, plus any additional columns we need
@@ -439,15 +439,19 @@ def combine_dataframes(rad_df, path_df):
 
 def audit_pathology_dates(df):
     """
-    Calculate days from biopsy to pathology for each patient and record in the audit.
+    Calculate days from biopsy to pathology SPECIMEN_RESULT_DTM for each patient and record in the audit.
+    Only considers cases where the DATE vs DATE difference is within 2 weeks.
     
     Args:
         df: The combined dataframe with biopsy and pathology records
     """
-    print("Auditing pathology dates from biopsies")
+    print("Auditing pathology dates from biopsies using SPECIMEN_RESULT_DTM")
     
     # Ensure DATE column is in datetime format
     df['DATE'] = pd.to_datetime(df['DATE'], errors='coerce')
+    
+    # Ensure SPECIMEN_RESULT_DTM is in datetime format
+    df['SPECIMEN_RESULT_DTM'] = pd.to_datetime(df['SPECIMEN_RESULT_DTM'], errors='coerce')
     
     # Create empty list to store days difference data
     days_differences = []
@@ -469,51 +473,29 @@ def audit_pathology_dates(df):
         if biopsy_records.empty or pathology_records.empty:
             continue
         
-        # For each biopsy, find the closest pathology record
+        # For each biopsy, find pathology records within 2 weeks
         for _, biopsy in biopsy_records.iterrows():
             biopsy_date = biopsy['DATE']
             
             if pd.isna(biopsy_date):
                 continue
                 
-            # Initialize variables to find closest pathology
-            closest_pathology_date = None
-            closest_days_diff = float('inf')
-            
-            # Look for the closest pathology date (preferably after biopsy)
+            # Look for pathology records with dates within 2 weeks of biopsy
             for _, pathology in pathology_records.iterrows():
                 pathology_date = pathology['DATE']
+                result_date = pathology['SPECIMEN_RESULT_DTM']
                 
-                if pd.isna(pathology_date):
+                if pd.isna(pathology_date) or pd.isna(result_date):
                     continue
                 
-                # Calculate days difference
-                days_diff = (pathology_date - biopsy_date).days
+                # Only process if DATE difference is within 2 weeks (14 days)
+                date_diff = (pathology_date - biopsy_date).days
+                if 0 <= date_diff <= 14:
+                    continue
                 
-                # Prefer pathology after biopsy (positive days)
-                if days_diff >= 0 and days_diff < closest_days_diff:
-                    closest_pathology_date = pathology_date
-                    closest_days_diff = days_diff
-            
-            # If no pathology after biopsy found, look for closest one before
-            if closest_pathology_date is None:
-                for _, pathology in pathology_records.iterrows():
-                    pathology_date = pathology['DATE']
-                    
-                    if pd.isna(pathology_date):
-                        continue
-                    
-                    # Calculate days difference (will be negative for before biopsy)
-                    days_diff = (pathology_date - biopsy_date).days
-                    
-                    # Find the closest one before biopsy (least negative)
-                    if days_diff < 0 and days_diff > closest_days_diff:
-                        closest_pathology_date = pathology_date
-                        closest_days_diff = days_diff
-            
-            # If we found a pathology record, add the days difference to our list
-            if closest_pathology_date is not None:
-                days_differences.append(closest_days_diff)
+                # Calculate the difference between biopsy DATE and pathology SPECIMEN_RESULT_DTM
+                result_diff = (result_date - biopsy_date).days
+                days_differences.append(result_diff)
     
     # Record the array of days differences in the audit
     append_audit("query_clean.pathology_date_from_biopsy", days_differences)
