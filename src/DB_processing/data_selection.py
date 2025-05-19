@@ -88,6 +88,13 @@ def choose_images_to_label(db, breast_df, database_path):
     append_audit("image_processing.multi_region_removed", region_removed)
     append_audit("image_processing.usable_images", len(db[db['label']]))
     
+    total_caliper_images = len(db[db['has_calipers']])
+    append_audit("image_processing.total_caliper_images", total_caliper_images)
+    caliper_with_duplicates = len(db[(db['has_calipers']) & (db['distance'] <= 5)])
+    append_audit("image_processing.caliper_with_duplicates", caliper_with_duplicates)
+    total_near_duplicates = len(db[db['distance'] <= 5]) 
+    append_audit("image_processing.total_near_duplicates", total_near_duplicates)
+    
     
     return db
 

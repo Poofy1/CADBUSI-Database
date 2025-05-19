@@ -349,6 +349,16 @@ def filter_rad_data(radiology_df, output_path):
     # Print length
     initial_count = len(radiology_df)
     print(f"Initial dataframe length: {initial_count} rows")
+    
+    # Audit year range
+    temp_dates = pd.to_datetime(radiology_df['RADIOLOGY_DTM'], errors='coerce')
+    
+    # Extract years into a temporary series
+    years = temp_dates.dt.year.dropna()
+    year_min = int(years.min())
+    year_max = int(years.max())
+    append_audit("query_clean_rad.init_year_min", year_min)
+    append_audit("query_clean_rad.init_year_max", year_max)
 
     rename_dict = {'PAT_PATIENT_CLINIC_NUMBER': 'PATIENT_ID',
         'IMGST_ACCESSION_IDENTIFIER_VALUE': 'Accession_Number',
