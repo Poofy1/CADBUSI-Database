@@ -112,7 +112,7 @@ def main():
         # Step 4: Clean data
         print("Step 4/5: Cleaning and processing image data...")
         Remove_Duplicate_Data(CONFIG["DATABASE_DIR"])
-        Find_Orientation(CONFIG)
+        #Find_Orientation(CONFIG) # Unnessesary and unreliable 
         Select_Data(CONFIG["DATABASE_DIR"], only_labels=False)
         
         # Make inpainting optional

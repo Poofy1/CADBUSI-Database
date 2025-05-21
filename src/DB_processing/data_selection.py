@@ -82,7 +82,7 @@ def choose_images_to_label(db, breast_df, database_path):
     
     # Create an audit log for all the filtering operations
     append_audit("image_processing.too_dark_removed", dark_removed)
-    append_audit("image_processing.caliper_issues_removed", caliper_removed)
+    append_audit("image_processing.caliper_issues_removed", caliper_removed) # same as caliper_with_duplicates?
     append_audit("image_processing.non_breast_removed", area_removed)
     append_audit("image_processing.unknown_lat_removed", lat_removed)
     append_audit("image_processing.multi_region_removed", region_removed)
