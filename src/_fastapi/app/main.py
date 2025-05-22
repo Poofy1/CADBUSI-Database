@@ -89,7 +89,7 @@ async def retrieve_and_store_dicom(url, bucket_name, bucket_path):
     headers["Authorization"] = f"Bearer {get_oauth2_token()}"
     
     try:
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, headers=headers, timeout=300)
         
         if response.status_code != 200:
             logger.error(f"Failed to retrieve DICOM: Status {response.status_code}")
@@ -154,7 +154,7 @@ async def retrieve_and_store_dicom(url, bucket_name, bucket_path):
         return False
     
     
-# Modify the Pub/Sub handler
+# Pub/Sub handler
 @app.post("/push_handlers/receive_messages")
 async def pubsub_push_handlers_receive(request: Request):
     bearer_token = request.headers.get("Authorization")
@@ -166,7 +166,6 @@ async def pubsub_push_handlers_receive(request: Request):
     try:
         token = bearer_token.split(" ")[1]
         claim = verify_jwt(token)
-        #logger.info(f"Processing request with JWT claim ID: {claim.get('sub', 'unknown')}")
 
         envelope = await request.json()
         if (
@@ -176,7 +175,7 @@ async def pubsub_push_handlers_receive(request: Request):
         ):
             # Decode the Pub/Sub message data
             data = base64.b64decode(envelope["message"]["data"]).decode("utf-8")
-            dicom_url = data  # Now data is directly the URL instead of a JSON payload
+            dicom_url = data
 
             if not dicom_url:
                 logger.error("No DICOM URL found in payload")
@@ -184,22 +183,30 @@ async def pubsub_push_handlers_receive(request: Request):
                     status_code=400, content={"message": "No DICOM URL in payload"}
                 )
             
-            # Get bucket information from environment variables with defaults
+            # Get bucket information from environment variables
             bucket_name = os.environ.get("BUCKET_NAME", "")
             bucket_path = os.environ.get("BUCKET_PATH", "Downloads")               
             
             # Retrieve and store the DICOM image
             success = await retrieve_and_store_dicom(dicom_url, bucket_name, bucket_path)
             
-            if not success:
-                logger.warning(f"Failed to process DICOM from {dicom_url}")
+            if success:
+                logger.info(f"Successfully processed DICOM from {dicom_url}")
+                return Response(status_code=HTTP_204_NO_CONTENT)  # SUCCESS - don't retry
+            else:
+                logger.error(f"Failed to process DICOM from {dicom_url}")
+                return JSONResponse(
+                    status_code=500, 
+                    content={"message": f"Failed to process DICOM from {dicom_url}"}
+                )  # FAILURE - trigger retry
             
         else:
             logger.warning("Invalid Pub/Sub message format")
+            return JSONResponse(
+                status_code=400, 
+                content={"message": "Invalid Pub/Sub message format"}
+            )  # Bad message format - don't retry
 
-        # Return a 204 to indicate a success, even if processing failed
-        # This is standard practice for Pub/Sub to prevent retries
-        return Response(status_code=HTTP_204_NO_CONTENT)
     except (ValueError, IndexError) as e:
         logger.error(f"Invalid Authorization header format: {e}")
         return JSONResponse(
@@ -209,7 +216,7 @@ async def pubsub_push_handlers_receive(request: Request):
         logger.exception(f"Error processing Pub/Sub message: {e}")
         return JSONResponse(
             status_code=500, content={"message": "Error processing message"}
-        )
+        )  # Unexpected error - retry
 
 
 if __name__ == "__main__":

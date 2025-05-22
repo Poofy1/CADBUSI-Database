@@ -138,7 +138,7 @@ def deploy_cloud_run(bucket_name=None, bucket_path=None):
         f"--vpc-connector={vpc_connector}",
         "--vpc-egress=all-traffic",
         "--timeout=3000",
-        "--memory=4096Mi",
+        "--memory=8192Mi",
         "--min-instances=1",
         f"--set-env-vars={env_vars}"
     ]
