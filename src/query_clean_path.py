@@ -290,8 +290,8 @@ def filter_path_data(pathology_df, output_path):
     
     # Split cases into separate rows via lesions
     expanded_df = split_lesions(pathology_df)
-    append_audit("query_clean_path.path_pre_lesion_count", len(pathology_df.drop_duplicates(keep='first')))
-    append_audit("query_clean_path.path_post_lesion_count", len(expanded_df.drop_duplicates(keep='first')))
+    append_audit("query_clean_path.path_pre_lesion_count", len(pathology_df))
+    append_audit("query_clean_path.path_post_lesion_count", len(expanded_df))
     
     # Re-determine laterality after splitting (for rows that didn't have it set during splitting)
     expanded_df['Pathology_Laterality'] = expanded_df.apply(determine_laterality, axis=1)

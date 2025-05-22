@@ -76,9 +76,11 @@ def get_oauth2_token():
     creds.refresh(auth_req)
     return creds.token
 
+import concurrent.futures
+import asyncio
+
 async def retrieve_and_store_dicom(url, bucket_name, bucket_path):
-    """Retrieves and stores all DICOM instances from a DICOMweb study."""
-    # Extract study ID from the URL
+    """Enhanced version with parallel DICOM processing"""
     study_id_from_url = url.split('/')[-1]
     
     storage_client = storage.Client()
@@ -100,57 +102,65 @@ async def retrieve_and_store_dicom(url, bucket_name, bucket_path):
             logger.error(f"Unsupported content type: {content_type}")
             return False
         
-        # Parse the multipart response
         decoder = MultipartDecoder(response.content, content_type)
         
-        # Process each part (each part is a separate DICOM instance)
-        instance_count = 0
-        success_count = 0
-        
-        for part in decoder.parts:
-            part_content_type = part.headers.get(b'Content-Type', b'').decode('utf-8')
+        # PARALLEL PROCESSING
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+            futures = []
             
-            if 'application/dicom' not in part_content_type:
-                logger.warning(f"Skipping non-DICOM part with content type: {part_content_type}")
-                continue
+            for part in decoder.parts:
+                part_content_type = part.headers.get(b'Content-Type', b'').decode('utf-8')
+                
+                if 'application/dicom' not in part_content_type:
+                    continue
+                
+                # Submit each DICOM part for parallel processing
+                future = executor.submit(
+                    process_single_dicom_part, 
+                    part, bucket, bucket_path, study_id_from_url
+                )
+                futures.append(future)
             
-            # Process this DICOM instance
-            try:
-                # Read the DICOM data
-                with io.BytesIO(part.content) as dicom_data:
-                    dcm = dicom.dcmread(dicom_data, force=True)
-                    
-                    # Extract metadata for logging (not using study_uid for path anymore)
-                    series_uid = str(dcm.get('SeriesInstanceUID', 'unknown_series'))
-                    
-                    # Get instance UID
-                    if 'SOPInstanceUID' in dcm:
-                        instance_uid = str(dcm['SOPInstanceUID'].value)
-                    else:
-                        # Generate a fallback UID
-                        import hashlib
-                        instance_hash = hashlib.md5(part.content[:4096]).hexdigest()
-                        instance_uid = f"unknown_uid_{instance_hash}"
-                        logger.warning(f"No SOPInstanceUID found in DICOM, using generated ID: {instance_uid}")
-                    
-                    # Use study ID from URL instead of study_uid from DICOM
-                    file_path = f"{bucket_path}/{study_id_from_url}/{series_uid}/{instance_uid}.dcm"
-                    
-                    # Upload to GCS
-                    blob = bucket.blob(file_path)
-                    blob.upload_from_string(part.content, content_type='application/dicom')
-                    
-                    success_count += 1
-            
-            except Exception as e:
-                logger.exception(f"Error processing DICOM instance: {e}")
-            
-            instance_count += 1
+            # Wait for all parts to complete
+            success_count = 0
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    if future.result():
+                        success_count += 1
+                except Exception as e:
+                    logger.exception(f"Error in parallel DICOM processing: {e}")
         
         return success_count > 0
         
     except Exception as e:
         logger.exception(f"Error retrieving or processing DICOM study: {e}")
+        return False
+
+def process_single_dicom_part(part, bucket, bucket_path, study_id_from_url):
+    """Process a single DICOM part - runs in parallel"""
+    try:
+        with io.BytesIO(part.content) as dicom_data:
+            dcm = dicom.dcmread(dicom_data, force=True)
+            
+            series_uid = str(dcm.get('SeriesInstanceUID', 'unknown_series'))
+            
+            if 'SOPInstanceUID' in dcm:
+                instance_uid = str(dcm['SOPInstanceUID'].value)
+            else:
+                import hashlib
+                instance_hash = hashlib.md5(part.content[:4096]).hexdigest()
+                instance_uid = f"unknown_uid_{instance_hash}"
+                logger.warning(f"No SOPInstanceUID found, using generated ID: {instance_uid}")
+            
+            file_path = f"{bucket_path}/{study_id_from_url}/{series_uid}/{instance_uid}.dcm"
+            
+            blob = bucket.blob(file_path)
+            blob.upload_from_string(part.content, content_type='application/dicom')
+            
+            return True
+            
+    except Exception as e:
+        logger.exception(f"Error processing DICOM part: {e}")
         return False
     
     
