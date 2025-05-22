@@ -442,6 +442,8 @@ def audit_pathology_dates(df):
     Calculate days from biopsy to pathology SPECIMEN_RESULT_DTM for each patient and record in the audit.
     Only considers cases where the DATE vs DATE difference is within 2 weeks.
     
+    Also audits day distance from biopsy to the most recent row before that biopsy.
+    
     Args:
         df: The combined dataframe with biopsy and pathology records
     """
@@ -453,15 +455,17 @@ def audit_pathology_dates(df):
     # Ensure SPECIMEN_RESULT_DTM is in datetime format
     df['SPECIMEN_RESULT_DTM'] = pd.to_datetime(df['SPECIMEN_RESULT_DTM'], errors='coerce')
     
-    # Create empty list to store days difference data
+    # Create empty lists to store days difference data
     days_differences = []
+    exam_to_biopsy_differences = []
     
     # Get unique patients
     unique_patients = df['PATIENT_ID'].unique()
     
     for patient_id in unique_patients:
-        # Get all records for this patient
+        # Get all records for this patient, sorted by DATE
         patient_records = df[df['PATIENT_ID'] == patient_id].copy()
+        patient_records = patient_records.sort_values('DATE')
         
         # Find biopsy records
         biopsy_records = patient_records[patient_records['is_biopsy'] == 'T']
@@ -469,36 +473,59 @@ def audit_pathology_dates(df):
         # Find pathology records (where path_interpretation is not null)
         pathology_records = patient_records[pd.notna(patient_records['path_interpretation'])]
         
-        # Skip if patient doesn't have both biopsy and pathology
-        if biopsy_records.empty or pathology_records.empty:
-            continue
+        # Audit 1: Biopsy to pathology differences (existing logic)
+        if not biopsy_records.empty and not pathology_records.empty:
+            # For each biopsy, find pathology records within 2 weeks
+            for _, biopsy in biopsy_records.iterrows():
+                biopsy_date = biopsy['DATE']
+                
+                if pd.isna(biopsy_date):
+                    continue
+                    
+                # Look for pathology records with dates within 2 weeks of biopsy
+                for _, pathology in pathology_records.iterrows():
+                    pathology_date = pathology['DATE']
+                    result_date = pathology['SPECIMEN_RESULT_DTM']
+                    
+                    if pd.isna(pathology_date) or pd.isna(result_date):
+                        continue
+                    
+                    # Only process if DATE difference is within 2 weeks (14 days)
+                    date_diff = (pathology_date - biopsy_date).days
+                    if 0 <= date_diff <= 14:
+                        continue
+                    
+                    # Calculate the difference between biopsy DATE and pathology SPECIMEN_RESULT_DTM
+                    result_diff = (result_date - biopsy_date).days
+                    days_differences.append(result_diff)
         
-        # For each biopsy, find pathology records within 2 weeks
-        for _, biopsy in biopsy_records.iterrows():
-            biopsy_date = biopsy['DATE']
-            
-            if pd.isna(biopsy_date):
-                continue
+        # Audit 2: Most recent exam to biopsy differences (new logic)
+        if not biopsy_records.empty:
+            # For each biopsy, find the most recent row before it
+            for _, biopsy in biopsy_records.iterrows():
+                biopsy_date = biopsy['DATE']
                 
-            # Look for pathology records with dates within 2 weeks of biopsy
-            for _, pathology in pathology_records.iterrows():
-                pathology_date = pathology['DATE']
-                result_date = pathology['SPECIMEN_RESULT_DTM']
-                
-                if pd.isna(pathology_date) or pd.isna(result_date):
+                if pd.isna(biopsy_date):
                     continue
                 
-                # Only process if DATE difference is within 2 weeks (14 days)
-                date_diff = (pathology_date - biopsy_date).days
-                if 0 <= date_diff <= 14:
-                    continue
+                # Find all records before this biopsy date
+                previous_records = patient_records[
+                    (patient_records['DATE'] < biopsy_date) & 
+                    (pd.notna(patient_records['DATE']))
+                ]
                 
-                # Calculate the difference between biopsy DATE and pathology SPECIMEN_RESULT_DTM
-                result_diff = (result_date - biopsy_date).days
-                days_differences.append(result_diff)
+                if not previous_records.empty:
+                    # Get the most recent record before the biopsy
+                    most_recent_exam = previous_records.iloc[-1]  # Last one since sorted by DATE
+                    most_recent_date = most_recent_exam['DATE']
+                    
+                    # Calculate days difference
+                    exam_diff = (biopsy_date - most_recent_date).days
+                    exam_to_biopsy_differences.append(exam_diff)
     
-    # Record the array of days differences in the audit
+    # Record both audits
     append_audit("query_clean.pathology_date_from_biopsy", days_differences)
+    append_audit("query_clean.exam_date_from_biospy", exam_to_biopsy_differences)
                 
 def create_final_dataset(rad_df, path_df, output_path):
     """Main function to create the final dataset with pathology records on separate rows."""
