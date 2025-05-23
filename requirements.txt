@@ -15,6 +15,7 @@ google-cloud-storage
 google-cloud-pubsub
 google-cloud-bigquery
 pydicom
+xxhash
 highdicom
 python-bidi
 pylibjpeg>=2.0
