@@ -1,5 +1,7 @@
 from src.DB_processing.image_processing import *
 from src.DB_processing.tools import append_audit
+import concurrent.futures
+from functools import partial
 tqdm.pandas()
 
 def fetch_index_for_patient_id( id, db):
@@ -214,7 +216,111 @@ def Remove_Green_Images(database_dir):
     df = df.drop(drop_indices)
     append_audit("image_processing.corrupted_removed", len(drop_indices))
     save_data(df, input_file)  # Save the updated DataFrame back to the CSV
+
+
+
+
+def create_caliper_file(database_path, image_df, breast_df, max_workers=None):
+    """
+    Creates a separate caliper file with specific columns for images that have calipers
+    and copies both the caliper images and raw images to a new directory using read_image and save_data.
     
+    Args:
+        database_path (str): Path to the database directory
+        max_workers (int): Maximum number of threads (defaults to CPU count)
+    """
+    caliper_output_file = f'{database_path}/CaliperData.csv'
+    images_dir = f'{database_path}/images'
+    caliper_images_dir = f'{database_path}/caliper_pairs'
+    
+    # Filter for images that have calipers
+    caliper_images = image_df[
+        (image_df['has_calipers'] == True) & 
+        (image_df['distance'] < 5) &
+        (image_df['distance'] >= 0)
+    ].copy()
+    
+    if caliper_images.empty:
+        print("No images with calipers found.")
+        return
+    
+    # Create the caliper dataframe with required columns
+    caliper_df = pd.DataFrame()
+    caliper_df['Patient_ID'] = caliper_images['Patient_ID']
+    caliper_df['Accession_Number'] = caliper_images.get('Accession_Number', '')
+    caliper_df['Distance'] = caliper_images['distance']
+    caliper_df['Caliper_Image'] = caliper_images['ImageName']
+    caliper_df['Raw_Image'] = caliper_images['closest_fn']
+    
+    # Merge with breast data to get Has_Malignant information
+    caliper_df = caliper_df.merge(
+        breast_df[['Accession_Number', 'Has_Malignant']], 
+        on='Accession_Number', 
+        how='left'
+    )
+    
+    # Reorder columns to match your specification
+    column_order = ['Patient_ID', 'Accession_Number', 'Has_Malignant', 'Distance', 'Raw_Image', 'Caliper_Image']
+    caliper_df = caliper_df[column_order]
+    
+    # Function to copy both caliper and raw images for a single row
+    def copy_images_for_row(row, images_dir, caliper_images_dir):
+        success_count = 0
+        
+        # Copy caliper image
+        try:
+            caliper_image_path = f"{images_dir}/{row['Caliper_Image']}"
+            image = read_image(caliper_image_path)
+            if image is not None:
+                caliper_filename = os.path.basename(caliper_image_path)
+                caliper_dest_path = f"{caliper_images_dir}/{caliper_filename}"
+                save_data(image, caliper_dest_path)
+                success_count += 1
+            else:
+                print(f"Failed to read caliper image: {caliper_image_path}")
+        except Exception as e:
+            print(f"Error copying caliper image {caliper_image_path}: {e}")
+        
+        # Copy raw image
+        try:
+            raw_image_path = f"{images_dir}/{row['Raw_Image']}"
+            image = read_image(raw_image_path)
+            if image is not None:
+                raw_filename = os.path.basename(raw_image_path)
+                raw_dest_path = f"{caliper_images_dir}/{raw_filename}"
+                save_data(image, raw_dest_path)
+                success_count += 1
+            else:
+                print(f"Failed to read raw image: {raw_image_path}")
+        except Exception as e:
+            print(f"Error copying raw image {raw_image_path}: {e}")
+        
+        return success_count
+    
+    # Copy both caliper and raw images using ThreadPoolExecutor
+    total_copied = 0
+    copy_func = partial(copy_images_for_row, images_dir=images_dir, caliper_images_dir=caliper_images_dir)
+    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Convert DataFrame rows to list for ThreadPoolExecutor
+        rows = [row for _, row in caliper_df.iterrows()]
+        
+        # Submit all tasks and track progress
+        future_to_row = {executor.submit(copy_func, row): row for row in rows}
+        
+        # Use tqdm to show progress
+        for future in tqdm(concurrent.futures.as_completed(future_to_row), 
+                          desc="Copying Caliper and Raw Images", 
+                          total=len(caliper_df)):
+            total_copied += future.result()
+    
+    # Save the caliper file
+    save_data(caliper_df, caliper_output_file)
+    
+    print(f"Successfully copied {total_copied} images total ({len(caliper_df)} caliper + {len(caliper_df)} raw images expected)")
+    
+    return caliper_df
+
 
 def Select_Data(database_path, only_labels):
     input_file = f'{database_path}/ImageData.csv'
@@ -272,6 +378,8 @@ def Select_Data(database_path, only_labels):
         db_out = db_out.drop(columns=['latIsLeft'])
 
     save_data(db_out, input_file)
+    
+    create_caliper_file(database_path, db_out, breast_df)
 
 
 def Remove_Duplicate_Data(database_path):

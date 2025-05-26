@@ -566,11 +566,6 @@ def create_final_dataset(rad_df, path_df, output_path):
     append_audit("query_clean.rad_missing_address_removed", empty_endpoint_count)
     append_audit("query_clean.rad_missing_final_interp", empty_interpretation_count)
     
-    # Remove rows with 'incomplete' in the Biopsy column
-    incomplete_count = sum(final_df_us['Biopsy'].str.contains('incomplete', case=False, na=False))
-    final_df_us = final_df_us[~(final_df_us['Biopsy'].str.contains('incomplete', case=False, na=False))]
-    append_audit("query_clean.rad_incomplete_biospy_removed", incomplete_count)
-    
     # Remove duplicate rows based on Accession_Number
     duplicate_accessions = final_df_us[final_df_us.duplicated(subset=['ACCESSION_NUMBER'], keep=False)]['ACCESSION_NUMBER']
     duplicate_count = len(final_df_us[final_df_us['ACCESSION_NUMBER'].isin(duplicate_accessions)])
