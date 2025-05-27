@@ -357,6 +357,11 @@ def determine_final_interpretation(final_df, output_path, rad_df_length):
     # Identify BENIGN2 cases and MALIGNANT2 based on next chronological path_interpretation
     final_df = check_from_next_diagnosis(final_df)
     
+    return final_df
+
+
+def audit_interpretations(final_df):
+    
     # After all processing, search for specific categories in the final_interpretation column
     benign1_count = sum(final_df['final_interpretation'] == 'BENIGN1')
     benign2_count = sum(final_df['final_interpretation'] == 'BENIGN2')
@@ -384,11 +389,6 @@ def determine_final_interpretation(final_df, output_path, rad_df_length):
     total_known = total_benign + total_malignant
     unknown_count = total_rows - total_known
     append_audit("query_clean.final_unknown_count", unknown_count)
-    
-    return final_df
-
-
-
 
 
 
@@ -553,24 +553,27 @@ def create_final_dataset(rad_df, path_df, output_path):
     filtered_count = initial_count - len(final_df_us)
 
     append_audit("query_clean.rad_non_US_removed", filtered_count - path_df_length) # path_df_length were removed here but lets keep radiology context
-
-    # Remove rows with empty ENDPOINT_ADDRESS or empty final_interpretation
-    empty_endpoint_count = sum(final_df_us['ENDPOINT_ADDRESS'].isna())
-    empty_interpretation_count = sum(final_df_us['final_interpretation'].isna())
-
-    final_df_us = final_df_us[
-        final_df_us['ENDPOINT_ADDRESS'].notna() & 
-        final_df_us['final_interpretation'].notna()
-    ]
-
-    append_audit("query_clean.rad_missing_address_removed", empty_endpoint_count)
-    append_audit("query_clean.rad_missing_final_interp", empty_interpretation_count)
     
     # Remove duplicate rows based on Accession_Number
     duplicate_accessions = final_df_us[final_df_us.duplicated(subset=['ACCESSION_NUMBER'], keep=False)]['ACCESSION_NUMBER']
     duplicate_count = len(final_df_us[final_df_us['ACCESSION_NUMBER'].isin(duplicate_accessions)])
     final_df_us = final_df_us[~final_df_us['ACCESSION_NUMBER'].isin(duplicate_accessions)]
     
+    # Remove rows with empty ENDPOINT_ADDRESS
+    empty_endpoint_count = sum(final_df_us['ENDPOINT_ADDRESS'].isna())
+    final_df_us = final_df_us[final_df_us['ENDPOINT_ADDRESS'].notna()]
+    append_audit("query_clean.rad_missing_address_removed", empty_endpoint_count)
+    
+    
+    # Count total interpretations
+    audit_interpretations(final_df_us)
+    
+    # Remove rows with empty final_interpretation
+    empty_interpretation_count = sum(final_df_us['final_interpretation'].isna())
+    final_df_us = final_df_us[final_df_us['final_interpretation'].notna()]
+    append_audit("query_clean.rad_missing_final_interp", empty_interpretation_count)
+    
+
     # Extract STUDY_ID from ENDPOINT_ADDRESS
     final_df_us['STUDY_ID'] = final_df_us['ENDPOINT_ADDRESS'].apply(
         lambda url: url.split('/')[-1] if pd.notna(url) else None
