@@ -73,10 +73,10 @@ def has_red_pixels(image, n=100, min_r=200):
     return False
 
     
-@lru_cache(maxsize=2048)
 def generate_hash(data):
-    # 10-20x faster than SHA256 for deduplication
-    return xxhash.xxh64_hexdigest(data)
+    sha256_hash = hashlib.sha256()
+    sha256_hash.update(data)
+    return sha256_hash.hexdigest()
 
 def manual_decompress(ds):
     """

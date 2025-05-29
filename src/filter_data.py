@@ -35,9 +35,10 @@ def check_assumed_benign(final_df):
         patient_us_records = us_records[us_records['PATIENT_ID'] == patient_id]
         
         for idx, row in patient_us_records.iterrows():
-            # Skip records that are less than 24 months old
+            """# Skip records that are less than 24 months old
             if (today - row['DATE']).days < 730:
-                continue
+                failure_reasons['insufficient_time_24months'] += 1
+                continue"""
             
             # Define time windows
             biopsy_window_start = row['DATE'] - pd.Timedelta(days=30)
@@ -130,20 +131,21 @@ def check_assumed_benign_birads3(final_df):
         patient_us_records = us_records[us_records['PATIENT_ID'] == patient_id]
         
         for idx, row in patient_us_records.iterrows():
-            # Skip records that are less than 36 months old
+            """# Skip records that are less than 36 months old
             if (today - row['DATE']).days < 1095:  # 36 months = 1095 days
+                failure_reasons['insufficient_time_36months'] += 1
                 continue
+            """
             
             # Define time windows
             biopsy_window_start = row['DATE'] - pd.Timedelta(days=30)
             biopsy_window_end = row['DATE'] + pd.Timedelta(days=120)
             followup_end = row['DATE'] + pd.Timedelta(days=1095)  # 36 months max
             malignancy_window_end = row['DATE'] + pd.Timedelta(days=450)  # 15 months
-            
 
-            # Check if there's at least 4 months of follow-up data available
+            # Check if there's at least 6 months of follow-up data available
             last_visit_date = patient_records[patient_records['DATE'] > row['DATE']]['DATE'].max()
-            if pd.isna(last_visit_date) or (last_visit_date - row['DATE']).days < 120:  # 4 months = 120 days
+            if pd.isna(last_visit_date) or (last_visit_date - row['DATE']).days < 180:  # 6 months
                 continue
             
             # Filter for records in the biopsy window efficiently
@@ -558,12 +560,17 @@ def create_final_dataset(rad_df, path_df, output_path):
     duplicate_accessions = final_df_us[final_df_us.duplicated(subset=['ACCESSION_NUMBER'], keep=False)]['ACCESSION_NUMBER']
     duplicate_count = len(final_df_us[final_df_us['ACCESSION_NUMBER'].isin(duplicate_accessions)])
     final_df_us = final_df_us[~final_df_us['ACCESSION_NUMBER'].isin(duplicate_accessions)]
+    append_audit("query_clean.rad_duplicates_removed", duplicate_count)
     
     # Remove rows with empty ENDPOINT_ADDRESS
     empty_endpoint_count = sum(final_df_us['ENDPOINT_ADDRESS'].isna())
     final_df_us = final_df_us[final_df_us['ENDPOINT_ADDRESS'].notna()]
     append_audit("query_clean.rad_missing_address_removed", empty_endpoint_count)
     
+    # Remove rows with empty BI-RADS
+    empty_birads_count = sum(final_df_us['BI-RADS'].isna())
+    final_df_us = final_df_us[final_df_us['BI-RADS'].notna()]
+    append_audit("query_clean.rad_missing_birads_removed", empty_birads_count)
     
     # Count total interpretations
     audit_interpretations(final_df_us)
@@ -585,7 +592,7 @@ def create_final_dataset(rad_df, path_df, output_path):
     # Print statistics
     print(f"Removed {duplicate_count} rows with duplicate ACCESSION_NUMBER")
     print(f"Dataset passed with {len(final_df_us)} results")
-    append_audit("query_clean.rad_duplicates_removed", duplicate_count)
+    
     append_audit("query_clean.final_case_count", len(final_df_us))
     
     return final_df
