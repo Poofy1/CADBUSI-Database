@@ -37,29 +37,24 @@ app = FastAPI()
 def create_robust_session():
     session = requests.Session()
     
-    # More aggressive retry strategy
+    # Configure retry strategy
     retry_strategy = Retry(
         total=5,
-        backoff_factor=2,  # Increased from 1
-        status_forcelist=[429, 500, 502, 503, 504, 520, 521, 522, 523, 524],
-        allowed_methods=["GET", "POST"],
-        raise_on_status=False  # Don't raise on HTTP errors
+        backoff_factor=1,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["GET", "POST"]
     )
     
-    # Optimized connection pooling
+    # Configure adapter with connection pooling
     adapter = HTTPAdapter(
         max_retries=retry_strategy,
-        pool_connections=50,   # Reduced from 100
+        pool_connections=100,  # Increase connection pool size
         pool_maxsize=100,
-        pool_block=True,      # Changed to True to prevent connection overflow
-        socket_options=[(socket.TCP_NODELAY, 1)]  # Reduce latency
+        pool_block=False
     )
     
     session.mount("http://", adapter)
     session.mount("https://", adapter)
-    
-    # Set session-level timeouts
-    session.timeout = (30, 600)  # (connect, read) timeout
     
     return session
 
