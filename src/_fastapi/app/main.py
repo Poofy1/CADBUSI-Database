@@ -1,10 +1,7 @@
 import logging
 import io
-import tempfile
 import os
-import sys
 import base64
-import json
 from typing import Union
 from typing import Dict
 from fastapi import FastAPI
@@ -14,6 +11,8 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.base import RequestResponseEndpoint
+import concurrent.futures
+import hashlib
 
 # Dicom imports
 import requests
@@ -22,7 +21,6 @@ from requests.structures import CaseInsensitiveDict
 from requests_toolbelt import MultipartDecoder
 from google.cloud import storage
 import google.auth.transport.requests
-import google.oauth2.id_token
 
 # Configure standard Python logging (Cloud Run captures stdout/stderr automatically)
 logging.basicConfig(
@@ -61,14 +59,6 @@ async def read_root():
 async def read_item(item_id: int, q: Union[str, None] = None):
     return {"item_id": item_id, "q": q}
 
-
-# Helper function to verify JWT
-def verify_jwt(token: str) -> Dict:
-    """Verifies a JWT token and returns the claims."""
-    auth_req = google.auth.transport.requests.Request()
-    return google.oauth2.id_token.verify_oauth2_token(token, auth_req)
-
-
 def get_oauth2_token():
     """Retrieves an OAuth2 token for accessing the Google Cloud Healthcare API."""
     creds, project = google.auth.default()
@@ -76,8 +66,6 @@ def get_oauth2_token():
     creds.refresh(auth_req)
     return creds.token
 
-import concurrent.futures
-import asyncio
 
 async def retrieve_and_store_dicom(url, bucket_name, bucket_path):
     """Enhanced version with parallel DICOM processing"""
@@ -147,7 +135,7 @@ def process_single_dicom_part(part, bucket, bucket_path, study_id_from_url):
             if 'SOPInstanceUID' in dcm:
                 instance_uid = str(dcm['SOPInstanceUID'].value)
             else:
-                import hashlib
+                
                 instance_hash = hashlib.md5(part.content[:4096]).hexdigest()
                 instance_uid = f"unknown_uid_{instance_hash}"
                 logger.warning(f"No SOPInstanceUID found, using generated ID: {instance_uid}")
@@ -174,9 +162,6 @@ async def pubsub_push_handlers_receive(request: Request):
         )
 
     try:
-        token = bearer_token.split(" ")[1]
-        claim = verify_jwt(token)
-
         envelope = await request.json()
         if (
             isinstance(envelope, dict)
