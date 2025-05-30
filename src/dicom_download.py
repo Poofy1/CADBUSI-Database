@@ -141,8 +141,8 @@ def deploy_cloud_run(bucket_name=None, bucket_path=None):
         "--cpu=2",
         "--memory=8192Mi",
         "--concurrency=10",
-        "--max-instances=100",
-        "--min-instances=5", 
+        "--max-instances=1000",
+        "--min-instances=2", 
         f"--set-env-vars={env_vars}"
     ]
     
