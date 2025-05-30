@@ -85,7 +85,8 @@ def main():
         create_final_dataset(rad_df, path_df, output_path)
     
     elif args.deploy or args.cleanup or args.rerun:
-        dicom_download_remote_start(dicom_query_file, args.deploy, args.cleanup)
+        manual_target = None
+        dicom_download_remote_start(dicom_query_file, args.deploy, args.cleanup, manual_target=manual_target)
         
     elif args.database:
         anon_file = f'{env}/raw_data/anon_data.csv'

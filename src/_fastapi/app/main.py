@@ -2,6 +2,7 @@ import logging
 import io
 import os
 import base64
+import random
 import asyncio
 from fastapi import FastAPI
 from starlette.status import HTTP_204_NO_CONTENT
@@ -39,9 +40,9 @@ def create_robust_session():
     
     # Configure retry strategy
     retry_strategy = Retry(
-        total=5,
-        backoff_factor=1,
-        status_forcelist=[429, 500, 502, 503, 504],
+        total=3,
+        backoff_factor=2,
+        status_forcelist=[429, 500, 502, 503, 504, 520, 521, 522, 523, 524],
         allowed_methods=["GET", "POST"]
     )
     
@@ -160,15 +161,21 @@ async def retrieve_and_store_dicom_improved(url, bucket_name, bucket_path):
                 logger.info(f"Processed {success_count} parts successfully, {failed_count} failed")
                 return success_count > 0
                 
-        except requests.exceptions.Timeout:
-            logger.error(f"Timeout on attempt {attempt + 1} for {url}")
+        except (
+            requests.exceptions.ConnectionError,
+            requests.exceptions.Timeout,
+            requests.exceptions.HTTPError,
+            requests.exceptions.RequestException
+        ) as network_error:
+            logger.error(f"Network error on attempt {attempt + 1} for {url}: {type(network_error).__name__}: {network_error}")
             if attempt < max_retries - 1:
-                await asyncio.sleep(2 ** attempt)
+                sleep_time = (2 ** attempt) + random.uniform(0, 1)
+                await asyncio.sleep(sleep_time)
                 continue
             return False
             
         except Exception as e:
-            logger.exception(f"Error retrieving DICOM study on attempt {attempt + 1}: {e}")
+            logger.exception(f"Unexpected error on attempt {attempt + 1}: {e}")
             if attempt < max_retries - 1:
                 await asyncio.sleep(2 ** attempt)
                 continue

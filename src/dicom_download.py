@@ -259,17 +259,54 @@ def publish_message(url):
     future = PUBLISHER.publish(TOPIC_PATH, data=url.encode("utf-8"))
     return future
 
+from google.cloud import storage
 
-def process_csv_file(csv_file):
+def get_immediate_folders(bucket_name, folder_prefix):
+    """
+    Get the names of immediate subdirectories in a GCP bucket folder.
+    """
+    # Initialize the storage client
+    client = storage.Client()
+    bucket = client.bucket(bucket_name)
+    
+    # Normalize the folder_prefix to prevent double slashes
+    folder_prefix = folder_prefix.strip('/')
+    if folder_prefix:
+        folder_prefix += '/'
+    
+    # Get all objects with the prefix
+    blobs = bucket.list_blobs(prefix=folder_prefix, delimiter='/')
+    
+    # Get immediate folder names
+    immediate_folders = set()
+    
+    # Consume the iterator to get prefixes
+    list(blobs)  # This processes the blobs and populates prefixes
+    
+    # Extract folder names from prefixes
+    if hasattr(blobs, 'prefixes'):
+        for prefix in blobs.prefixes:
+            # Extract folder name from path like "folder_prefix/FOLDER_NAME/"
+            folder_name = prefix.rstrip('/').split('/')[-1]
+            if folder_name:  # Make sure it's not empty
+                immediate_folders.add(folder_name)
+    
+    return immediate_folders
+
+def process_csv_file(csv_file, bucket_name=None, bucket_path=None):
     """
     Read the CSV file containing DICOM URLs and publish each URL to Pub/Sub.
-    
-    Args:
-        csv_file (str): Path to the CSV file
     """
     global DEBUG_MESSAGE_LIMIT
     
     print(f"Processing CSV file: {csv_file}")
+    
+    # Get existing studies in one batch operation if bucket_path is provided
+    existing_studies = set()
+    if bucket_path and bucket_name:
+        print("Checking for existing studies...")
+        existing_studies = get_immediate_folders(bucket_name, bucket_path)
+        print(f"Found {len(existing_studies)} existing studies to skip")
     
     # First count total rows for the progress bar
     with open(csv_file, 'r') as f:
@@ -278,20 +315,30 @@ def process_csv_file(csv_file):
     # Apply debug limit if set
     if DEBUG_MESSAGE_LIMIT and DEBUG_MESSAGE_LIMIT > 0:
         total_rows = min(total_rows, DEBUG_MESSAGE_LIMIT)
-        print(f"DEBUG: Limiting processing to {DEBUG_MESSAGE_LIMIT} messages (out of {total_rows} total)")
+        print(f"DEBUG: Limiting processing to {DEBUG_MESSAGE_LIMIT} messages")
     
+    num_skipped = 0
     num_processed = 0
+    
     with open(csv_file, 'r') as f:
         reader = csv.DictReader(f)
-        # Create progress bar
         pbar = tqdm.tqdm(total=total_rows, desc="Publishing messages")
+        
         for row in reader:
-            # Check if we've reached the debug limit
             if DEBUG_MESSAGE_LIMIT and DEBUG_MESSAGE_LIMIT > 0 and num_processed >= DEBUG_MESSAGE_LIMIT:
                 print(f"DEBUG: Reached message limit of {DEBUG_MESSAGE_LIMIT}, stopping processing")
                 break
                 
             url = row.get('ENDPOINT_ADDRESS')
+            study_id = row.get('STUDY_ID')
+            
+            # Fast lookup in the pre-loaded set
+            if study_id in existing_studies:
+                num_skipped += 1
+                num_processed += 1
+                pbar.update(1)
+                continue
+                
             if not url:
                 print(f"Warning: Missing URL in row: {row}")
                 pbar.update(1)
@@ -303,13 +350,11 @@ def process_csv_file(csv_file):
             
         pbar.close()
     
-    if DEBUG_MESSAGE_LIMIT and DEBUG_MESSAGE_LIMIT > 0:
-        print(f"DEBUG: Processed {num_processed} URLs (limited by DEBUG_MESSAGE_LIMIT={DEBUG_MESSAGE_LIMIT})")
-    else:
-        print(f"Processed {num_processed} URLs from {csv_file}")
+    if num_skipped > 0:
+        print(f"Skipped {num_skipped} existing studies")
     
+    print(f"Processed {num_processed} URLs from {csv_file}")
     print(f"Wait for bucket storage to fill up to {num_processed} folders, then cleanup with: python main.py --cleanup")
-
 
 
 def cleanup_resources(delete_cloud_run=False):
@@ -383,7 +428,7 @@ def get_existing_cloud_run_url():
         return None
 
 
-def dicom_download_remote_start(csv_file=None, deploy=False, cleanup=False, bucket_path=None):
+def dicom_download_remote_start(csv_file=None, deploy=False, cleanup=False, manual_target=None):
     global CLOUD_RUN_URL
     global PUBLISHER
     global TOPIC_PATH
@@ -399,11 +444,14 @@ def dicom_download_remote_start(csv_file=None, deploy=False, cleanup=False, buck
     TOPIC_PATH = PUBLISHER.topic_path(CONFIG['env']['project_id'], CONFIG['env']['topic_name'])
     
     # Generate a timestamp-based path if not provided
-    if bucket_path is None:
+    bucket_path = None
+    if manual_target is None:
         current_time = datetime.datetime.now()
         timestamp = current_time.strftime("%Y-%m-%d_%H%M%S")
         bucket_path = f"{CONFIG['storage']['download_path']}/{timestamp}"
         print(f"Using timestamped bucket path: {bucket_path}")
+    else:
+        bucket_path = f"{CONFIG['storage']['download_path']}/{manual_target}"
     
     # Handle cleanup first - this can be run without other flags
     if cleanup:
@@ -440,8 +488,13 @@ def dicom_download_remote_start(csv_file=None, deploy=False, cleanup=False, buck
         # Make sure service is warmed up before sending messages
         wake_up_service()
         
+        
+        
         # Now process the CSV file
-        process_csv_file(csv_file)
+        if manual_target:
+            process_csv_file(csv_file, bucket_name=CONFIG['storage']['bucket_name'], bucket_path=bucket_path)
+        else:
+            process_csv_file(csv_file)
         
         # Wait a bit to allow processing to complete
         print("Waiting 20 seconds for message processing to complete...")
