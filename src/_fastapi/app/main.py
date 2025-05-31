@@ -1,5 +1,6 @@
 import logging
 import io
+import uuid
 import os
 import base64
 import random
@@ -49,8 +50,8 @@ def create_robust_session():
     # Configure adapter with connection pooling
     adapter = HTTPAdapter(
         max_retries=retry_strategy,
-        pool_connections=100,  # Increase connection pool size
-        pool_maxsize=100,
+        pool_connections=20,
+        pool_maxsize=20,
         pool_block=False
     )
     
@@ -101,13 +102,13 @@ async def retrieve_and_store_dicom_improved(url, bucket_name, bucket_path):
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            # Use streaming to handle large responses
-            with http_session.get(url, headers=headers, timeout=600, stream=True) as response:
-                
+            # Get DICOM response
+            with http_session.get(url, headers=headers, timeout=600) as response:
+    
                 if response.status_code != 200:
                     logger.error(f"Failed to retrieve DICOM: Status {response.status_code}")
                     if attempt < max_retries - 1:
-                        await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                        await asyncio.sleep(2 ** attempt)
                         continue
                     return False
                 
@@ -116,50 +117,50 @@ async def retrieve_and_store_dicom_improved(url, bucket_name, bucket_path):
                     logger.error(f"Unsupported content type: {content_type}")
                     return False
                 
-                # Read response in chunks to avoid memory issues
-                chunks = []
-                chunk_size = 1024 * 1024  # 1MB chunks
-                for chunk in response.iter_content(chunk_size=chunk_size):
-                    if chunk:
-                        chunks.append(chunk)
+                # Read all content (you need it all for MultipartDecoder anyway)
+                content = response.content
                 
-                content = b''.join(chunks)
-                decoder = MultipartDecoder(content, content_type)
+            # Process multipart content 
+            decoder = MultipartDecoder(content, content_type)
+            
+            # Use asyncio for concurrent processing
+            tasks = []
+            for part in decoder.parts:
+                part_content_type = part.headers.get(b'Content-Type', b'').decode('utf-8')
                 
-                # Process parts with better error handling
-                success_count = 0
-                failed_count = 0
+                if 'application/dicom' not in part_content_type:
+                    continue
                 
-                # Use asyncio for concurrent processing instead of threads
-                tasks = []
-                for part in decoder.parts:
-                    part_content_type = part.headers.get(b'Content-Type', b'').decode('utf-8')
-                    
-                    if 'application/dicom' not in part_content_type:
-                        continue
-                    
-                    task = process_dicom_part_async(
-                        part, bucket, bucket_path, study_id_from_url
-                    )
-                    tasks.append(task)
+                task = process_dicom_part_async(
+                    part, bucket, bucket_path, study_id_from_url
+                )
+                tasks.append(task)
+            
+            if not tasks:
+                logger.warning("No DICOM parts found in response")
+                return False
+            
+            # Process in batches to avoid overwhelming the system
+            batch_size = 10
+            success_count = 0
+            failed_count = 0
+            
+            for i in range(0, len(tasks), batch_size):
+                batch = tasks[i:i + batch_size]
+                results = await asyncio.gather(*batch, return_exceptions=True)
                 
-                # Process in batches to avoid overwhelming the system
-                batch_size = 10
-                for i in range(0, len(tasks), batch_size):
-                    batch = tasks[i:i + batch_size]
-                    results = await asyncio.gather(*batch, return_exceptions=True)
-                    
-                    for result in results:
-                        if isinstance(result, Exception):
-                            logger.error(f"Failed to process DICOM part: {result}")
-                            failed_count += 1
-                        elif result:
-                            success_count += 1
-                        else:
-                            failed_count += 1
-                
-                logger.info(f"Processed {success_count} parts successfully, {failed_count} failed")
-                return success_count > 0
+                for result in results:
+                    if isinstance(result, Exception):
+                        logger.error(f"Failed to process DICOM part: {result}")
+                        failed_count += 1
+                    elif result:
+                        success_count += 1
+                    else:
+                        failed_count += 1
+            
+            if failed_count > 0:
+                logger.warning(f"Processed {success_count} parts successfully, {failed_count} failed")
+            return success_count > 0
                 
         except (
             requests.exceptions.ConnectionError,
@@ -184,40 +185,21 @@ async def retrieve_and_store_dicom_improved(url, bucket_name, bucket_path):
     return False
 
 async def process_dicom_part_async(part, bucket, bucket_path, study_id_from_url):
-    """Async version of DICOM part processing with retry logic"""
+    """Simplified with single retry layer"""
     max_retries = 3
     
     for attempt in range(max_retries):
         try:
-            with io.BytesIO(part.content) as dicom_data:
-                dcm = dicom.dcmread(dicom_data, force=True)
-                
-                series_uid = str(dcm.get('SeriesInstanceUID', 'unknown_series'))
-                
-                if 'SOPInstanceUID' in dcm:
-                    instance_uid = str(dcm['SOPInstanceUID'].value)
-                else:
-                    instance_hash = hashlib.md5(part.content[:4096]).hexdigest()
-                    instance_uid = f"unknown_uid_{instance_hash}"
-                    logger.warning(f"No SOPInstanceUID found, using generated ID: {instance_uid}")
-                
-                file_path = f"{bucket_path}/{study_id_from_url}/{series_uid}/{instance_uid}.dcm"
-                
-                blob = bucket.blob(file_path)
-                
-                # Upload with retry
-                for upload_attempt in range(3):
-                    try:
-                        blob.upload_from_string(part.content, content_type='application/dicom')
-                        return True
-                    except Exception as upload_error:
-                        if upload_attempt < 2:
-                            await asyncio.sleep(1)
-                            continue
-                        raise upload_error
+            unique_id = str(uuid.uuid4())
+            file_path = f"{bucket_path}/{study_id_from_url}/{unique_id}.dcm"
+            blob = bucket.blob(file_path)
+            
+            # Single upload attempt per retry
+            blob.upload_from_string(part.content, content_type='application/dicom')
+            return True
                 
         except Exception as e:
-            logger.error(f"Error processing DICOM part (attempt {attempt + 1}): {e}")
+            logger.error(f"Error uploading DICOM part (attempt {attempt + 1}): {e}")
             if attempt < max_retries - 1:
                 await asyncio.sleep(2 ** attempt)
                 continue
@@ -259,13 +241,11 @@ async def pubsub_push_handlers_receive(request: Request):
             success = await retrieve_and_store_dicom_improved(dicom_url, bucket_name, bucket_path)
             
             if success:
-                logger.info(f"Successfully processed DICOM from {dicom_url}")
                 return Response(status_code=HTTP_204_NO_CONTENT)
             else:
                 logger.error(f"Failed to process DICOM from {dicom_url}")
-                # Return 500 to trigger Pub/Sub retry
                 return JSONResponse(
-                    status_code=500, 
+                    status_code=200, 
                     content={"message": f"Failed to process DICOM from {dicom_url}"}
                 )
             
@@ -278,10 +258,20 @@ async def pubsub_push_handlers_receive(request: Request):
 
     except Exception as e:
         logger.exception(f"Error processing Pub/Sub message: {e}")
-        # Return 500 to trigger retry
-        return JSONResponse(
-            status_code=500, content={"message": "Error processing message"}
-        )
+        
+        # Check if it's a DNS/permanent error that escaped our handling
+        error_str = str(e).lower()
+        if any(phrase in error_str for phrase in [
+            'name or service not known',
+            'failed to resolve', 
+            'nameresolutionerror',
+            'nodename nor servname provided'
+        ]):
+            logger.error(f"DNS resolution error - permanent failure: {e}")
+            return JSONResponse(status_code=200, content={"message": "DNS resolution failed"})
+        
+        # For other unexpected errors, still retry
+        return JSONResponse(status_code=500, content={"message": "Error processing message"})
 
 # Add health check endpoint
 @app.get("/health")

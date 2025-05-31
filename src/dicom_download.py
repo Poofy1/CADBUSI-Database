@@ -141,11 +141,11 @@ def deploy_cloud_run(bucket_name=None, bucket_path=None):
         f"--vpc-connector={vpc_connector}",
         "--vpc-egress=all-traffic",
         "--timeout=3000",
-        "--cpu=2",
-        "--memory=8192Mi",
-        "--concurrency=10",
-        "--max-instances=1000",
-        "--min-instances=2", 
+        "--cpu=1",
+        "--memory=4096Mi",
+        "--concurrency=25",
+        "--max-instances=2000",
+        "--min-instances=1", 
         f"--set-env-vars={env_vars}"
     ]
     
@@ -318,7 +318,8 @@ def process_csv_file(csv_file, bucket_name=None, bucket_path=None):
         print(f"DEBUG: Limiting processing to {DEBUG_MESSAGE_LIMIT} messages")
     
     num_skipped = 0
-    num_processed = 0
+    num_published = 0 
+    num_processed = 0 
     
     with open(csv_file, 'r') as f:
         reader = csv.DictReader(f)
@@ -331,11 +332,11 @@ def process_csv_file(csv_file, bucket_name=None, bucket_path=None):
                 
             url = row.get('ENDPOINT_ADDRESS')
             study_id = row.get('STUDY_ID')
+            num_processed += 1 
             
             # Fast lookup in the pre-loaded set
             if study_id in existing_studies:
                 num_skipped += 1
-                num_processed += 1
                 pbar.update(1)
                 continue
                 
@@ -345,7 +346,7 @@ def process_csv_file(csv_file, bucket_name=None, bucket_path=None):
                 continue
                 
             publish_message(url)
-            num_processed += 1
+            num_published += 1 
             pbar.update(1)
             
         pbar.close()
@@ -353,8 +354,9 @@ def process_csv_file(csv_file, bucket_name=None, bucket_path=None):
     if num_skipped > 0:
         print(f"Skipped {num_skipped} existing studies")
     
-    print(f"Processed {num_processed} URLs from {csv_file}")
-    print(f"Wait for bucket storage to fill up to {num_processed} folders, then cleanup with: python main.py --cleanup")
+    print(f"Published {num_published} new messages from {csv_file}")
+    print(f"Total rows processed: {num_processed}")
+    print(f"Wait for bucket storage to fill up to {num_published} new folders, then cleanup with: python main.py --cleanup")
 
 
 def cleanup_resources(delete_cloud_run=False):
