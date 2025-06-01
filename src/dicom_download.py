@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import datetime
 import csv
+import random
 import os
 import subprocess
 import tqdm
@@ -293,6 +294,7 @@ def get_immediate_folders(bucket_name, folder_prefix):
     
     return immediate_folders
 
+
 def process_csv_file(csv_file, bucket_name=None, bucket_path=None):
     """
     Read the CSV file containing DICOM URLs and publish each URL to Pub/Sub.
@@ -308,54 +310,48 @@ def process_csv_file(csv_file, bucket_name=None, bucket_path=None):
         existing_studies = get_immediate_folders(bucket_name, bucket_path)
         print(f"Found {len(existing_studies)} existing studies to skip")
     
-    # First count total rows for the progress bar
-    with open(csv_file, 'r') as f:
-        total_rows = sum(1 for _ in csv.DictReader(f))
-    
-    # Apply debug limit if set
-    if DEBUG_MESSAGE_LIMIT and DEBUG_MESSAGE_LIMIT > 0:
-        total_rows = min(total_rows, DEBUG_MESSAGE_LIMIT)
-        print(f"DEBUG: Limiting processing to {DEBUG_MESSAGE_LIMIT} messages")
-    
-    num_skipped = 0
-    num_published = 0 
-    num_processed = 0 
-    
+    # Read all rows into memory first
+    all_rows = []
     with open(csv_file, 'r') as f:
         reader = csv.DictReader(f)
-        pbar = tqdm.tqdm(total=total_rows, desc="Publishing messages")
-        
         for row in reader:
-            if DEBUG_MESSAGE_LIMIT and DEBUG_MESSAGE_LIMIT > 0 and num_processed >= DEBUG_MESSAGE_LIMIT:
-                print(f"DEBUG: Reached message limit of {DEBUG_MESSAGE_LIMIT}, stopping processing")
-                break
-                
             url = row.get('ENDPOINT_ADDRESS')
             study_id = row.get('STUDY_ID')
-            num_processed += 1 
             
-            # Fast lookup in the pre-loaded set
-            if study_id in existing_studies:
-                num_skipped += 1
-                pbar.update(1)
+            # Skip rows we don't want to process
+            if study_id in existing_studies or not url:
                 continue
                 
-            if not url:
-                print(f"Warning: Missing URL in row: {row}")
-                pbar.update(1)
-                continue
-                
-            publish_message(url)
-            num_published += 1 
-            pbar.update(1)
-            
-        pbar.close()
+            all_rows.append((url, study_id, row))
+    
+    # Shuffle the rows to randomize processing order
+    random.shuffle(all_rows)
+    print(f"Shuffled {len(all_rows)} rows for processing")
+    
+    # Apply debug limit if set
+    total_rows = len(all_rows)
+    if DEBUG_MESSAGE_LIMIT and DEBUG_MESSAGE_LIMIT > 0:
+        total_rows = min(total_rows, DEBUG_MESSAGE_LIMIT)
+        all_rows = all_rows[:DEBUG_MESSAGE_LIMIT]
+        print(f"DEBUG: Limiting processing to {DEBUG_MESSAGE_LIMIT} messages")
+    
+    num_skipped = len(existing_studies) if bucket_path and bucket_name else 0
+    num_published = 0 
+    
+    # Process the shuffled rows
+    pbar = tqdm.tqdm(total=total_rows, desc="Publishing messages")
+    
+    for url, study_id, row in all_rows:
+        publish_message(url)
+        num_published += 1 
+        pbar.update(1)
+        
+    pbar.close()
     
     if num_skipped > 0:
         print(f"Skipped {num_skipped} existing studies")
     
     print(f"Published {num_published} new messages from {csv_file}")
-    print(f"Total rows processed: {num_processed}")
     print(f"Wait for bucket storage to fill up to {num_published} new folders, then cleanup with: python main.py --cleanup")
 
 
