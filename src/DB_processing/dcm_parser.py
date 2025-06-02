@@ -74,9 +74,7 @@ def has_red_pixels(image, n=100, min_r=200):
 
     
 def generate_hash(data):
-    sha256_hash = hashlib.sha256()
-    sha256_hash.update(data)
-    return sha256_hash.hexdigest()
+    return xxhash.xxh128(data).hexdigest()
 
 def manual_decompress(ds):
     """
@@ -506,7 +504,7 @@ def parse_files(dcm_files_list, database_path, batch_size=100):
     failure_counter = 0
     
     # Use more workers for CPU-bound tasks
-    num_workers = min(multiprocessing.cpu_count(), 16)
+    num_workers = min(32, multiprocessing.cpu_count())
     
     with ProcessPoolExecutor(max_workers=num_workers) as executor:
         futures = {executor.submit(process_batch, batch): batch for batch in batches}
@@ -575,9 +573,9 @@ def parse_anon_file(anon_location, database_path, image_df, ):
     breast_csv['Has_Malignant'] = breast_csv['final_interpretation'] == 'MALIGNANT'
     breast_csv['Has_Benign'] = breast_csv['final_interpretation'] == 'BENIGN'
     
-    image_csv_file = f'{database_path}ImageData.csv'
-    video_csv_file = f'{database_path}VideoData.csv'
-    breast_csv_file = f'{database_path}BreastData.csv'
+    image_csv_file = f'{database_path}/ImageData.csv'
+    video_csv_file = f'{database_path}/VideoData.csv'
+    breast_csv_file = f'{database_path}/BreastData.csv'
     
     image_combined_df = image_df
     if file_exists(image_csv_file):
