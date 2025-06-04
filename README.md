@@ -158,7 +158,5 @@ This will:
 
 
 ## Data Pipeline
-- [CADBUSI-Anonymize](https://github.com/Poofy1/CADBUSI-Anonymize)
 - [CADBUSI-Database](https://github.com/Poofy1/CADBUSI-Database)
 - [CADBUSI-Training](https://github.com/Poofy1/CADBUSI-Training)
-![CADBUSI Pipeline](/demo/CADBUSI-Pipeline.png)
