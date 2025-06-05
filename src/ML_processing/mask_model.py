@@ -7,8 +7,12 @@ from torchvision.models.detection import FasterRCNN
 from torchvision.models.detection.rpn import AnchorGenerator
 from torch.utils.data import Dataset, DataLoader
 from storage_adapter import *
+from torch.amp import autocast
 env = os.path.dirname(os.path.abspath(__file__))
 device = torch.device("cuda")
+torch.backends.cudnn.benchmark = True  # Optimize for consistent input sizes
+torch.backends.cuda.matmul.allow_tf32 = True  # Enable TF32 on A100/T4
+torch.backends.cudnn.allow_tf32 = True
 
 def get_first_image_in_each_folder(video_folder_path):
     first_images = []
@@ -61,6 +65,12 @@ class MyDataset(Dataset):
         
         self.max_width = max_width
         self.max_height = max_height
+        
+        self.preprocess = transforms.Compose([
+            transforms.Grayscale(num_output_channels=1),
+            transforms.ToTensor(),
+            transforms.Normalize([0.5], [0.5]),
+        ])
 
     def __len__(self):
         return len(self.images)
@@ -68,12 +78,8 @@ class MyDataset(Dataset):
     def __getitem__(self, idx):
         img_name = os.path.join(self.root_dir, self.images[idx])
         image = read_image(img_name, use_pil=True)
-        preprocess = transforms.Compose([
-            transforms.Grayscale(num_output_channels=1),
-            transforms.ToTensor(),
-            transforms.Normalize([0.5], [0.5]),
-        ])
-        img_before_pad = preprocess(image)
+        
+        img_before_pad = self.preprocess(image)
         padding = transforms.Pad((0, 0, self.max_width - img_before_pad.shape[-1], self.max_height - img_before_pad.shape[-2]))
         img_after_pad = padding(img_before_pad)
         return img_after_pad, self.images[idx] 
@@ -85,6 +91,11 @@ class MyDatasetVideo(Dataset):
         self.images = get_first_image_in_each_folder(root_dir) 
         self.max_width = max_width
         self.max_height = max_height
+        self.preprocess = transforms.Compose([
+            transforms.Grayscale(num_output_channels=1),
+            transforms.ToTensor(),
+            transforms.Normalize([0.5], [0.5]),
+        ])
 
     def __len__(self):
         return len(self.images)
@@ -92,19 +103,15 @@ class MyDatasetVideo(Dataset):
     def __getitem__(self, idx):
         img_name = os.path.join(self.root_dir, self.images[idx])
         image = read_image(img_name, use_pil=True)
-        preprocess = transforms.Compose([
-            transforms.Grayscale(num_output_channels=1),
-            transforms.ToTensor(),
-            transforms.Normalize([0.5], [0.5]),
-        ])
-        img_before_pad = preprocess(image)
+        
+        img_before_pad = self.preprocess(image)
         padding = transforms.Pad((0, 0, self.max_width - img_before_pad.shape[-1], self.max_height - img_before_pad.shape[-2]))
         img_after_pad = padding(img_before_pad)
         return img_after_pad, self.images[idx] 
     
     
     
-def find_masks(images_dir, model_name, db_to_process, max_width, max_height, batch_size=8, video_format=False, video_folders=None):
+def find_masks(images_dir, model_name, db_to_process, max_width, max_height, video_format=False, video_folders=None):
     # Load a pre-trained model for classification
     backbone = torchvision.models.squeezenet1_1(pretrained=True).features
     backbone.out_channels = 512
@@ -121,15 +128,22 @@ def find_masks(images_dir, model_name, db_to_process, max_width, max_height, bat
         dataset = MyDatasetVideo(images_dir, db_to_process, max_width, max_height)
     else:
         dataset = MyDataset(images_dir, db_to_process, max_width, max_height)
-    dataloader = DataLoader(dataset, batch_size=batch_size, num_workers=2)
+        
+    dataloader = DataLoader(
+        dataset, 
+        batch_size=64,
+        num_workers=8,
+        pin_memory=True,
+    )
 
     class1_results = []
     class2_results = []
 
     with torch.no_grad():
         for images, filenames in tqdm(dataloader, total=len(dataloader)):  # Unpack filenames here
-            images = images.to(device)
-            output = model(images)
+            images = images.to(device, non_blocking=True)
+            with autocast('cuda'):
+                output = model(images)
 
             for i in range(len(output)):
                 pred_boxes = output[i]['boxes']

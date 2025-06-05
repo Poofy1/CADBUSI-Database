@@ -7,9 +7,13 @@ import warnings
 from torch.utils.data import DataLoader
 from storage_adapter import *
 from torch.utils.data import Dataset
+from torch.amp import autocast
 warnings.filterwarnings('ignore')
 env = os.path.dirname(os.path.abspath(__file__))
 device = torch.device("cuda")
+torch.backends.cudnn.benchmark = True  # Optimize for consistent input sizes
+torch.backends.cuda.matmul.allow_tf32 = True  # Enable TF32 on A100/T4
+torch.backends.cudnn.allow_tf32 = True
 
 class MyDataset(Dataset):
     def __init__(self, root_dir, db_to_process, transform=None):
@@ -59,7 +63,7 @@ class Net(torch.nn.Module):
         return x
 
 
-def find_calipers(images_dir, model_name, db_to_process, image_size=256, batch_size=4):
+def find_calipers(images_dir, model_name, db_to_process, image_size=256):
     model = Net()
     model.load_state_dict(torch.load(f"{env}/models/{model_name}.pt"))
     model = model.to(device)
@@ -73,14 +77,15 @@ def find_calipers(images_dir, model_name, db_to_process, image_size=256, batch_s
         transforms.Normalize([0.5], [0.5]),
     ])
     dataset = MyDataset(images_dir, db_to_process, transform=preprocess)
-    dataloader = DataLoader(dataset, batch_size=batch_size, num_workers=4)
+    dataloader = DataLoader(dataset, batch_size=64, num_workers=8, pin_memory=True)
 
     results = []
     
     with torch.no_grad():
         for images, filenames in tqdm(dataloader, total=len(dataloader)):
             images = images.to(device)
-            has_calipers_pred = model(images)
+            with autocast('cuda'):
+                has_calipers_pred = model(images)
             raw_predictions = has_calipers_pred.cpu().view(-1).tolist()
             boolean_predictions = (has_calipers_pred > 0.5).cpu().view(-1).tolist()
             
