@@ -80,7 +80,7 @@ def ProcessVideoData(database_path):
     description_masks_coords = [dm[1] for dm in description_masks]
 
     with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-        futures = {executor.submit(ocr_image, image_file, description_mask, video_folder_path, reader, description_kw): image_file for image_file, description_mask in zip(first_images, description_masks_coords)}
+        futures = {executor.submit(ocr_image, image_file, description_mask, video_folder_path): image_file for image_file, description_mask in zip(first_images, description_masks_coords)}
         progress = tqdm(total=len(futures), desc='')
 
         # Initialize dictionary to store descriptions

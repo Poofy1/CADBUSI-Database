@@ -1,4 +1,4 @@
-import os, pydicom, hashlib
+import os, pydicom
 import numpy as np
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import multiprocessing
@@ -6,7 +6,6 @@ import pandas as pd
 import io
 from tqdm import tqdm
 import warnings, logging, cv2
-import xxhash 
 from functools import lru_cache
 from PIL import Image
 import time
@@ -71,10 +70,6 @@ def has_red_pixels(image, n=100, min_r=200):
             if r >= min_r and r - b >= n and r - g >= n:
                 return True
     return False
-
-    
-def generate_hash(data):
-    return xxhash.xxh128(data).hexdigest()
 
 def manual_decompress(ds):
     """
@@ -358,7 +353,7 @@ def parse_video_data(dcm, dcm_data, dataset, current_index, parsed_database):
     data_dict['FileName'] = os.path.basename(dcm)
     data_dict['ImagesPath'] = video_path
     data_dict['SavedFrames'] = image_count
-    data_dict['DicomHash'] = generate_hash(dcm_data)
+    data_dict['DicomHash'] = os.path.splitext(os.path.basename(dcm))[0]
     data_dict['SoftwareVersions'] = str(software_version)
     data_dict['ManufacturerModelName'] = str(manufacturer_model)
     
@@ -457,7 +452,7 @@ def parse_single_dcm(dcm, current_index, parsed_database, max_retries=3):
     data_dict['DataType'] = 'image'
     data_dict['FileName'] = os.path.basename(dcm)
     data_dict['ImageName'] = image_name
-    data_dict['DicomHash'] = generate_hash(dcm_data)
+    data_dict['DicomHash'] = os.path.splitext(os.path.basename(dcm))[0]
     data_dict['RegionCount'] = region_count
     data_dict['SoftwareVersions'] = str(software_version)
     data_dict['ManufacturerModelName'] = str(manufacturer_model)

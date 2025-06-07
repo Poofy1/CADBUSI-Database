@@ -261,7 +261,7 @@ def process_images_combined(image_folder_path, db_to_process):
 ######################################################
 
 
-def ocr_image(image_file, description_mask, image_folder_path, reader, kw_list):
+def ocr_image(image_file, description_mask, image_folder_path):
     reader_thread = get_reader()
 
     try:
@@ -314,7 +314,7 @@ def get_OCR(image_folder_path, description_masks):
     
     with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
         # Pass basename to the future, but also provide a way to access the full path inside ocr_image
-        futures = {executor.submit(ocr_image, basename, description_mask, image_folder_path, reader, description_kw): 
+        futures = {executor.submit(ocr_image, basename, description_mask, image_folder_path): 
                   basename for basename, description_mask in basename_description_masks}
         progress = tqdm(total=len(futures), desc='')
 

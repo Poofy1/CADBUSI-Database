@@ -142,10 +142,10 @@ def deploy_cloud_run(bucket_name=None, bucket_path=None):
         f"--vpc-connector={vpc_connector}",
         "--vpc-egress=all-traffic",
         "--timeout=3000",
-        "--cpu=1",
-        "--memory=4096Mi",
-        "--concurrency=25",
-        "--max-instances=2000",
+        "--cpu=2",
+        "--memory=8192Mi",
+        "--concurrency=35",
+        "--max-instances=500",
         "--min-instances=1", 
         f"--set-env-vars={env_vars}"
     ]
@@ -210,17 +210,14 @@ def setup_pubsub():
         print("ERROR: Cloud Run URL is not available. Deploy Cloud Run first.")
         return False
     
-    # The endpoint where Pub/Sub will push messages
     push_endpoint = f"{CLOUD_RUN_URL}/push_handlers/receive_messages"
     print(f"Push endpoint: {push_endpoint}")
     
-    # Check if resources already exist
     topic_exists, subscription_exists = check_pubsub_exists()
     
     if not topic_exists:
         print(f"Setting up Pub/Sub topic: {CONFIG['env']['topic_name']}")
         try:
-            # Create topic
             subprocess.run([
                 "gcloud", "pubsub", "topics", "create", CONFIG['env']['topic_name'],
                 f"--project={CONFIG['env']['project_id']}"
@@ -235,13 +232,13 @@ def setup_pubsub():
     if not subscription_exists:
         print(f"Setting up Pub/Sub subscription: {CONFIG['env']['subscription_name']}")
         try:
-            # Create subscription with push configuration
+            # Simple subscription without delivery limits
             subprocess.run([
                 "gcloud", "pubsub", "subscriptions", "create", CONFIG['env']['subscription_name'],
                 f"--topic={CONFIG['env']['topic_name']}",
                 f"--push-endpoint={push_endpoint}",
                 f"--push-auth-service-account={CONFIG['env']['service_account_identity']}",
-                f"--project={CONFIG['env']['project_id']}"
+                f"--project={CONFIG['env']['project_id']}",
             ], check=True)
             print(f"Subscription '{CONFIG['env']['subscription_name']}' created successfully.")
         except subprocess.CalledProcessError as e:

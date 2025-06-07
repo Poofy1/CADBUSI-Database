@@ -1,6 +1,5 @@
 import logging
 import io
-import uuid
 import os
 import base64
 import random
@@ -14,9 +13,6 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.base import RequestResponseEndpoint
 import hashlib
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-
-# Dicom imports
-import pydicom as dicom
 from requests.structures import CaseInsensitiveDict
 from requests_toolbelt import MultipartDecoder
 from google.cloud import storage
@@ -24,6 +20,9 @@ import google.auth.transport.requests
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+import time
+import threading
+from google.api_core import exceptions as gcs_exceptions
 
 # Configure logging
 logging.basicConfig(
@@ -70,11 +69,16 @@ class SimpleLoggingMiddleware(BaseHTTPMiddleware):
             return response
         except Exception as ex:
             logger.exception(f"Request failed: {ex}")
-            return JSONResponse(
-                status_code=500, content={"success": False, "message": str(ex)}
-            )
+            # Always return 204 to prevent any retries
+            return Response(status_code=HTTP_204_NO_CONTENT)
 
 app.add_middleware(SimpleLoggingMiddleware)
+
+
+
+# Global token cache with thread safety
+TOKEN_CACHE = {"token": None, "expires_at": 0}
+TOKEN_LOCK = threading.Lock()
 
 @retry(
     stop=stop_after_attempt(3),
@@ -82,13 +86,33 @@ app.add_middleware(SimpleLoggingMiddleware)
     retry=retry_if_exception_type(Exception)
 )
 def get_oauth2_token():
-    """Retrieves an OAuth2 token with retry logic."""
-    creds, project = google.auth.default()
-    auth_req = google.auth.transport.requests.Request()
-    creds.refresh(auth_req)
-    return creds.token
+    """Retrieves an OAuth2 token with caching to avoid rate limits."""
+    now = time.time()
+    
+    # Check cache first (with thread safety)
+    with TOKEN_LOCK:
+        if TOKEN_CACHE["token"] and now < TOKEN_CACHE["expires_at"]:
+            return TOKEN_CACHE["token"]
+    
+    # Need to refresh - only one thread should do this
+    with TOKEN_LOCK:
+        # Double-check in case another thread just refreshed
+        if TOKEN_CACHE["token"] and now < TOKEN_CACHE["expires_at"]:
+            return TOKEN_CACHE["token"]
+            
+        logger.info("Refreshing OAuth2 token...")
+        creds, project = google.auth.default()
+        auth_req = google.auth.transport.requests.Request()
+        creds.refresh(auth_req)
+        
+        # Cache token for 45 minutes (3600 - 900 second buffer)
+        TOKEN_CACHE["token"] = creds.token
+        TOKEN_CACHE["expires_at"] = now + 2700  # 45 minutes
+        
+        logger.info("OAuth2 token refreshed and cached")
+        return creds.token
 
-async def retrieve_and_store_dicom_improved(url, bucket_name, bucket_path):
+async def retrieve_and_store_dicom(url, bucket_name, bucket_path):
     """Improved version with better error handling and connection management"""
     study_id_from_url = url.split('/')[-1]
     
@@ -99,6 +123,9 @@ async def retrieve_and_store_dicom_improved(url, bucket_name, bucket_path):
     headers['Accept'] = 'multipart/related; type="application/dicom"; transfer-syntax=*'
     headers["Authorization"] = f"Bearer {get_oauth2_token()}"
     
+    # Create shared tracking set for this study
+    processed_hashes = set()
+            
     max_retries = 3
     for attempt in range(max_retries):
         try:
@@ -123,7 +150,6 @@ async def retrieve_and_store_dicom_improved(url, bucket_name, bucket_path):
             # Process multipart content 
             decoder = MultipartDecoder(content, content_type)
             
-            # Use asyncio for concurrent processing
             tasks = []
             for part in decoder.parts:
                 part_content_type = part.headers.get(b'Content-Type', b'').decode('utf-8')
@@ -131,17 +157,17 @@ async def retrieve_and_store_dicom_improved(url, bucket_name, bucket_path):
                 if 'application/dicom' not in part_content_type:
                     continue
                 
-                task = process_dicom_part_async(
-                    part, bucket, bucket_path, study_id_from_url
+                task = process_dicom_part(
+                    part, bucket, bucket_path, study_id_from_url, processed_hashes
                 )
                 tasks.append(task)
-            
+                    
             if not tasks:
                 logger.warning("No DICOM parts found in response")
                 return False
             
             # Process in batches to avoid overwhelming the system
-            batch_size = 10
+            batch_size = 5
             success_count = 0
             failed_count = 0
             
@@ -184,37 +210,59 @@ async def retrieve_and_store_dicom_improved(url, bucket_name, bucket_path):
     
     return False
 
-async def process_dicom_part_async(part, bucket, bucket_path, study_id_from_url):
-    """Simplified with single retry layer"""
-    max_retries = 3
-    
-    for attempt in range(max_retries):
-        try:
-            unique_id = str(uuid.uuid4())
-            file_path = f"{bucket_path}/{study_id_from_url}/{unique_id}.dcm"
-            blob = bucket.blob(file_path)
-            
-            # Single upload attempt per retry
-            blob.upload_from_string(part.content, content_type='application/dicom')
+async def process_dicom_part(part, bucket, bucket_path, study_id_from_url, processed_hashes):
+    try:
+        content_hash = hashlib.md5(part.content).hexdigest()
+        
+        if content_hash in processed_hashes:
+            logger.info(f"Skipping duplicate content with hash: {content_hash}")
             return True
+            
+        processed_hashes.add(content_hash)
+        
+        file_path = f"{bucket_path}/{study_id_from_url}/{content_hash}.dcm"
+        blob = bucket.blob(file_path)
+        
+        # Atomic upload-if-not-exists - no bandwidth wasted, more reliable
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                blob.upload_from_string(
+                    part.content, 
+                    content_type='application/dicom',
+                    if_generation_match=0  # Only upload if file doesn't exist
+                )
+                logger.info(f"Uploaded new DICOM part to: {file_path}")
+                return True
                 
-        except Exception as e:
-            logger.error(f"Error uploading DICOM part (attempt {attempt + 1}): {e}")
-            if attempt < max_retries - 1:
-                await asyncio.sleep(2 ** attempt)
-                continue
-            return False
-    
-    return False
+            except gcs_exceptions.PreconditionFailed:
+                # File already exists - no data was uploaded
+                logger.info(f"File already exists in storage: {file_path}")
+                return True
+                
+            except Exception as upload_error:
+                logger.error(f"Error uploading DICOM part (attempt {attempt + 1}): {upload_error}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                else:
+                    return False
+                
+    except Exception as e:
+        logger.error(f"Error processing DICOM part: {e}")
+        return False
+
+# Add this at the top of your file
+PROCESSED_URLS = set()
+URL_LOCK = threading.Lock()
 
 # Update the pubsub handler to use the improved function
 @app.post("/push_handlers/receive_messages")
 async def pubsub_push_handlers_receive(request: Request):
     bearer_token = request.headers.get("Authorization")
     if not bearer_token:
-        return JSONResponse(
-            status_code=401, content={"message": "Missing Authorization header"}
-        )
+        logger.warning("Missing Authorization header")
+        return Response(status_code=HTTP_204_NO_CONTENT)  # Always 204!
 
     try:
         envelope = await request.json()
@@ -229,49 +277,37 @@ async def pubsub_push_handlers_receive(request: Request):
 
             if not dicom_url:
                 logger.error("No DICOM URL found in payload")
-                return JSONResponse(
-                    status_code=400, content={"message": "No DICOM URL in payload"}
-                )
+                return Response(status_code=HTTP_204_NO_CONTENT)  # Always 204!
+                
+            with URL_LOCK:
+                if dicom_url in PROCESSED_URLS:
+                    logger.info(f"SKIPPING DUPLICATE URL: {dicom_url}")
+                    return Response(status_code=HTTP_204_NO_CONTENT)  # Always 204!
+                PROCESSED_URLS.add(dicom_url)
             
             # Get bucket information from environment variables
             bucket_name = os.environ.get("BUCKET_NAME", "")
             bucket_path = os.environ.get("BUCKET_PATH", "Downloads")               
             
             # Use the improved retrieval function
-            success = await retrieve_and_store_dicom_improved(dicom_url, bucket_name, bucket_path)
+            success = await retrieve_and_store_dicom(dicom_url, bucket_name, bucket_path)
             
             if success:
-                return Response(status_code=HTTP_204_NO_CONTENT)
+                logger.info(f"Successfully processed DICOM from {dicom_url}")
             else:
                 logger.error(f"Failed to process DICOM from {dicom_url}")
-                return JSONResponse(
-                    status_code=200, 
-                    content={"message": f"Failed to process DICOM from {dicom_url}"}
-                )
+            
+            # ALWAYS return 204 regardless of success/failure
+            return Response(status_code=HTTP_204_NO_CONTENT)
             
         else:
             logger.warning("Invalid Pub/Sub message format")
-            return JSONResponse(
-                status_code=400, 
-                content={"message": "Invalid Pub/Sub message format"}
-            )
+            return Response(status_code=HTTP_204_NO_CONTENT)  # Always 204!
 
     except Exception as e:
         logger.exception(f"Error processing Pub/Sub message: {e}")
-        
-        # Check if it's a DNS/permanent error that escaped our handling
-        error_str = str(e).lower()
-        if any(phrase in error_str for phrase in [
-            'name or service not known',
-            'failed to resolve', 
-            'nameresolutionerror',
-            'nodename nor servname provided'
-        ]):
-            logger.error(f"DNS resolution error - permanent failure: {e}")
-            return JSONResponse(status_code=200, content={"message": "DNS resolution failed"})
-        
-        # For other unexpected errors, still retry
-        return JSONResponse(status_code=500, content={"message": "Error processing message"})
+        # ALWAYS return 204, even on exceptions
+        return Response(status_code=HTTP_204_NO_CONTENT)
 
 # Add health check endpoint
 @app.get("/health")
