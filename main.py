@@ -107,12 +107,12 @@ def main():
                         encryption_key=key)
         
         # Step 3: Run OCR
-        print("Step 3/5: Running OCR analysis...")
+        print("Step 3/5: Processing image data...")
         analyze_images(CONFIG["DATABASE_DIR"])
         
         # Step 4: Clean data
-        print("Step 4/5: Cleaning and processing image data...")
-        Remove_Duplicate_Data(CONFIG["DATABASE_DIR"])
+        print("Step 4/5: Cleaning image data...")
+        #Remove_Duplicate_Data(CONFIG["DATABASE_DIR"]) # deprecated 
         #Find_Orientation(CONFIG) # Unnessesary and unreliable 
         Select_Data(CONFIG["DATABASE_DIR"], only_labels=False)
         

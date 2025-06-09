@@ -4,12 +4,12 @@ import concurrent.futures
 from functools import partial
 tqdm.pandas()
 
-def fetch_index_for_patient_id( id, db):
-    # id is a patient id number that should be listed in database
+def fetch_index_for_id( id, db):
+    # id is a number that should be listed in database
     # returns list of indices
     
-    if id in db['Patient_ID'].tolist():
-         indices= db.index[db['Patient_ID']==id].tolist()
+    if id in db['Accession_Number'].tolist():
+         indices= db.index[db['Accession_Number']==id].tolist()
     else:
         indices = []
     return indices
@@ -104,7 +104,7 @@ def choose_images_to_label(db, breast_df, database_path):
 
 
 
-def find_nearest_images(db, patient_id, image_folder_path):
+def find_nearest_images(db, id, image_folder_path):
     subset = db[db['PhotometricInterpretation'] != 'RGB']
     # Validate crop coordinates
     invalid_coords = (
@@ -116,10 +116,10 @@ def find_nearest_images(db, patient_id, image_folder_path):
         subset = subset[~invalid_coords]
     
     if len(subset) == 0:
-        print(f"Patient {patient_id}: No valid images after filtering")
+        print(f"Accession {id}: No valid images after filtering")
         return {}
     
-    idx = np.array(fetch_index_for_patient_id(patient_id, subset))
+    idx = np.array(fetch_index_for_id(id, subset))
     result = {}
     image_pairs_checked = set()
 
@@ -181,8 +181,8 @@ def find_nearest_images(db, patient_id, image_folder_path):
     return result
 
 
-def process_patient_id(pid, db_out, image_folder_path):
-    subset = db_out[db_out['Patient_ID'] == pid]
+def process_nearest_given_ids(pid, db_out, image_folder_path):
+    subset = db_out[db_out['Accession_Number'] == pid]
     
     result = find_nearest_images(subset, pid, image_folder_path)
     idxs = result.keys()
@@ -360,13 +360,13 @@ def Select_Data(database_path, only_labels):
         db_to_process = db_out[db_out['processed'] == False]
 
         print("Finding Similar Images")
-        patient_ids = db_to_process['Patient_ID'].unique()
+        accession_ids = db_to_process['Accession_Number'].unique()
 
         db_to_process['closest_fn']=''
         db_to_process['distance'] = -1
 
-        with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor, tqdm(total=len(patient_ids), desc='') as progress:
-            futures = {executor.submit(process_patient_id, pid, db_to_process, image_folder_path): pid for pid in patient_ids}
+        with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor, tqdm(total=len(accession_ids), desc='') as progress:
+            futures = {executor.submit(process_nearest_given_ids, pid, db_to_process, image_folder_path): pid for pid in accession_ids}
 
             for future in as_completed(futures):
                 result = future.result()
