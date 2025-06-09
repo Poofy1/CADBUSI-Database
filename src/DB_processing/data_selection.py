@@ -4,16 +4,6 @@ import concurrent.futures
 from functools import partial
 tqdm.pandas()
 
-def fetch_index_for_id( id, db):
-    # id is a number that should be listed in database
-    # returns list of indices
-    
-    if id in db['Accession_Number'].tolist():
-         indices= db.index[db['Accession_Number']==id].tolist()
-    else:
-        indices = []
-    return indices
-
 def add_labeling_categories(db):
     db['label_cat'] = ''
 
@@ -104,91 +94,127 @@ def choose_images_to_label(db, breast_df, database_path):
 
 
 
-def find_nearest_images(db, id, image_folder_path):
-    subset = db[db['PhotometricInterpretation'] != 'RGB']
-    # Validate crop coordinates
-    invalid_coords = (
-        (subset['RegionLocationMaxX1'] <= subset['RegionLocationMinX0']) |
-        (subset['RegionLocationMaxY1'] <= subset['RegionLocationMinY0'])
-    )
-    
-    if invalid_coords.any():
-        subset = subset[~invalid_coords]
-    
+def find_nearest_images(subset, image_folder_path):
     if len(subset) == 0:
-        print(f"Accession {id}: No valid images after filtering")
         return {}
     
-    idx = np.array(fetch_index_for_id(id, subset))
+    idx = subset.index.to_numpy()
     result = {}
     image_pairs_checked = set()
 
-    # Precompute cropping coordinates
+    # All regions have same coordinates - get them once
     coord_cols = ['RegionLocationMinX0', 'RegionLocationMinY0', 'RegionLocationMaxX1', 'RegionLocationMaxY1']
-    crop_coords = subset[coord_cols].astype(int)
-    crop_coords['w'] = crop_coords['RegionLocationMaxX1'] - crop_coords['RegionLocationMinX0']
-    crop_coords['h'] = crop_coords['RegionLocationMaxY1'] - crop_coords['RegionLocationMinY0']
+    x, y, x1, y1 = subset.iloc[0][coord_cols].astype(int)
+    w, h = x1 - x, y1 - y
 
-    # Preload and process all images
-    img_dict = {}
+    # Load and crop all images once
+    cropped_images = {}
     for image_id in idx:
         file_name = subset.loc[image_id, 'ImageName']
         full_filename = os.path.join(image_folder_path, file_name)
         img = read_image(full_filename, use_pil=True)
         img = np.array(img).astype(np.uint8)
-        img_dict[image_id] = img
+        img, _ = make_grayscale(img)
+        
+        # Crop once
+        rows, cols = img.shape[:2]
+        if rows >= y + h and cols >= x + w:
+            cropped = img[y:y+h, x:x+w]
+        else:
+            cropped = np.full((h, w), 255, dtype=np.uint8)
+        
+        cropped_images[image_id] = cropped.flatten()
 
-    for j, c in enumerate(idx):
-        if c in image_pairs_checked:
+    # Convert to matrix for vectorized operations
+    image_ids = list(cropped_images.keys())
+    image_matrix = np.array([cropped_images[id] for id in image_ids], dtype=np.uint8)
+    
+    # Vectorized distance computation
+    for j, current_id in enumerate(image_ids):
+        if current_id in image_pairs_checked:
             continue
-
-        x, y, w, h = crop_coords.loc[c, ['RegionLocationMinX0', 'RegionLocationMinY0', 'w', 'h']]
-
-        img_list = []
-        for image_id in idx:
-            img = img_dict[image_id]
-            (rows, cols) = img.shape[:2]
-            if rows >= y + h and cols >= x + w:
-                img, _ = make_grayscale(img)
-                img = img[y:y+h, x:x+w]
-            else:
-                img = np.full((h, w), 255, dtype=np.uint8)
-            img_list.append(img.flatten())
-
-        img_stack = np.array(img_list, dtype=np.uint8)
-        img_stack = np.abs(img_stack - img_stack[j, :])
-        img_stack = np.mean(img_stack, axis=1)
-        img_stack[j] = 1000
-        sister_image = np.argmin(img_stack)
-        distance = img_stack[sister_image]
-
-        result[c] = {
-            'image_filename': subset.at[c, 'ImageName'],
-            'sister_filename': subset.at[idx[sister_image], 'ImageName'],
+        
+        # Compute distances to all images at once
+        current_img = image_matrix[j:j+1]  # Keep 2D for broadcasting
+        distances = np.mean(np.abs(image_matrix - current_img), axis=1)
+        distances[j] = 1000  # Exclude self
+        
+        sister_idx = np.argmin(distances)
+        sister_id = image_ids[sister_idx]
+        distance = distances[sister_idx]
+        
+        # Store results for both images
+        result[current_id] = {
+            'image_filename': subset.at[current_id, 'ImageName'],
+            'sister_filename': subset.at[sister_id, 'ImageName'],
             'distance': distance
         }
-
-        if idx[sister_image] not in result:
-            result[idx[sister_image]] = {
-                'image_filename': subset.at[idx[sister_image], 'ImageName'],
-                'sister_filename': subset.at[c, 'ImageName'],
+        
+        if sister_id not in result:
+            result[sister_id] = {
+                'image_filename': subset.at[sister_id, 'ImageName'],
+                'sister_filename': subset.at[current_id, 'ImageName'],
                 'distance': distance
             }
-
-        image_pairs_checked.add(c)
-        image_pairs_checked.add(idx[sister_image])
-
+        
+        image_pairs_checked.add(current_id)
+        image_pairs_checked.add(sister_id)
+    
     return result
 
 
 def process_nearest_given_ids(pid, db_out, image_folder_path):
+    # Filter by accession number first
     subset = db_out[db_out['Accession_Number'] == pid]
     
-    result = find_nearest_images(subset, pid, image_folder_path)
-    idxs = result.keys()
-    for i in idxs:
-        subset.at[i, 'closest_fn'] = result[i]['sister_filename']
-        subset.at[i, 'distance'] = result[i]['distance']
+    # EARLY EXIT:
+    subset = subset[subset['PhotometricInterpretation'] != 'RGB']
+    
+    # Validate crop coordinates
+    invalid_coords = (
+        (subset['RegionLocationMaxX1'] <= subset['RegionLocationMinX0']) |
+        (subset['RegionLocationMaxY1'] <= subset['RegionLocationMinY0'])
+    )
+    if invalid_coords.any():
+        subset = subset[~invalid_coords]
+    
+    # Early termination if no valid images
+    if len(subset) == 0:
+        return subset
+    
+    # Group by crop coordinates
+    coord_cols = ['RegionLocationMinX0', 'RegionLocationMinY0', 'RegionLocationMaxX1', 'RegionLocationMaxY1']
+    
+    # Create coordinate groups
+    subset['coord_key'] = subset[coord_cols].apply(lambda row: tuple(row), axis=1)
+    coordinate_groups = subset.groupby('coord_key')
+    
+    #print(f"Accession {pid}: {len(subset)} regions split into {len(coordinate_groups)} coordinate groups")
+    
+    # Process each coordinate group separately
+    all_results = {}
+    
+    for coord_key, group_subset in coordinate_groups:
+        # Check if group has multiple images AND at least one has calipers
+        has_calipers_in_group = group_subset['has_calipers'].any()
+        
+        if len(group_subset) >= 2 and has_calipers_in_group:
+            group_result = find_nearest_images(group_subset, image_folder_path)
+            all_results.update(group_result)
+        else:
+            # Single image in group - no comparison possible
+            single_idx = group_subset.index[0]
+            subset.at[single_idx, 'closest_fn'] = ''
+            subset.at[single_idx, 'distance'] = -1
+    
+    # Apply all results back to subset
+    for i in all_results.keys():
+        subset.at[i, 'closest_fn'] = all_results[i]['sister_filename']
+        subset.at[i, 'distance'] = all_results[i]['distance']
+    
+    # Clean up the temporary coordinate key column
+    subset = subset.drop('coord_key', axis=1)
+    
     return subset
 
 def Remove_Green_Images(database_dir):
@@ -365,7 +391,8 @@ def Select_Data(database_path, only_labels):
         db_to_process['closest_fn']=''
         db_to_process['distance'] = -1
 
-        with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor, tqdm(total=len(accession_ids), desc='') as progress:
+        # 1 worker is the fastest for GCP, do not change
+        with ThreadPoolExecutor(max_workers=1) as executor, tqdm(total=len(accession_ids), desc='') as progress:
             futures = {executor.submit(process_nearest_given_ids, pid, db_to_process, image_folder_path): pid for pid in accession_ids}
 
             for future in as_completed(futures):
