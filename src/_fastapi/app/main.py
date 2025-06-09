@@ -220,7 +220,8 @@ async def process_dicom_part(part, bucket, bucket_path, study_id_from_url, proce
             
         processed_hashes.add(content_hash)
         
-        file_path = f"{bucket_path}/{study_id_from_url}/{content_hash}.dcm"
+        file_path = f"{bucket_path}/{study_id_from_url or 'unknown'}/{content_hash}.dcm"
+        file_path = '/'.join(filter(None, file_path.split('/'))).lstrip('/')
         blob = bucket.blob(file_path)
         
         # Atomic upload-if-not-exists - no bandwidth wasted, more reliable

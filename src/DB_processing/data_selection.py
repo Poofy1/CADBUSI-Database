@@ -106,12 +106,26 @@ def choose_images_to_label(db, breast_df, database_path):
 
 def find_nearest_images(db, patient_id, image_folder_path):
     subset = db[db['PhotometricInterpretation'] != 'RGB']
+    # Validate crop coordinates
+    invalid_coords = (
+        (subset['RegionLocationMaxX1'] <= subset['RegionLocationMinX0']) |
+        (subset['RegionLocationMaxY1'] <= subset['RegionLocationMinY0'])
+    )
+    
+    if invalid_coords.any():
+        subset = subset[~invalid_coords]
+    
+    if len(subset) == 0:
+        print(f"Patient {patient_id}: No valid images after filtering")
+        return {}
+    
     idx = np.array(fetch_index_for_patient_id(patient_id, subset))
     result = {}
     image_pairs_checked = set()
 
     # Precompute cropping coordinates
-    crop_coords = subset[['RegionLocationMinX0', 'RegionLocationMinY0', 'RegionLocationMaxX1', 'RegionLocationMaxY1']].astype(int)
+    coord_cols = ['RegionLocationMinX0', 'RegionLocationMinY0', 'RegionLocationMaxX1', 'RegionLocationMaxY1']
+    crop_coords = subset[coord_cols].astype(int)
     crop_coords['w'] = crop_coords['RegionLocationMaxX1'] - crop_coords['RegionLocationMinX0']
     crop_coords['h'] = crop_coords['RegionLocationMaxY1'] - crop_coords['RegionLocationMinY0']
 
