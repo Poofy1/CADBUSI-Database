@@ -292,6 +292,15 @@ def create_caliper_file(database_path, image_df, breast_df, max_workers=None):
     caliper_df['Caliper_Image'] = caliper_images['ImageName']
     caliper_df['Raw_Image'] = caliper_images['closest_fn']
     
+    # Fix leading zeros issue - normalize both accession number columns
+    caliper_df['Accession_Number'] = caliper_df['Accession_Number'].astype(str).str.lstrip('0')
+    breast_df = breast_df.copy()  # Don't modify the original
+    breast_df['Accession_Number'] = breast_df['Accession_Number'].astype(str).str.lstrip('0')
+    
+    # Handle edge case where all zeros becomes empty string
+    caliper_df['Accession_Number'] = caliper_df['Accession_Number'].replace('', '0')
+    breast_df['Accession_Number'] = breast_df['Accession_Number'].replace('', '0')
+    
     # Merge with breast data to get Has_Malignant information
     caliper_df = caliper_df.merge(
         breast_df[['Accession_Number', 'Has_Malignant']], 

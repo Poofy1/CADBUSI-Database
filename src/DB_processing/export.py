@@ -589,47 +589,49 @@ def Export_Database(CONFIG, reparse_images = True):
     save_data(config_json_str, export_config_path)
     
     #Dirs
-    image_csv_file = f'{parsed_database}ImageData.csv'
-    breast_csv_file = f'{parsed_database}BreastData.csv' 
-    video_csv_file =  f'{parsed_database}VideoData.csv'
-    instance_labels_csv_file = f'{labelbox_path}InstanceLabels.csv'
+    image_csv_file = os.path.join(parsed_database, 'ImageData.csv')
+    breast_csv_file = os.path.join(parsed_database, 'BreastData.csv') 
+    video_csv_file = os.path.join(parsed_database, 'VideoData.csv')
+    instance_labels_csv_file = os.path.join(labelbox_path, 'InstanceLabels.csv')
     
     # Read data
     video_df = read_csv(video_csv_file)
     image_df = read_csv(image_csv_file)
     breast_df = read_csv(breast_csv_file)
-    instance_data = read_csv(instance_labels_csv_file)
-    
-    
-    ##Format Instance Data
-    file_to_image_name_map = dict(zip(image_df['FileName'], image_df['ImageName']))
-    instance_data['ImageName'] = instance_data['FileName'].map(file_to_image_name_map)
-    instance_data = instance_data[instance_data['Accession_Number'].isin(image_df['Accession_Number'])]
-
-    if 'Reject Image' in instance_data.columns:
-        if use_reject_system:
-            # Count before filtering
-            before_count = len(image_df)
-            
-            # Create a new DataFrame with rejected instances
-            rejected_images = instance_data[instance_data['Reject Image'] == True][['FileName', 'ImageName']]
-            
-            # Remove rows where 'Reject Image' is True from instance_data
-            instance_data = instance_data[instance_data['Reject Image'] != True]
-            
-            # Remove rows from image_df based on rejected FileNames
-            image_df = image_df[~image_df['FileName'].isin(rejected_images['FileName'])]
-            
-            # Calculate how many were removed
-            removed_count = before_count - len(image_df)
-            
-            append_audit("export.labeled_reject_removed", removed_count)
+    if file_exists(instance_labels_csv_file):
+        instance_data = read_csv(instance_labels_csv_file)
         
-        # If not using reject system, keep 'Reject Image' as a column
-        if not use_reject_system:
-            instance_data['Reject Image'] = instance_data['Reject Image'].fillna(False)
-        else:
-            instance_data.drop(columns=['Reject Image'], inplace=True)
+        # Format Instance Data
+        file_to_image_name_map = dict(zip(image_df['FileName'], image_df['ImageName']))
+        instance_data['ImageName'] = instance_data['FileName'].map(file_to_image_name_map)
+        instance_data = instance_data[instance_data['Accession_Number'].isin(image_df['Accession_Number'])]
+
+        if 'Reject Image' in instance_data.columns:
+            if use_reject_system:
+                # Count before filtering
+                before_count = len(image_df)
+                
+                # Create a new DataFrame with rejected instances
+                rejected_images = instance_data[instance_data['Reject Image'] == True][['FileName', 'ImageName']]
+                
+                # Remove rows where 'Reject Image' is True from instance_data
+                instance_data = instance_data[instance_data['Reject Image'] != True]
+                
+                # Remove rows from image_df based on rejected FileNames
+                image_df = image_df[~image_df['FileName'].isin(rejected_images['FileName'])]
+                
+                # Calculate how many were removed
+                removed_count = before_count - len(image_df)
+                
+                append_audit("export.labeled_reject_removed", removed_count)
+            
+            # If not using reject system, keep 'Reject Image' as a column
+            if not use_reject_system:
+                instance_data['Reject Image'] = instance_data['Reject Image'].fillna(False)
+            else:
+                instance_data.drop(columns=['Reject Image'], inplace=True)
+    else:
+        instance_data = None
         
 
     if os.path.exists(labeled_data_dir):
@@ -732,7 +734,8 @@ def Export_Database(CONFIG, reparse_images = True):
     save_data(video_df, os.path.join(output_dir, 'VideoData.csv'))
     save_data(image_df, os.path.join(output_dir, 'ImageData.csv'))
     save_data(train_data, os.path.join(output_dir, 'TrainData.csv'))
-    save_data(instance_data, os.path.join(output_dir, 'InstanceData.csv'))
+    if instance_data is not None:
+        save_data(instance_data, os.path.join(output_dir, 'InstanceData.csv'))
     
     # Generate and save audit report
     ExportAuditReport(image_df, breast_df, video_df, video_images_df if reparse_images else None)
