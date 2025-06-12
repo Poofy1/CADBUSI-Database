@@ -269,3 +269,75 @@ def encrypt_ids(input_file=None, output_file_local=None, key_output=None):
     print(f"Encryption and date anonymization complete. Output saved locally to {output_file_local}")
     
     return key
+
+def ff1_decrypt(key, encrypted_number, domain_size):
+    """
+    NIST SP 800-38G compliant FF1 format-preserving decryption.
+    
+    Args:
+        key (bytes): The encryption key
+        encrypted_number (int): The encrypted number to decrypt
+        domain_size (int): The size of the domain (10^n for n-digit numbers)
+        
+    Returns:
+        int: The decrypted number
+    """
+    # Convert encrypted number to string and get its length
+    encrypted_str = str(encrypted_number)
+    length = len(encrypted_str)
+
+    # Initialize the FF1 cipher with the same parameters used for encryption
+    ff1 = pyffx.Integer(key, length)
+    
+    # Decrypt the number
+    decrypted_value = ff1.decrypt(encrypted_number)
+    
+    return decrypted_value
+
+def decrypt_single_id(encrypted_id):
+    """Decrypt a single ID value back to its original form.
+    
+    Args:
+        encrypted_id: The encrypted ID to decrypt (string or integer)
+        
+    Returns:
+        Original ID value as a string
+    """
+    # Get the same key used for encryption
+    key = get_encryption_key()
+    
+    # Handle hyphenated values
+    if '-' in str(encrypted_id):
+        parts = str(encrypted_id).split('-')
+        decrypted_parts = []
+        
+        for part in parts:
+            if part.strip().isdigit():
+                encrypted_num = int(part.strip())
+                part_length = len(str(encrypted_num))
+                
+                # Get domain size based on encrypted part length
+                domain_size = 10 ** part_length
+                
+                decrypted_part = ff1_decrypt(key, encrypted_num, domain_size)
+                # Preserve leading zeros by padding to original length
+                decrypted_parts.append(str(decrypted_part).zfill(part_length))
+            else:
+                decrypted_parts.append(part)
+                
+        return '-'.join(decrypted_parts)
+    else:
+        # Handle numeric IDs
+        try:
+            encrypted_num = int(str(encrypted_id).strip())
+            encrypted_length = len(str(encrypted_num))
+            
+            # Get domain size based on encrypted number length
+            domain_size = 10 ** encrypted_length
+            
+            decrypted_value = ff1_decrypt(key, encrypted_num, domain_size)
+            # Preserve leading zeros by padding to original length
+            return str(decrypted_value).zfill(encrypted_length)
+        except ValueError:
+            # Return original for non-numeric values
+            return str(encrypted_id)
