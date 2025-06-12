@@ -721,6 +721,7 @@ def Export_Database(CONFIG, reparse_images = True):
     train_data = format_data(breast_df, image_df)
     
     # Create a mapping of (Accession_Number, laterality) to list of ImagesPath
+    video_df['laterality'] = video_df['laterality'].str.upper()
     video_paths = video_df.groupby(['Accession_Number', 'laterality'])['ImagesPath'].agg(list).to_dict()
     train_data['VideoPaths'] = train_data.apply(lambda row: video_paths.get((row['Accession_Number'], row['Study_Laterality']), []), axis=1)
 
