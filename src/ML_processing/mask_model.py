@@ -16,36 +16,26 @@ torch.backends.cudnn.allow_tf32 = True
 
 def get_first_image_in_each_folder(video_folder_path):
     first_images = []
-
-    # Normalize path to remove double slashes
     video_folder_path = os.path.normpath(video_folder_path)
     
-    # Get all PNG files in the directory
-    image_files = get_files_by_extension(video_folder_path, '.png')
-
-    # Sort the files and group them by directory
-    grouped_files = {}
-    for file_path in image_files:
-        # Get the directory part
-        directory = os.path.dirname(file_path)
+    storage = StorageClient.get_instance()
+    
+    # For GCP: Get unique folder prefixes, then construct first image path
+    prefix = video_folder_path.replace('\\', '/').rstrip('/') + '/'
+    
+    # Use delimiter to get folder structure
+    iterator = storage._bucket.list_blobs(prefix=prefix, delimiter='/')
+    blobs = list(iterator)  # Get the blobs
+    prefixes = iterator.prefixes  # Get the folder prefixes
+    
+    # For each folder prefix, construct the first image path
+    for folder_prefix in prefixes:
+        # Extract folder name from prefix (remove trailing slash)
+        folder_name = folder_prefix.rstrip('/').split('/')[-1]
         
-        # Extract just the last folder name from the directory path
-        video_folder_name = os.path.basename(directory)
-        
-        if directory not in grouped_files:
-            grouped_files[directory] = []
-        
-        # Create the desired format: video_folder_name/image_name.png
-        image_name = os.path.basename(file_path)
-        desired_path = f"{video_folder_name}/{image_name}"
-        
-        grouped_files[directory].append(desired_path)
-
-    # Get the first image from each directory
-    for directory in grouped_files:
-        if grouped_files[directory]:
-            first_image = sorted(grouped_files[directory])[0]
-            first_images.append(first_image)
+        # Construct first image path using naming convention
+        first_image_path = f"{folder_name}/{folder_name}_0.png"
+        first_images.append(first_image_path)
 
     return first_images
 
@@ -88,7 +78,14 @@ class MyDatasetVideo(Dataset):
     def __init__(self, root_dir, db_to_process, max_width, max_height, transform=None):
         self.root_dir = root_dir
         self.transform = transform
-        self.images = get_first_image_in_each_folder(root_dir) 
+        all_first_images = get_first_image_in_each_folder(root_dir) 
+        # Filter to only include images from db_to_process
+        images_to_process = set(db_to_process['ImagesPath'].tolist())
+        
+        # Extract folder name from image path (before the "/")
+        self.images = [img for img in all_first_images 
+                       if img.split('/')[0] in images_to_process]
+        
         self.max_width = max_width
         self.max_height = max_height
         self.preprocess = transforms.Compose([

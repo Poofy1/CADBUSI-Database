@@ -660,23 +660,16 @@ def Export_Database(CONFIG, reparse_images = True):
     max_aspect_ratio = 4.0
     image_df_after_aspect = image_df[(image_df['crop_aspect_ratio'] >= min_aspect_ratio) & 
                         (image_df['crop_aspect_ratio'] <= max_aspect_ratio)]
-    video_df_after_aspect = video_df[(video_df['crop_aspect_ratio'] >= min_aspect_ratio) & 
-                        (video_df['crop_aspect_ratio'] <= max_aspect_ratio)]
     
     intermediate_image_count = len(image_df_after_aspect)
-    intermediate_video_count = len(video_df_after_aspect)
     append_audit("export.bad_aspect_image_removed", initial_image_count - intermediate_image_count)
-    append_audit("export.bad_aspect_video_removed", initial_video_count - intermediate_video_count)
-
+    
     # Remove images with crop width or height less than 200 pixels
     min_dimension = 200
     image_df = image_df_after_aspect[(image_df_after_aspect['crop_w'] >= min_dimension) & 
                     (image_df_after_aspect['crop_h'] >= min_dimension)]
-    video_df = video_df_after_aspect[(video_df_after_aspect['crop_w'] >= min_dimension) & 
-                        (video_df_after_aspect['crop_h'] >= min_dimension)]
     
     append_audit("export.too_small_image_removed", intermediate_image_count - len(image_df))
-    append_audit("export.too_small_video_removed", intermediate_video_count - len(video_df))
 
     if reparse_images:   
         # Crop the images for the relevant studies

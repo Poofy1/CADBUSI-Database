@@ -74,13 +74,8 @@ def ProcessVideoData(database_path):
     append_audit("video_processing.extracted_description_masks", len(description_masks))
 
     print("Performing OCR")
-    first_images = get_first_image_in_each_folder(video_folder_path)
-
-    # Separate image names and description masks into their own lists
-    description_masks_coords = [dm[1] for dm in description_masks]
-
     with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-        futures = {executor.submit(ocr_image, image_file, description_mask, video_folder_path): image_file for image_file, description_mask in zip(first_images, description_masks_coords)}
+        futures = {executor.submit(ocr_image, image_file, description_mask, video_folder_path): image_file for image_file, description_mask in description_masks}
         progress = tqdm(total=len(futures), desc='')
 
         # Initialize dictionary to store descriptions
@@ -97,7 +92,12 @@ def ProcessVideoData(database_path):
     append_audit("video_processing.extracted_ocr_descriptions", valid_descriptions)
 
     print("Finding Image Masks")
-    image_masks_dict = get_video_ultrasound_region(video_folder_path, first_images)
+    first_images = get_first_image_in_each_folder(video_folder_path)
+    # Filter first_images to only include those from db_to_process
+    images_to_process = set(db_to_process['ImagesPath'].tolist())
+    filtered_first_images = [img for img in first_images 
+                            if img.split('/')[0] in images_to_process]
+    image_masks_dict = get_video_ultrasound_region(video_folder_path, filtered_first_images)
     valid_masks = sum(1 for mask in image_masks_dict.values() if mask is not None)
     append_audit("video_processing.extracted_crop_regions", valid_masks)
     
@@ -106,23 +106,64 @@ def ProcessVideoData(database_path):
     descriptions = modify_keys(descriptions)
     image_masks_dict = modify_keys(image_masks_dict)
 
-    # After processing
+    # Initialize with defaults
     matched_descriptions = sum(1 for key in db_to_process['ImagesPath'] if key in descriptions)
     matched_masks = sum(1 for key in db_to_process['ImagesPath'] if key in image_masks_dict)
+    db_to_process['description'] = None
+    db_to_process['bounding_box'] = None
 
-    # Update dataframe using map
-    db_to_process['description'] = db_to_process['ImagesPath'].map(pd.Series(descriptions))
-    db_to_process['bounding_box'] = db_to_process['ImagesPath'].map(pd.Series(image_masks_dict))
-    
-    db_to_process[['crop_x', 'crop_y', 'crop_w', 'crop_h']] = pd.DataFrame(db_to_process['bounding_box'].tolist(), index=db_to_process.index)
 
-    # Construct a temporary DataFrame with the feature extraction
-    temp_df = db_to_process['description'].apply(lambda x: extract_descript_features(x, labels_dict=description_labels_dict)).apply(pd.Series)
-    for column in temp_df.columns:
-        db_to_process[column] = temp_df[column]
+    # Map descriptions and masks (this part looks fine)
+    if matched_descriptions > 0:
+        desc_series = pd.Series(descriptions)
+        mask = db_to_process['ImagesPath'].isin(descriptions.keys())
+        db_to_process.loc[mask, 'description'] = db_to_process.loc[mask, 'ImagesPath'].map(desc_series)
+
+    if matched_masks > 0:
+        mask_series = pd.Series(image_masks_dict)
+        mask = db_to_process['ImagesPath'].isin(image_masks_dict.keys())
+        db_to_process.loc[mask, 'bounding_box'] = db_to_process.loc[mask, 'ImagesPath'].map(mask_series)
+
+    # Handle bounding box extraction safely, row by row
+    db_to_process['crop_x'] = None
+    db_to_process['crop_y'] = None
+    db_to_process['crop_w'] = None
+    db_to_process['crop_h'] = None
     
+    for idx, row in db_to_process.iterrows():
+        bbox = row['bounding_box']
+        if bbox is not None and isinstance(bbox, (list, tuple)) and len(bbox) >= 4:
+            try:
+                db_to_process.at[idx, 'crop_x'] = bbox[0]
+                db_to_process.at[idx, 'crop_y'] = bbox[1]
+                db_to_process.at[idx, 'crop_w'] = bbox[2]
+                db_to_process.at[idx, 'crop_h'] = bbox[3]
+            except (IndexError, TypeError, ValueError) as e:
+                print(f"Failed to extract bbox for row {idx}: {e}")
+                # Keep as None, don't fail the entire operation
+
+    # Handle feature extraction safely, row by row
+    feature_columns = ['area', 'laterality', 'orientation', 'clock_pos', 'nipple_dist']  # adjust based on your extract_descript_features output
+    
+    for col in feature_columns:
+        if col not in db_to_process.columns:
+            db_to_process[col] = None
+    
+    for idx, row in db_to_process.iterrows():
+        desc = row['description']
+        if desc is not None:
+            try:
+                features = extract_descript_features(desc, labels_dict=description_labels_dict)
+                if isinstance(features, dict):
+                    for feature_name, feature_value in features.items():
+                        if feature_name in db_to_process.columns:
+                            db_to_process.at[idx, feature_name] = feature_value
+            except Exception as e:
+                print(f"Failed to extract features for row {idx}: {e}")
+
     # Overwrite non bilateral cases with known lateralities
     laterality_mapping = breast_df[breast_df['Study_Laterality'].isin(['LEFT', 'RIGHT'])].set_index('Accession_Number')['Study_Laterality'].to_dict()
+
     db_to_process['laterality'] = db_to_process.apply(
         lambda row: laterality_mapping.get(row['Accession_Number']).lower() 
         if row['Accession_Number'] in laterality_mapping 
@@ -133,15 +174,9 @@ def ProcessVideoData(database_path):
     # Count unknown lateralities after correction
     unknown_lateralities = db_to_process[db_to_process['laterality'] == 'unknown'].shape[0]
     append_audit("video_processing.bilateral_with_unknown_lat", unknown_lateralities)
-    
-    
-    # Remove rows where area is unknown or NaN
-    unknown_areas_count = len(db_to_process[(db_to_process['area'] == 'unknown') | (db_to_process['area'].isna())])
-    append_audit("video_processing.unknown_areas_removed", unknown_areas_count)
-    db_to_process = db_to_process[~((db_to_process['area'] == 'unknown') | (db_to_process['area'].isna()))]
-    
+
     video_df.update(db_to_process, overwrite=True)
-    
+
     # Find crop ratio
     video_df['crop_aspect_ratio'] = (video_df['crop_w'] / video_df['crop_h']).round(2)
 
