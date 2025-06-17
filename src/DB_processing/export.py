@@ -602,9 +602,9 @@ def Export_Database(CONFIG, reparse_images = True):
         instance_data = read_csv(instance_labels_csv_file)
         
         # Format Instance Data
-        file_to_image_name_map = dict(zip(image_df['FileName'], image_df['ImageName']))
-        instance_data['ImageName'] = instance_data['FileName'].map(file_to_image_name_map)
-        instance_data = instance_data[instance_data['Accession_Number'].isin(image_df['Accession_Number'])]
+        file_to_image_name_map = dict(zip(image_df['DicomHash'], image_df['ImageName']))
+        instance_data['ImageName'] = instance_data['DicomHash'].map(file_to_image_name_map)
+        instance_data = instance_data[instance_data['DicomHash'].isin(image_df['DicomHash'])]
 
         if 'Reject Image' in instance_data.columns:
             if use_reject_system:
@@ -612,13 +612,13 @@ def Export_Database(CONFIG, reparse_images = True):
                 before_count = len(image_df)
                 
                 # Create a new DataFrame with rejected instances
-                rejected_images = instance_data[instance_data['Reject Image'] == True][['FileName', 'ImageName']]
+                rejected_images = instance_data[instance_data['Reject Image'] == True][['DicomHash', 'ImageName']]
                 
                 # Remove rows where 'Reject Image' is True from instance_data
                 instance_data = instance_data[instance_data['Reject Image'] != True]
                 
-                # Remove rows from image_df based on rejected FileNames
-                image_df = image_df[~image_df['FileName'].isin(rejected_images['FileName'])]
+                # Remove rows from image_df based on rejected DicomHash
+                image_df = image_df[~image_df['DicomHash'].isin(rejected_images['DicomHash'])]
                 
                 # Calculate how many were removed
                 removed_count = before_count - len(image_df)
@@ -724,7 +724,7 @@ def Export_Database(CONFIG, reparse_images = True):
 
     # Write the filtered dataframes to CSV files in the output directory
     save_data(breast_df, os.path.join(output_dir, 'BreastData.csv'))
-    save_data(labeled_df, os.path.join(output_dir, 'LabeledData.csv'))
+    #save_data(labeled_df, os.path.join(output_dir, 'LabeledData.csv'))
     save_data(video_df, os.path.join(output_dir, 'VideoData.csv'))
     save_data(image_df, os.path.join(output_dir, 'ImageData.csv'))
     save_data(train_data, os.path.join(output_dir, 'TrainData.csv'))
