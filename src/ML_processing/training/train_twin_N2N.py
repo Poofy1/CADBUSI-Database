@@ -565,15 +565,99 @@ def evaluate_metrics(model, data_dir, csv_file, img_dir):
     
     return average_psnr, average_ssim
 
-
+def process_image_directory(model, input_dir, output_dir):
+    """
+    Process all images in a directory and save caliper-removed versions.
+    
+    Args:
+        model: Trained U-Net model
+        input_dir: Directory containing input images
+        output_dir: Directory to save processed images
+    """
+    import glob
+    
+    # Create output directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Supported image formats
+    image_extensions = ['*.jpg', '*.jpeg', '*.png', '*.bmp', '*.tif', '*.tiff']
+    
+    # Get all image files
+    image_files = []
+    for ext in image_extensions:
+        image_files.extend(glob.glob(os.path.join(input_dir, ext)))
+        image_files.extend(glob.glob(os.path.join(input_dir, ext.upper())))
+    
+    if not image_files:
+        print(f"No images found in {input_dir}")
+        return
+    
+    print(f"Found {len(image_files)} images to process...")
+    
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+    model.eval()
+    
+    # Process each image
+    for i, image_path in enumerate(tqdm(image_files, desc="Processing images")):
+        try:
+            # Load and preprocess image
+            image = Image.open(image_path).convert('L')
+            original_size = image.size  # (width, height)
+            
+            # Preprocess
+            to_tensor = transforms.ToTensor()
+            normalize = transforms.Normalize(mean=[0.5], std=[0.5])
+            image_tensor = normalize(to_tensor(image)).unsqueeze(0)
+            
+            # Inference
+            with torch.no_grad():
+                output = model(image_tensor.to(device))
+            
+            # Post-process - Fix the dimension issue
+            output = output.squeeze(0).cpu()
+            
+            # Denormalize
+            output = output * 0.5 + 0.5
+            
+            # Clamp values to [0, 1] range
+            output = torch.clamp(output, 0, 1)
+            
+            # Convert to PIL Image
+            output_img = transforms.ToPILImage()(output)
+            
+            # Resize to original size (PIL format: width, height)
+            output_img = output_img.resize(original_size, Image.BILINEAR)
+            
+            # Save processed image
+            input_filename = os.path.basename(image_path)
+            name, ext = os.path.splitext(input_filename)
+            output_filename = f"{name}_caliper_removed{ext}"
+            output_path = os.path.join(output_dir, output_filename)
+            
+            output_img.save(output_path)
+            
+        except Exception as e:
+            print(f"Error processing {image_path}: {str(e)}")
+            continue
+    
+    print(f"Processing complete! Output images saved to {output_dir}")
+    
+    
 if __name__ == "__main__":
     data_dir = "D:/DATA/CASBUSI/PairExport"
     csv_file = os.path.join(data_dir, "PairData.csv")
-    img_dir = os.path.join(data_dir, "images")
+    img_dir = os.path.join(data_dir, "box_images")
     caliper_dir = "D:/DATA/CASBUSI/PairExport/unique_caliper_shapes"
     model_path = os.path.join(data_dir, "caliper_removal_unet_l1loss_N2N_7.pth")
 
-    choice = input("Do you want to (1) train the model, (2) show validation examples, or (3) evaluate PSNR and SSIM? Enter 1, 2, or 3: ")
+    print("Select an option:")
+    print("1. Train the model")
+    print("2. Show validation examples")
+    print("3. Evaluate PSNR and SSIM")
+    print("4. Process image directory (simple)")
+    
+    choice = input("Enter your choice (1-4): ")
 
     if choice == '1':
         train_model(csv_file, img_dir, caliper_dir, model_path)
@@ -591,5 +675,20 @@ if __name__ == "__main__":
             evaluate_metrics(model, data_dir, csv_file, img_dir)
         else:
             print("No pre-trained model found. Please train the model first.")
+    elif choice == '4':
+        if os.path.exists(model_path):
+            model = N2N_Original_Used_UNet(in_channels=1, out_channels=1)
+            model.load_state_dict(torch.load(model_path))
+            
+            img_dir = os.path.join(data_dir, "box_images")
+            output_dir = os.path.join(data_dir, "box_images")
+            
+            if not os.path.exists(img_dir):
+                print("Input directory does not exist!")
+            else:
+                process_image_directory(model, img_dir, output_dir)
+        else:
+            print("No pre-trained model found. Please train the model first.")
+
     else:
-        print("Invalid choice. Please run the script again and enter 1, 2, or 3.")
+        print("Invalid choice. Please run the script again and enter 1-4.")
