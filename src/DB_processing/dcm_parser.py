@@ -294,7 +294,10 @@ def deidentify_dicom(ds):
 
 
 
-def parse_video_data(dcm, dcm_data, dataset, current_index, parsed_database):
+def parse_video_data(dcm, dataset, current_index, parsed_database, video_n_frames):
+    
+    if video_n_frames <= 0:
+        return None
     
     # Extract Software Version
     software_version = ""
@@ -330,7 +333,7 @@ def parse_video_data(dcm, dcm_data, dataset, current_index, parsed_database):
     total_frames = getattr(dataset, 'NumberOfFrames', 1)
     
     # Extract frames directly from dataset using pydicom
-    for i in range(0, total_frames, 4):  # Process every 4th frame
+    for i in range(0, total_frames, video_n_frames):  # Process every nth frame
         # Use pydicom to extract the frame
         if hasattr(dataset, 'pixel_array'):
             if total_frames > 1:
@@ -361,7 +364,7 @@ def parse_video_data(dcm, dcm_data, dataset, current_index, parsed_database):
 
 
 
-def parse_single_dcm(dcm, current_index, parsed_database, max_retries=3):
+def parse_single_dcm(dcm, current_index, parsed_database, video_n_frames, max_retries=3):
     for attempt in range(max_retries):
         try:
             # Read the DICOM file
@@ -389,7 +392,7 @@ def parse_single_dcm(dcm, current_index, parsed_database, max_retries=3):
     
     # Safely check for Multi-frame content
     if is_video:
-        return parse_video_data(dcm, dcm_data, dataset, current_index, parsed_database)
+        return parse_video_data(dcm, dataset, current_index, parsed_database, video_n_frames)
 
     
     # Extract Software Version
@@ -463,18 +466,19 @@ def parse_single_dcm(dcm, current_index, parsed_database, max_retries=3):
 def process_batch(batch_data):
     """Process a batch of DICOM files"""
     results = []
-    for dcm, current_index, parsed_database in batch_data:
+    for dcm, current_index, parsed_database, video_n_frames in batch_data:
         try:
-            result = parse_single_dcm(dcm, current_index, parsed_database)
+            result = parse_single_dcm(dcm, current_index, parsed_database, video_n_frames)
             if result is not None:
                 results.append(result)
         except Exception as e:
             print(f"Error processing {dcm}: {e}")
     return results
 
-def parse_files(dcm_files_list, database_path, batch_size=100):
+def parse_files(CONFIG, dcm_files_list, database_path, batch_size=100):
     """Optimized parsing with batching and process pooling"""
     print("Parsing DCM Data")
+    video_n_frames = CONFIG["VIDEO_SAMPLING"]
     
     # Load current index
     index_file = os.path.join(database_path, "IndexCounter.txt")
@@ -491,12 +495,13 @@ def parse_files(dcm_files_list, database_path, batch_size=100):
     for i in range(0, len(dcm_files_list), batch_size):
         batch = []
         for j, dcm in enumerate(dcm_files_list[i:i+batch_size]):
-            batch.append((dcm, i+j+current_index, database_path))
+            batch.append((dcm, i+j+current_index, database_path, video_n_frames))
         batches.append(batch)
     
     # Process batches in parallel using ProcessPoolExecutor
     data_list = []
     failure_counter = 0
+    
     
     # Use more workers for CPU-bound tasks
     num_workers = min(32, multiprocessing.cpu_count())
@@ -608,7 +613,9 @@ def parse_anon_file(anon_location, database_path, image_df, ):
     
 
 # Main Method
-def Parse_Dicom_Files(database_path, anon_location, raw_storage_database, data_range, encryption_key):
+def Parse_Dicom_Files(CONFIG, anon_location, raw_storage_database, encryption_key):
+    database_path = CONFIG["DATABASE_DIR"]
+    data_range = CONFIG["DEBUG_DATA_RANGE"]
     
     # Set the global encryption key
     global ENCRYPTION_KEY
@@ -653,7 +660,7 @@ def Parse_Dicom_Files(database_path, anon_location, raw_storage_database, data_r
     save_data(content, parsed_files_list_file)
     
     # Get DCM Data
-    image_df = parse_files(dcm_files_list, database_path)
+    image_df = parse_files(CONFIG, dcm_files_list, database_path)
     image_df = image_df.rename(columns={'PatientID': 'Patient_ID'})
     image_df = image_df.rename(columns={'AccessionNumber': 'Accession_Number'})
 

@@ -239,6 +239,33 @@ class CaliperDataset(Dataset):
                 except ValueError:
                     continue  # Skip if dimensions don't match
         
+        # Add random box outline (can be anywhere on the image)
+        # Random box dimensions (20% to 80% of image dimensions)
+        box_width = random.randint(int(image.width * 0.2), int(image.width * 0.8))
+        box_height = random.randint(int(image.height * 0.2), int(image.height * 0.8))
+        
+        # Random position (ensure box fits within image)
+        max_x = image.width - box_width
+        max_y = image.height - box_height
+        box_x = random.randint(0, max_x)
+        box_y = random.randint(0, max_y)
+        
+        # Random outline thickness (1 to 5 pixels)
+        thickness = random.randint(1, 5)
+        
+        # Random grayscale color for the outline (0 to 255)
+        outline_color = random.randint(0, 255)
+        
+        # Draw the box outline
+        # Top edge
+        img_array[box_y:box_y+thickness, box_x:box_x+box_width] = outline_color
+        # Bottom edge
+        img_array[box_y+box_height-thickness:box_y+box_height, box_x:box_x+box_width] = outline_color
+        # Left edge
+        img_array[box_y:box_y+box_height, box_x:box_x+thickness] = outline_color
+        # Right edge
+        img_array[box_y:box_y+box_height, box_x+box_width-thickness:box_x+box_width] = outline_color
+        
         return Image.fromarray(img_array)
 
     def __getitem__(self, idx):
@@ -544,7 +571,7 @@ if __name__ == "__main__":
     csv_file = os.path.join(data_dir, "PairData.csv")
     img_dir = os.path.join(data_dir, "images")
     caliper_dir = "D:/DATA/CASBUSI/PairExport/unique_caliper_shapes"
-    model_path = os.path.join(data_dir, "caliper_removal_unet_l1loss_N2N_5.pth")
+    model_path = os.path.join(data_dir, "caliper_removal_unet_l1loss_N2N_7.pth")
 
     choice = input("Do you want to (1) train the model, (2) show validation examples, or (3) evaluate PSNR and SSIM? Enter 1, 2, or 3: ")
 

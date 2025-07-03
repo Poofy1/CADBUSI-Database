@@ -100,10 +100,9 @@ def main():
         
         # Step 2: Parse DICOM files
         print("Step 2/5: Parsing and anonymizing DICOM files...")
-        Parse_Dicom_Files(CONFIG["DATABASE_DIR"], 
+        Parse_Dicom_Files(CONFIG, 
                         anon_file, 
                         BUCKET_PATH, 
-                        CONFIG["DEBUG_DATA_RANGE"],
                         encryption_key=key)
         
         # Step 3: Run OCR
