@@ -568,6 +568,7 @@ def evaluate_metrics(model, data_dir, csv_file, img_dir):
 def process_image_directory(model, input_dir, output_dir):
     """
     Process all images in a directory and save caliper-removed versions.
+    For RGB images, preserves color by applying grayscale changes to all channels.
     
     Args:
         model: Trained U-Net model
@@ -601,33 +602,62 @@ def process_image_directory(model, input_dir, output_dir):
     # Process each image
     for i, image_path in enumerate(tqdm(image_files, desc="Processing images")):
         try:
-            # Load and preprocess image
-            image = Image.open(image_path).convert('L')
-            original_size = image.size  # (width, height)
+            # Load original image
+            original_image = Image.open(image_path)
+            original_size = original_image.size
+            is_rgb = original_image.mode == 'RGB'
             
-            # Preprocess
+            # Convert to grayscale for model processing
+            grayscale_image = original_image.convert('L')
+            
+            # Preprocess for model
             to_tensor = transforms.ToTensor()
             normalize = transforms.Normalize(mean=[0.5], std=[0.5])
-            image_tensor = normalize(to_tensor(image)).unsqueeze(0)
+            image_tensor = normalize(to_tensor(grayscale_image)).unsqueeze(0)
             
             # Inference
             with torch.no_grad():
                 output = model(image_tensor.to(device))
             
-            # Post-process - Fix the dimension issue
+            # Post-process
             output = output.squeeze(0).cpu()
-            
-            # Denormalize
             output = output * 0.5 + 0.5
-            
-            # Clamp values to [0, 1] range
             output = torch.clamp(output, 0, 1)
             
             # Convert to PIL Image
-            output_img = transforms.ToPILImage()(output)
+            processed_grayscale = transforms.ToPILImage()(output)
+            processed_grayscale = processed_grayscale.resize(original_size, Image.BILINEAR)
             
-            # Resize to original size (PIL format: width, height)
-            output_img = output_img.resize(original_size, Image.BILINEAR)
+            # If original was RGB, selectively replace changed pixels
+            if is_rgb:
+                # Convert to numpy arrays
+                original_gray_np = np.array(grayscale_image, dtype=np.float32) / 255.0
+                processed_gray_np = np.array(processed_grayscale, dtype=np.float32) / 255.0
+                original_rgb_np = np.array(original_image, dtype=np.float32) / 255.0
+                
+                # Create mask of significantly changed areas
+                difference = np.abs(original_gray_np - processed_gray_np)
+                threshold = 0.05  # Adjust this threshold as needed
+                replacement_mask = difference > threshold
+                
+                # Start with original RGB image
+                result_rgb = original_rgb_np.copy()
+                
+                # For pixels that changed significantly, replace ALL color channels 
+                # with the processed grayscale value
+                if np.any(replacement_mask):
+                    grayscale_rgb_value = processed_gray_np[replacement_mask]
+                    # Set R, G, B all to the same grayscale value
+                    result_rgb[replacement_mask, 0] = grayscale_rgb_value  # R
+                    result_rgb[replacement_mask, 1] = grayscale_rgb_value  # G  
+                    result_rgb[replacement_mask, 2] = grayscale_rgb_value  # B
+                
+                # Convert back to PIL Image
+                result_rgb = np.clip(result_rgb * 255, 0, 255).astype(np.uint8)
+                final_image = Image.fromarray(result_rgb, mode='RGB')
+            else:
+                # For grayscale images, use processed result directly
+                final_image = processed_grayscale
             
             # Save processed image
             input_filename = os.path.basename(image_path)
@@ -635,7 +665,7 @@ def process_image_directory(model, input_dir, output_dir):
             output_filename = f"{name}_caliper_removed{ext}"
             output_path = os.path.join(output_dir, output_filename)
             
-            output_img.save(output_path)
+            final_image.save(output_path)
             
         except Exception as e:
             print(f"Error processing {image_path}: {str(e)}")
