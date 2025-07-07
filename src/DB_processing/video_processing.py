@@ -67,6 +67,17 @@ def ProcessVideoData(database_path):
     # Only keep rows where 'processed' is False
     db_to_process = video_df[video_df['processed'] != True]
     db_to_process['processed'] = False
+    
+    # Check if 'ImagesPath' column exists - if not, create empty DataFrame and return
+    if 'ImagesPath' not in db_to_process.columns:
+        # Create empty DataFrame with all expected columns
+        expected_columns = list(video_df.columns) + ['bounding_box', 'crop_aspect_ratio']
+        empty_df = pd.DataFrame(columns=expected_columns)
+        
+        # Save empty DataFrame and return
+        save_data(empty_df, video_data_file)
+        return
+    
     append_audit("video_processing.input_videos", len(db_to_process))
     
     print("Finding OCR Masks")

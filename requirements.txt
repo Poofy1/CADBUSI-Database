@@ -8,8 +8,8 @@ matplotlib
 easyocr
 #labelbox # wont work in GCP
 #requests # wont work in GCP
-torch
-torchvision
+torch>=1.13.0,<2.1.0
+torchvision>=0.14.0,<0.16.0
 segmentation-models-pytorch
 google-cloud-storage
 google-cloud-pubsub

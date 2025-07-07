@@ -25,7 +25,7 @@ def Inpaint_Dataset_N2N(csv_file_path, input_folder):
     # Filter the data
     processed_data = data[
         (data['label'] == True) & 
-        (data['has_calipers'] == True) & 
+        ((data['has_calipers'] == True) | (data['PhotometricInterpretation'] == 'RGB')) & 
         (data['Inpainted'] == False)
     ]
     
