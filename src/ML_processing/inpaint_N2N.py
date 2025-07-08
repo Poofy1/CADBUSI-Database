@@ -3,6 +3,7 @@ from torchvision import transforms
 import os
 from tqdm import tqdm
 import numpy as np
+import pandas as pd
 from PIL import Image
 from training.train_twin_N2N import N2N_Original_Used_UNet
 from storage_adapter import *
@@ -16,17 +17,15 @@ def Inpaint_Dataset_N2N(csv_file_path, input_folder):
     # Load the CSV file
     data = read_csv(csv_file_path)
     
-    # Add 'Inpainted' column if not present
-    if 'Inpainted' not in data.columns:
-        data['Inpainted'] = False
-    else:
-        data['Inpainted'] = data['Inpainted'].where(data['Inpainted'], False)
+    # Add 'inpainted_from' column if not present
+    if 'inpainted_from' not in data.columns:
+        data['inpainted_from'] = None
     
-    # Filter the data
+    # Filter the data - only process rows that haven't been inpainted yet
     processed_data = data[
         (data['label'] == True) & 
         ((data['has_calipers'] == True) | (data['PhotometricInterpretation'] == 'RGB')) & 
-        (data['Inpainted'] == False)
+        (data['inpainted_from'].isna())
     ]
     
     # Prepare transforms
@@ -38,6 +37,9 @@ def Inpaint_Dataset_N2N(csv_file_path, input_folder):
     model.load_state_dict(torch.load(model_path))
     model.to(DEVICE)
     model.eval()
+    
+    # List to store new rows to be added
+    new_rows = []
     
     with torch.no_grad():
         for index, row in tqdm(processed_data.iterrows(), total=len(processed_data)):
@@ -100,12 +102,30 @@ def Inpaint_Dataset_N2N(csv_file_path, input_folder):
                 # For grayscale images, use processed result directly
                 final_image = processed_grayscale
             
-            # Save inpainted image
-            delete_file(input_image_path)
-            save_data(final_image, input_image_path)
+            # Create new filename with _inpainted suffix
+            original_filename = row['ImageName']
+            name, ext = os.path.splitext(original_filename)
+            new_filename = f"{name}_inpainted{ext}"
+            new_image_path = os.path.join(input_folder, new_filename)
+            new_image_path = os.path.normpath(new_image_path)
             
-            # Update CSV
-            data.loc[index, 'Inpainted'] = True
+            # Save inpainted image with new filename (keep original)
+            save_data(final_image, new_image_path)
+            
+            # Update the original row: set label to False
+            data.loc[index, 'label'] = False
+            
+            # Create a copy of the current row for the inpainted version
+            new_row = row.copy()
+            new_row['ImageName'] = new_filename
+            new_row['inpainted_from'] = original_filename  # Store original filename
+            new_row['label'] = True  # Set label to True for the inpainted version
+            new_rows.append(new_row)
+    
+    # Add all new rows to the dataframe
+    if new_rows:
+        new_rows_df = pd.DataFrame(new_rows)
+        data = pd.concat([data, new_rows_df], ignore_index=True)
     
     # Save updated CSV
     save_data(data, csv_file_path)

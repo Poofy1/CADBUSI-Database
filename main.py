@@ -13,7 +13,7 @@ from src.DB_processing.data_selection import Select_Data, Remove_Duplicate_Data,
 from src.DB_processing.export import Export_Database
 from src.DB_processing.dcm_parser import Parse_Dicom_Files
 from src.DB_processing.video_processing import ProcessVideoData
-from src.ML_processing.inpaint import Inpaint_Dataset
+from src.DB_processing.lesion_detection import Locate_Lesions
 from src.ML_processing.inpaint_N2N import Inpaint_Dataset_N2N
 from src.ML_processing.orientation_detection import Find_Orientation
 
@@ -111,7 +111,6 @@ def main():
         
         # Step 4: Clean data
         print("Step 4/5: Cleaning image data...")
-        #Remove_Duplicate_Data(CONFIG["DATABASE_DIR"]) # deprecated 
         #Find_Orientation(CONFIG) # Unnessesary and unreliable 
         Select_Data(CONFIG["DATABASE_DIR"], only_labels=False)
         
@@ -120,6 +119,8 @@ def main():
             print("Running inpainting (can be skipped with --skip-inpaint)...")
             Inpaint_Dataset_N2N(f'{CONFIG["DATABASE_DIR"]}/ImageData.csv', 
                             f'{CONFIG["DATABASE_DIR"]}/images/')
+            
+        Locate_Lesions(f'{CONFIG["DATABASE_DIR"]}/ImageData.csv', f'{CONFIG["DATABASE_DIR"]}/images/')
         
         # Step 5: Process video
         print("Step 5/5: Processing video data...")

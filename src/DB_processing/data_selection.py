@@ -205,7 +205,7 @@ def process_nearest_given_ids(pid, db_out, image_folder_path):
             # Single image in group - no comparison possible
             single_idx = group_subset.index[0]
             subset.at[single_idx, 'closest_fn'] = ''
-            subset.at[single_idx, 'distance'] = -1
+            subset.at[single_idx, 'distance'] = 99999
     
     # Apply all results back to subset
     for i in all_results.keys():
@@ -276,8 +276,7 @@ def create_caliper_file(database_path, image_df, breast_df, max_workers=None):
     # Filter for images that have calipers
     caliper_images = image_df[
         (image_df['has_calipers'] == True) & 
-        (image_df['distance'] < 5) &
-        (image_df['distance'] >= 0)
+        (image_df['distance'] < 5)
     ].copy()
     
     if caliper_images.empty:
@@ -398,7 +397,7 @@ def Select_Data(database_path, only_labels):
         accession_ids = db_to_process['Accession_Number'].unique()
 
         db_to_process['closest_fn']=''
-        db_to_process['distance'] = -1
+        db_to_process['distance'] = 99999
 
         # 1 worker is the fastest for GCP, do not change
         with ThreadPoolExecutor(max_workers=1) as executor, tqdm(total=len(accession_ids), desc='') as progress:
@@ -430,38 +429,3 @@ def Select_Data(database_path, only_labels):
     save_data(db_out, input_file)
     
     create_caliper_file(database_path, db_out, breast_df)
-
-
-def Remove_Duplicate_Data(database_path):
-    print("Removing Duplicate Data")
-    
-    input_file = f'{database_path}/ImageData.csv'
-    image_folder_path = f"{database_path}/images/"
-    
-    # Read the CSV file
-    df = read_csv(input_file)
-    
-    # Identify rows with duplicate 'DicomHash' values, except for the last occurrence
-    duplicates = df[df.duplicated(subset='DicomHash', keep='last')]
-    
-    # Get the count of duplicate rows
-    duplicate_count = len(duplicates)
-    
-    # Extract the image names of the duplicate rows
-    duplicate_image_names = duplicates['ImageName'].tolist()
-    
-    # Remove the duplicate rows from the dataframe
-    df.drop_duplicates(subset='DicomHash', keep='last', inplace=True)
-    
-    # Save the cleaned dataframe back to the CSV file
-    save_data(df, input_file)
-    append_audit("image_processing.duplicates_removed", duplicate_count)
-    
-    # Delete the duplicate images
-    for image_name in tqdm(duplicate_image_names):
-        image_path = os.path.join(image_folder_path, image_name)
-        if file_exists(image_path):
-            delete_file(image_path)
-    
-    # Print the number of duplicates removed
-    print(f"Removed {duplicate_count} duplicate rows")
