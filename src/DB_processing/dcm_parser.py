@@ -213,7 +213,7 @@ def manual_decompress(ds):
     
     
     
-def deidentify_dicom(ds):
+def deidentify_dicom(ds, is_video, is_secondary):
     
     global ENCRYPTION_KEY
     
@@ -227,24 +227,6 @@ def deidentify_dicom(ds):
     # Only walk file_meta if it exists
     if hasattr(ds, 'file_meta') and ds.file_meta is not None:
         ds.file_meta.walk(anon_callback)
-
-    # Safely check for Multi-frame content
-    is_video = False
-    is_secondary = False
-    try:
-        if hasattr(ds, 'file_meta') and 0x00020002 in ds.file_meta:
-            media_type = ds.file_meta[0x00020002]
-            is_video = str(media_type).find('Multi-frame') > -1
-            is_secondary = 'Secondary' in str(media_type)
-        # Additional check for multi-frame files
-        elif hasattr(ds, 'NumberOfFrames') and ds.NumberOfFrames > 1:
-            is_video = True
-            
-        # Method 3: Check SOP Class UID (backup method)
-        elif hasattr(ds, 'SOPClassUID') and 'Multi-frame' in str(ds.SOPClassUID):
-            is_video = True
-    except Exception as e:
-        print(f"Error determining media type: {e}")
 
     y0 = 101
     
@@ -290,7 +272,7 @@ def deidentify_dicom(ds):
     # Keep the original transfer syntax
     ds.file_meta.TransferSyntaxUID = ds.file_meta.TransferSyntaxUID
 
-    return ds, is_video
+    return ds
 
 
 
@@ -383,9 +365,29 @@ def parse_single_dcm(dcm, current_index, parsed_database, video_n_frames, max_re
     # Not a ultrasound image, likely a image of the settings or some sketch notes
     if not hasattr(dataset, 'SequenceOfUltrasoundRegions'):
         return None
+    
+    # Safely check for Multi-frame content
+    is_video = False
+    is_secondary = False
+    try:
+        if hasattr(dataset, 'file_meta') and 0x00020002 in dataset.file_meta:
+            media_type = dataset.file_meta[0x00020002]
+            is_video = str(media_type).find('Multi-frame') > -1
+            is_secondary = 'Secondary' in str(media_type)
+        # Additional check for multi-frame files
+        elif hasattr(dataset, 'NumberOfFrames') and dataset.NumberOfFrames > 1:
+            is_video = True
+        # Method 3: Check SOP Class UID (backup method)
+        elif hasattr(dataset, 'SOPClassUID') and 'Multi-frame' in str(dataset.SOPClassUID):
+            is_video = True
+    except Exception as e:
+        print(f"Error determining media type: {e}")
         
+    if (is_video and video_n_frames == 0):
+        return None
+    
     # Anonymize 
-    dataset, is_video = deidentify_dicom(dataset)
+    dataset = deidentify_dicom(dataset, is_video, is_secondary)
     
     if (dataset is None):
         return None
