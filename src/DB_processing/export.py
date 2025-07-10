@@ -630,6 +630,14 @@ def Export_Database(CONFIG, reparse_images = True):
                 instance_data['Reject Image'] = instance_data['Reject Image'].fillna(False)
             else:
                 instance_data.drop(columns=['Reject Image'], inplace=True)
+                
+            # Add PhysicalDeltaX to instance_data for all instances
+            if instance_data is not None and 'PhysicalDeltaX' in image_df.columns:
+                # Create a mapping from ImageName to PhysicalDeltaX
+                image_to_physicaldelta_map = dict(zip(image_df['ImageName'], image_df['PhysicalDeltaX']))
+                
+                # Add PhysicalDeltaX column to all instances
+                instance_data['PhysicalDeltaX'] = instance_data['ImageName'].map(image_to_physicaldelta_map)
     else:
         instance_data = None
         

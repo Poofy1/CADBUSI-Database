@@ -9,7 +9,7 @@ from src.query_clean_rad import filter_rad_data
 from src.filter_data import create_final_dataset
 
 from src.DB_processing.image_processing import analyze_images
-from src.DB_processing.data_selection import Select_Data, Remove_Duplicate_Data, Remove_Green_Images
+from src.DB_processing.data_selection import Select_Data, Remove_Green_Images
 from src.DB_processing.export import Export_Database
 from src.DB_processing.dcm_parser import Parse_Dicom_Files
 from src.DB_processing.video_processing import ProcessVideoData

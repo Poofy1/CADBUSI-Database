@@ -16,6 +16,14 @@ logging.getLogger().setLevel(logging.ERROR)
 warnings.filterwarnings('ignore', category=UserWarning, message='.*Invalid value for VR UI.*')
 env = os.path.dirname(os.path.abspath(__file__))
 
+try:
+    import gdcm
+    GDCM_AVAILABLE = True
+    print("GDCM loaded - enhanced DICOM decompression available")
+except ImportError:
+    GDCM_AVAILABLE = False
+    print("GDCM not available - compressed DICOM handling may fail")
+
 
 ENCRYPTION_KEY = None
 
@@ -71,6 +79,7 @@ def has_red_pixels(image, n=100, min_r=200):
                 return True
     return False
 
+'''
 def manual_decompress(ds):
     """
     Replacement for ds.decompress() for specific edge cases where normal decompression fails
@@ -210,8 +219,8 @@ def manual_decompress(ds):
     except Exception as e:
         print(f"Error updating dataset: {e}")
         return None
-    
-    
+
+'''
     
 def deidentify_dicom(ds, is_video, is_secondary):
     
@@ -244,18 +253,19 @@ def deidentify_dicom(ds, is_video, is_secondary):
         is_compressed = True
     else:
         print("couldn't determine if compressed")
-        return None, is_video
+        return None
 
     # Attempt to decompress if needed
     if is_compressed:
         try:
             ds.decompress()
         except Exception as e:
-            # Try manual decompression
-            ds = manual_decompress(ds)
-            
-            if ds is None:
-                print("Manual and automatic decompression failed")
+            print(f"GDCM decompression failed: {e}")
+            try:
+                arr = ds.pixel_array  # Sometimes this works even when decompress() fails
+                print("Got pixel data despite decompression failure")
+            except Exception as e2:
+                print(f"Cannot access pixel data: {e2}")
                 return None
         
     # crop patient info above US region 
@@ -335,7 +345,7 @@ def parse_video_data(dcm, dataset, current_index, parsed_database, video_n_frame
 
     # Add custom data
     data_dict['DataType'] = 'video'
-    data_dict['FileName'] = os.path.basename(dcm)
+    data_dict['FileName'] = os.path.join(os.path.basename(os.path.dirname(dcm)), os.path.basename(dcm))
     data_dict['ImagesPath'] = video_path
     data_dict['SavedFrames'] = image_count
     data_dict['DicomHash'] = os.path.splitext(os.path.basename(dcm))[0]
@@ -455,7 +465,7 @@ def parse_single_dcm(dcm, current_index, parsed_database, video_n_frames, max_re
 
     # Add custom data
     data_dict['DataType'] = 'image'
-    data_dict['FileName'] = os.path.basename(dcm)
+    data_dict['FileName'] = os.path.join(os.path.basename(os.path.dirname(dcm)), os.path.basename(dcm))
     data_dict['ImageName'] = image_name
     data_dict['DicomHash'] = os.path.splitext(os.path.basename(dcm))[0]
     data_dict['RegionCount'] = region_count
@@ -545,7 +555,7 @@ def parse_anon_file(anon_location, database_path, image_df, ):
     common_columns = ['Patient_ID', 'Accession_Number', 'RegionSpatialFormat', 'RegionDataType', 
                     'RegionLocationMinX0', 'RegionLocationMinY0', 'RegionLocationMaxX1', 
                     'RegionLocationMaxY1', 'PhotometricInterpretation', 'Rows', 'Columns',
-                    'FileName', 'DicomHash', 'SoftwareVersions', 'ManufacturerModelName']
+                    'FileName', 'DicomHash', 'SoftwareVersions', 'ManufacturerModelName', 'PhysicalDeltaX']
 
     # Keep only necessary columns from dataframes
     if not video_df.empty:

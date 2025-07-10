@@ -78,7 +78,7 @@ def get_caliper_inpainted_pairs(csv_file_path):
     
     # Filter for images with distance <= 5, has_calipers = True, and closest_fn not null
     closest_candidates = data[
-        (data['distance'] <= 5) & 
+        (data['distance'] <= 5) & (data['distance'] > 0) & 
         (data['has_calipers'] == True) & 
         (data['closest_fn'].notna())
     ]
@@ -111,75 +111,30 @@ def get_caliper_inpainted_pairs(csv_file_path):
     print(f"Found {len(inpainted_pairs)} inpainted pairs")
     print(f"Found {len(closest_pairs)} closest clean pairs")
     print(f"Total: {len(all_pairs)} image pairs")
-    
     return all_pairs
 
 
 
-def create_difference_masks(pairs, input_folder, threshold=30):
-    """
-    Load image pairs in grayscale and create binary difference masks.
+def create_difference_mask(caliper_path, clean_path, input_folder, threshold=30):
     
-    Args:
-        pairs: List of image pairs from get_caliper_inpainted_pairs()
-        input_folder: Folder containing the images
-        threshold: Threshold value (0-255) for creating binary mask. 
-                  Differences above this value will be white (255), below will be black (0)
+    # Get image paths
+    caliper_path = os.path.join(input_folder, caliper_path)
+    clean_path = os.path.join(input_folder, clean_path)
+    caliper_path = os.path.normpath(caliper_path)
+    clean_path = os.path.normpath(clean_path)
     
-    Returns:
-        List of dictionaries containing:
-        - 'caliper_image': PIL grayscale image of caliper image
-        - 'clean_image': PIL grayscale image of clean image
-        - 'difference_mask': PIL binary mask showing differences
-    """
-    print(f"Creating difference masks for {len(pairs)} image pairs...")
+    # Load images and convert to grayscale
+    caliper_img = read_image(caliper_path, use_pil=True).convert('L')
+    clean_img = read_image(clean_path, use_pil=True).convert('L')
+    caliper_array = np.array(caliper_img, dtype=np.float32)
+    clean_array = np.array(clean_img, dtype=np.float32)
     
-    results = []
-    successful_count = 0
-    
-    for i, pair in enumerate(pairs):
-        try:
-            # Get image paths
-            caliper_path = os.path.join(input_folder, pair['caliper_image'])
-            clean_path = os.path.join(input_folder, pair['clean_image'])
-            caliper_path = os.path.normpath(caliper_path)
-            clean_path = os.path.normpath(clean_path)
-            
-            # Check if files exist
-            if not os.path.exists(caliper_path):
-                print(f"Warning: Caliper image not found: {caliper_path}")
-                continue
-                
-            if not os.path.exists(clean_path):
-                print(f"Warning: Clean image not found: {clean_path}")
-                continue
-            
-            # Load images and convert to grayscale
-            caliper_img = read_image(caliper_path, use_pil=True).convert('L')
-            clean_img = read_image(clean_path, use_pil=True).convert('L')
-            caliper_array = np.array(caliper_img, dtype=np.float32)
-            clean_array = np.array(clean_img, dtype=np.float32)
-            
-            # Create binary mask (threshold the difference)
-            difference_array = np.abs(caliper_array - clean_array)
-            mask_array = np.where(difference_array > threshold, 255, 0).astype(np.uint8)
-            mask_img = Image.fromarray(mask_array, mode='L')
-            
-            # Store results
-            result = {
-                'caliper_image': caliper_img,
-                'clean_image': clean_img,
-                'difference_mask': mask_img,
-            }
-            
-            results.append(result)
-            successful_count += 1
-            
-        except Exception as e:
-            print(f"Error processing pair {i+1} ({pair['caliper_image']} -> {pair['clean_image']}): {str(e)}")
-    
-    print(f"Successfully processed {successful_count}/{len(pairs)} image pairs")
-    return results
+    # Create binary mask (threshold the difference)
+    difference_array = np.abs(caliper_array - clean_array)
+    mask_array = np.where(difference_array > threshold, 255, 0).astype(np.uint8)
+    mask_img = Image.fromarray(mask_array, mode='L')
+
+    return caliper_img, clean_img, mask_img
 
 
 
@@ -310,7 +265,7 @@ def detect_calipers_from_mask(difference_mask, min_area=20, max_area=500, morpho
     
     return caliper_centers
 
-def process_single_image_pair(pair_data, mask_result, image_data_row):
+def process_single_image_pair(pair, image_dir, image_data_row):
     """
     Process a single image pair to detect calipers and compute bounding boxes.
     
@@ -322,21 +277,65 @@ def process_single_image_pair(pair_data, mask_result, image_data_row):
     Returns:
         Dictionary with detection results
     """
+    caliper_path = pair['caliper_image']
+    clean_path = pair['clean_image']
+    
     # Extract caliper centers from mask
-    caliper_centers = detect_calipers_from_mask(mask_result['difference_mask'])
+    caliper_img, clean_img, mask_img = create_difference_mask(caliper_path, clean_path, image_dir)
+    caliper_centers = detect_calipers_from_mask(mask_img)
+    
+    
+    
+    # Create a copy of the caliper image to draw centers on
+    caliper_img_with_centers = caliper_img.copy()
+
+    # Convert PIL Image to numpy array if needed for drawing
+    if isinstance(caliper_img_with_centers, Image.Image):
+        caliper_img_with_centers = np.array(caliper_img_with_centers)
+        # Convert to BGR if it's RGB (for OpenCV compatibility)
+        if len(caliper_img_with_centers.shape) == 3:
+            caliper_img_with_centers = cv2.cvtColor(caliper_img_with_centers, cv2.COLOR_RGB2BGR)
+
+    # Draw caliper centers on the image
+    for center in caliper_centers:
+        x, y = center
+        # Draw green circles at caliper center locations
+        cv2.circle(caliper_img_with_centers, (x, y), 8, (0, 255, 0), 2)  # Green circles
+        # Optional: Add a small center dot
+        cv2.circle(caliper_img_with_centers, (x, y), 2, (0, 0, 255), -1)  # Red center dot
+
+    parent_dir = os.path.dirname(os.path.normpath(image_dir))
+    save_dir = os.path.join(parent_dir, "test_images")
+
+    # Use the caliper image name as the base for filenames
+    base_name = caliper_path.replace('.png', '').replace('.jpg', '').replace('.jpeg', '')
+    mask_filename = f"{base_name}_mask.png"
+    caliper_filename = f"{base_name}_caliper_with_centers.png"
+    clean_filename = f"{base_name}_clean.png"
+
+    mask_save_path = os.path.join(save_dir, mask_filename)
+    caliper_save_path = os.path.join(save_dir, caliper_filename)
+    clean_save_path = os.path.join(save_dir, clean_filename)
+
+    # Save both images
+    save_data(mask_img, mask_save_path)
+    save_data(caliper_img_with_centers, caliper_save_path)
+    save_data(clean_img, clean_save_path)
+    print(mask_save_path)
+    
     
     # Get parameters for pairing
     px_spacing = float(image_data_row.get("delta_x", 0.1)) * 10 if "delta_x" in image_data_row else 1.0
     
     # Load the full image to extract expected lengths
-    # Note: You might need to adapt this path construction based on your setup
-    img_path = os.path.join("your_image_dir", image_data_row["filename"])  # Update this path
     try:
-        img = read_image(img_path, use_pil=True).convert('L')
-        img_array = np.array(img)
-        expected_lengths, _ = extract_expected_lengths(img_array)
+        caliper_array = np.array(caliper_img, dtype=np.float32)
+        expected_lengths, _ = extract_expected_lengths(caliper_array)
     except:
         expected_lengths = [2.0, 1.5]  # Default values if OCR fails
+        
+        
+    print(expected_lengths)
     
     result = {
         'caliper_centers': caliper_centers,
@@ -390,40 +389,32 @@ def Locate_Lesions(csv_file_path, image_dir):
         print("No image pairs found for mask-based detection.")
         return None
     
-    # Create difference masks
-    mask_results = create_difference_masks(pairs, image_dir)
+    # Create a mapping from ImageName to row index for faster lookup
+    image_name_to_idx = {row['ImageName']: idx for idx, row in image_data.iterrows()}
     
-    # Create lookup dictionary using CLEAN image filename as key
-    mask_lookup = {}
-    for i, pair in enumerate(pairs):
-        if i < len(mask_results):
-            mask_lookup[pair['clean_image']] = {
-                'pair_data': pair,
-                'mask_result': mask_results[i]
-            }
-    
-    # Process each row
+    # Process each pair
     processed_count = 0
-    for idx, row in image_data.iterrows():
-        filename = row["filename"]
+    for pair in pairs:
+        clean_image_name = pair['clean_image']
         
-        # Check if this is a clean image that has mask data
-        if filename in mask_lookup:
-            # Use mask-based detection
-            mask_info = mask_lookup[filename]
-            detection_result = process_single_image_pair(
-                mask_info['pair_data'],
-                mask_info['mask_result'],
-                row
-            )
+        # Find the row index for the clean image
+        if clean_image_name in image_name_to_idx:
+            clean_idx = image_name_to_idx[clean_image_name]
+            clean_row = image_data.iloc[clean_idx]
             
-            # Update the CSV row (this will be the clean image row)
-            image_data.at[idx, "caliper_pairs"] = detection_result['caliper_pairs']
-            image_data.at[idx, "caliper_box"] = detection_result['caliper_box']
+            # Use mask-based detection on this specific pair
+            detection_result = process_single_image_pair(pair, image_dir, clean_row)
+            
+            # Update only the clean image row
+            image_data.at[clean_idx, "caliper_pairs"] = detection_result['caliper_pairs']
+            image_data.at[clean_idx, "caliper_box"] = detection_result['caliper_box']
             
             processed_count += 1
+        else:
+            print(f"Warning: Clean image '{clean_image_name}' not found in CSV data")
     
     # Save updated CSV
     save_data(image_data, csv_file_path)
     
-    print(f"Processed {processed_count} images with mask-based detection")
+    print(f"Processed {processed_count} image pairs with mask-based detection")
+    return image_data
