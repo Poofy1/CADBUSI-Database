@@ -7,7 +7,6 @@ pyffx
 matplotlib
 easyocr
 python-gdcm
-pytesseract
 #labelbox # wont work in GCP
 #requests # wont work in GCP
 torch>=1.13.0,<2.1.0

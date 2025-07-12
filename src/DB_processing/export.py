@@ -568,7 +568,7 @@ def ExportAuditReport(image_df, breast_df, video_df, video_images_df):
         
 def Export_Database(CONFIG, reparse_images = True):
     #Debug Tools
-    use_reject_system = True # True = removes rejects from trianing
+    use_reject_system = True # True = removes rejects from training
     
     output_dir = CONFIG["EXPORT_DIR"]
     parsed_database = CONFIG["DATABASE_DIR"]
@@ -598,12 +598,32 @@ def Export_Database(CONFIG, reparse_images = True):
     video_df = read_csv(video_csv_file)
     image_df = read_csv(image_csv_file)
     breast_df = read_csv(breast_csv_file)
+    
+    # Always create instance_data from image_df - never None
+    instance_data = image_df[['DicomHash', 'ImageName']].copy()
+    
+    # Always add PhysicalDeltaX to instance_data for all instances
+    if 'PhysicalDeltaX' in image_df.columns:
+        image_to_physicaldelta_map = dict(zip(image_df['ImageName'], image_df['PhysicalDeltaX']))
+        instance_data['PhysicalDeltaX'] = instance_data['ImageName'].map(image_to_physicaldelta_map)
+    
+    # If instance labels file exists, merge that data
     if file_exists(instance_labels_csv_file):
-        instance_data = read_csv(instance_labels_csv_file)
+        labelbox_instance_data = read_csv(instance_labels_csv_file)
         
-        # Format Instance Data
-        file_to_image_name_map = dict(zip(image_df['DicomHash'], image_df['ImageName']))
-        instance_data['ImageName'] = instance_data['DicomHash'].map(file_to_image_name_map)
+        # Merge labelbox data with our base instance_data
+        instance_data = instance_data.merge(
+            labelbox_instance_data, 
+            on='DicomHash', 
+            how='left',
+            suffixes=('', '_labelbox')
+        )
+        
+        # Handle ImageName conflicts (keep the original)
+        if 'ImageName_labelbox' in instance_data.columns:
+            instance_data.drop(columns=['ImageName_labelbox'], inplace=True)
+        
+        # Only keep instances that exist in our image_df
         instance_data = instance_data[instance_data['DicomHash'].isin(image_df['DicomHash'])]
 
         if 'Reject Image' in instance_data.columns:
@@ -624,22 +644,12 @@ def Export_Database(CONFIG, reparse_images = True):
                 removed_count = before_count - len(image_df)
                 
                 append_audit("export.labeled_reject_removed", removed_count)
-            
-            # If not using reject system, keep 'Reject Image' as a column
-            if not use_reject_system:
-                instance_data['Reject Image'] = instance_data['Reject Image'].fillna(False)
-            else:
+                
+                # Drop the Reject Image column since we've processed it
                 instance_data.drop(columns=['Reject Image'], inplace=True)
-                
-            # Add PhysicalDeltaX to instance_data for all instances
-            if instance_data is not None and 'PhysicalDeltaX' in image_df.columns:
-                # Create a mapping from ImageName to PhysicalDeltaX
-                image_to_physicaldelta_map = dict(zip(image_df['ImageName'], image_df['PhysicalDeltaX']))
-                
-                # Add PhysicalDeltaX column to all instances
-                instance_data['PhysicalDeltaX'] = instance_data['ImageName'].map(image_to_physicaldelta_map)
-    else:
-        instance_data = None
+            else:
+                # If not using reject system, keep 'Reject Image' as a column
+                instance_data['Reject Image'] = instance_data['Reject Image'].fillna(False)
         
 
     if os.path.exists(labeled_data_dir):
@@ -685,11 +695,11 @@ def Export_Database(CONFIG, reparse_images = True):
         Crop_Videos(video_df, parsed_database, output_dir)
     
     # Convert 'Patient_ID' columns to integers
-    labeled_df['Patient_ID'] = labeled_df['Patient_ID'].astype(str)
+    labeled_df['Patient_ID'] = labeled_df['Patient_ID'].astype(int).astype(str)
     image_df['Accession_Number'] = image_df['Accession_Number'].astype(str)
-    image_df['Patient_ID'] = image_df['Patient_ID'].astype(str)
+    image_df['Patient_ID'] = image_df['Patient_ID'].astype(int).astype(str)
     breast_df['Accession_Number'] = breast_df['Accession_Number'].astype(str)
-    breast_df['Patient_ID'] = breast_df['Patient_ID'].astype(str)
+    breast_df['Patient_ID'] = breast_df['Patient_ID'].astype(int).astype(str)
 
     # Set 'Labeled' to True for rows with a 'Patient_ID' in labeled_df
     image_df.loc[image_df['Patient_ID'].isin(labeled_df['Patient_ID']), 'labeled'] = True
@@ -722,13 +732,21 @@ def Export_Database(CONFIG, reparse_images = True):
     train_data = format_data(breast_df, image_df)
     
     # Create a mapping of (Accession_Number, laterality) to list of ImagesPath
-    video_df['laterality'] = video_df['laterality'].str.upper()
-    video_paths = video_df.groupby(['Accession_Number', 'laterality'])['ImagesPath'].agg(list).to_dict()
-    train_data['VideoPaths'] = train_data.apply(lambda row: video_paths.get((row['Accession_Number'], row['Study_Laterality']), []), axis=1)
-
-    if reparse_images:  
-        video_images_df = generate_video_images_csv(video_df, output_dir)
-        save_data(video_images_df, os.path.join(output_dir, 'VideoImages.csv'))
+    if not video_df.empty and 'ImagesPath' in video_df.columns:
+        video_df['laterality'] = video_df['laterality'].str.upper()
+        video_paths = video_df.groupby(['Accession_Number', 'laterality'])['ImagesPath'].agg(list).to_dict()
+        train_data['VideoPaths'] = train_data.apply(lambda row: video_paths.get((row['Accession_Number'], row['Study_Laterality']), []), axis=1)
+        
+        if reparse_images:  
+            video_images_df = generate_video_images_csv(video_df, output_dir)
+            save_data(video_images_df, os.path.join(output_dir, 'VideoImages.csv'))
+        else:
+            video_images_df = None
+    else:
+        # No video data available
+        train_data['VideoPaths'] = [[] for _ in range(len(train_data))]  # Empty lists for all rows
+        video_images_df = None
+        print("No video data found - VideoPaths set to empty lists")
 
     # Write the filtered dataframes to CSV files in the output directory
     save_data(breast_df, os.path.join(output_dir, 'BreastData.csv'))

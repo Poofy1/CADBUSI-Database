@@ -3,13 +3,12 @@ import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 from pathlib import Path
-import pytesseract
 from itertools import combinations
 import re
 import os
 from PIL import Image
 from storage_adapter import *
-
+from src.DB_processing.tools import get_reader, reader, append_audit
 
 
 def get_caliper_inpainted_pairs(csv_file_path):
@@ -151,12 +150,60 @@ def extract_expected_lengths(img_gray):
     row_sums = np.sum(img_gray[:, x1:x2] > 100, axis=1)
     white_rows = np.where(row_sums > 0.9 * (x2 - x1))[0]
     white_rows = white_rows[white_rows > h-73]
-    y1, y2 = (white_rows[0], h-2) if white_rows[0] < 650 else (white_rows[3], h-2)
+    
+    # Simplified: just use the highest (topmost) white row if any exist
+    if len(white_rows) > 0:
+        y1, y2 = white_rows[0], white_rows[-1]  # First (highest) white row to bottom-2
+    else:
+        y1, y2 = h-30, h-2  # Default: bottom 30 pixels if no white rows found
+    
+    # ADD BOUNDS CHECKING - ensure coordinates are within image boundaries
+    x1 = max(0, min(x1, w - 1))
+    x2 = max(x1 + 1, min(x2, w))  # Ensure x2 > x1 and within bounds
+    y1 = max(0, min(y1, h - 1))
+    y2 = max(y1 + 1, min(y2, h))  # Ensure y2 > y1 and within bounds
+    
+    # Additional safety check - ensure minimum crop size
+    if (y2 - y1) < 2 or (x2 - x1) < 2:
+        # If crop region is too small, use a safe default region
+        y1 = max(0, h - 20)
+        y2 = h
+        x1 = 0
+        x2 = w
+    
+    # Create the crop
     legend_crop = img_gray[y1:y2, x1:x2]
-    config = "--psm 11 -c tessedit_char_whitelist=0123456789.Lcm "
-    text = pytesseract.image_to_string(legend_crop, config=config).replace("\n", " ").replace(":", "")
-    matches = re.findall(r"\d+\.?\d*\s*cm", text)
-    lengths = [float(m.replace("cm", "").strip()) for m in matches]
+    
+    # Validate the crop before sending to pytesseract
+    if legend_crop.size == 0:
+        print(f"Warning: Empty crop region at ({x1},{y1}) to ({x2},{y2})")
+        return [], (x1, y1, x2, y2)
+    
+    try:
+        reader = get_reader()
+        
+        # Try with paragraph=True first
+        results = reader.readtext(legend_crop, paragraph=True, width_ths=0.9, height_ths=0.9)
+        
+        # If that doesn't work well, try without paragraph grouping
+        if len(results) < 2:  # Expecting multiple measurements
+            results = reader.readtext(legend_crop, paragraph=False)
+        
+        # Extract text and find measurements
+        all_text = []
+        for (bbox, text, confidence) in results:
+            if confidence > 0.5:  # Filter low-confidence detections
+                all_text.append(text)
+        
+        # Combine all text and search for measurements
+        combined_text = " ".join(all_text)
+        matches = re.findall(r"\d+\.?\d*\s*cm", combined_text)
+        lengths = [float(m.replace("cm", "").strip()) for m in matches]
+        
+    except Exception as e:
+        print(f"EasyOCR failed: {e}")
+        lengths = []
+    
     return lengths, (x1, y1, x2, y2)
 
 def do_segments_intersect(p1, p2, q1, q2):
@@ -209,63 +256,87 @@ def compute_oriented_bbox_and_cyan_bbox(centers):
 
 
 
-def detect_calipers_from_mask(difference_mask, min_area=20, max_area=500, morphology_cleanup=True):
+def detect_calipers_from_mask(difference_mask, min_area=20, max_area=500):
     """
-    Extract caliper locations from a difference mask.
-    
-    Args:
-        difference_mask: PIL Image or numpy array of the binary difference mask
-        min_area: Minimum area of connected components to consider as calipers
-        max_area: Maximum area of connected components to consider as calipers
-        morphology_cleanup: Apply morphological operations to clean up mask
-    
-    Returns:
-        List of (x, y) coordinates of detected caliper centers
+    Detect cross/X patterns by analyzing contour properties.
     """
     # Convert to numpy if PIL Image
     if hasattr(difference_mask, 'convert'):
         mask_array = np.array(difference_mask)
     else:
-        mask_array = difference_mask
+        mask_array = difference_mask.copy()
     
-    # Optional morphological cleanup
-    if morphology_cleanup:
-        # Remove small noise
-        kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-        mask_array = cv2.morphologyEx(mask_array, cv2.MORPH_OPEN, kernel_open)
-        
-        # Fill small holes
-        kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-        mask_array = cv2.morphologyEx(mask_array, cv2.MORPH_CLOSE, kernel_close)
+    # Ensure binary mask
+    if len(mask_array.shape) == 3:
+        mask_array = cv2.cvtColor(mask_array, cv2.COLOR_RGB2GRAY)
+    mask_array = (mask_array > 127).astype(np.uint8) * 255
     
-    # Find connected components
-    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask_array, connectivity=8)
+    # Find contours
+    contours, _ = cv2.findContours(mask_array, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
     caliper_centers = []
     
-    for i in range(1, num_labels):  # Skip background label 0
-        area = stats[i, cv2.CC_STAT_AREA]
+    for contour in contours:
+        area = cv2.contourArea(contour)
         
         if min_area <= area <= max_area:
-            # Additional filtering based on shape (optional)
-            component_mask = (labels == i).astype(np.uint8) * 255
-            contours, _ = cv2.findContours(component_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            # Get bounding box
+            x, y, w, h = cv2.boundingRect(contour)
             
-            if contours:
-                contour = contours[0]
-                # Calculate circularity (calipers are typically somewhat circular)
-                perimeter = cv2.arcLength(contour, True)
-                if perimeter > 0:
-                    circularity = 4 * np.pi * area / (perimeter * perimeter)
-                    
-                    # Accept if reasonably circular (adjust threshold as needed)
-                    if 0.1 <= circularity <= 1.2:
-                        cx, cy = centroids[i]
-                        caliper_centers.append((int(cx), int(cy)))
+            # Check aspect ratio (cross shapes should be roughly square)
+            aspect_ratio = max(w, h) / max(min(w, h), 1)
+            if aspect_ratio > 3:  # Too elongated
+                continue
+            
+            # Extract the region of interest
+            roi = mask_array[y:y+h, x:x+w]
+            
+            if is_cross_or_x_shape(roi):
+                # Calculate center
+                M = cv2.moments(contour)
+                if M["m00"] != 0:
+                    cx = int(M["m10"] / M["m00"])
+                    cy = int(M["m01"] / M["m00"])
+                    caliper_centers.append((cx, cy))
     
     return caliper_centers
 
-def process_single_image_pair(pair, image_dir, image_data_row):
+def is_cross_or_x_shape(roi):
+    """
+    Check if a binary ROI contains a cross or X shape by analyzing line intersections.
+    """
+    if roi.shape[0] < 5 or roi.shape[1] < 5:
+        return False
+    
+    # Use HoughLines to detect lines
+    edges = cv2.Canny(roi, 50, 150, apertureSize=3)
+    lines = cv2.HoughLines(edges, 1, np.pi/180, threshold=max(3, min(roi.shape)//3))
+    
+    if lines is None or len(lines) < 2:
+        return False
+    
+    # Analyze line orientations
+    angles = []
+    for line in lines:
+        rho, theta = line[0]
+        angles.append(theta)
+    
+    # Check for perpendicular lines (cross) or diagonal lines (X)
+    angles = np.array(angles)
+    
+    # For cross: look for horizontal and vertical lines
+    horizontal = np.sum(np.abs(angles - 0) < 0.2) + np.sum(np.abs(angles - np.pi) < 0.2)
+    vertical = np.sum(np.abs(angles - np.pi/2) < 0.2)
+    
+    # For X: look for diagonal lines
+    diagonal1 = np.sum(np.abs(angles - np.pi/4) < 0.3)
+    diagonal2 = np.sum(np.abs(angles - 3*np.pi/4) < 0.3)
+    
+    # Return True if we have evidence of cross or X pattern
+    return (horizontal > 0 and vertical > 0) or (diagonal1 > 0 and diagonal2 > 0)
+
+
+def process_single_image_pair(pair, image_dir, image_data_row, save_debug_images = True):
     """
     Process a single image pair to detect calipers and compute bounding boxes.
     
@@ -282,60 +353,47 @@ def process_single_image_pair(pair, image_dir, image_data_row):
     
     # Extract caliper centers from mask
     caliper_img, clean_img, mask_img = create_difference_mask(caliper_path, clean_path, image_dir)
+    
+    
+    
+    # Find Calipers
+    # Mask out everything outside the crop region
+    crop_x, crop_y, crop_w, crop_h = None, None, None, None
+    if all(col in image_data_row for col in ['crop_x', 'crop_y', 'crop_h', 'crop_w']):
+        crop_x = int(image_data_row['crop_x']) if pd.notna(image_data_row['crop_x']) else 0
+        crop_y = int(image_data_row['crop_y']) if pd.notna(image_data_row['crop_y']) else 0
+        crop_w = int(image_data_row['crop_w']) if pd.notna(image_data_row['crop_w']) else mask_img.width
+        crop_h = int(image_data_row['crop_h']) if pd.notna(image_data_row['crop_h']) else mask_img.height
+        
+        # Convert PIL Image to numpy array for masking
+        mask_array = np.array(mask_img)
+        
+        # Create a mask that blacks out everything outside the crop region
+        masked_array = np.zeros_like(mask_array)
+        
+        # Ensure crop coordinates are within image bounds
+        img_h, img_w = mask_array.shape
+        crop_x = max(0, min(crop_x, img_w))
+        crop_y = max(0, min(crop_y, img_h))
+        crop_x2 = min(img_w, crop_x + crop_w)
+        crop_y2 = min(img_h, crop_y + crop_h)
+        
+        # Copy only the crop region to the masked array
+        if crop_x2 > crop_x and crop_y2 > crop_y:
+            masked_array[crop_y:crop_y2, crop_x:crop_x2] = mask_array[crop_y:crop_y2, crop_x:crop_x2]
+        
+        # Convert back to PIL Image
+        mask_img = Image.fromarray(masked_array, mode='L')
+    
     caliper_centers = detect_calipers_from_mask(mask_img)
     
-    
-    
-    # Create a copy of the caliper image to draw centers on
-    caliper_img_with_centers = caliper_img.copy()
-
-    # Convert PIL Image to numpy array if needed for drawing
-    if isinstance(caliper_img_with_centers, Image.Image):
-        caliper_img_with_centers = np.array(caliper_img_with_centers)
-        # Convert to BGR if it's RGB (for OpenCV compatibility)
-        if len(caliper_img_with_centers.shape) == 3:
-            caliper_img_with_centers = cv2.cvtColor(caliper_img_with_centers, cv2.COLOR_RGB2BGR)
-
-    # Draw caliper centers on the image
-    for center in caliper_centers:
-        x, y = center
-        # Draw green circles at caliper center locations
-        cv2.circle(caliper_img_with_centers, (x, y), 8, (0, 255, 0), 2)  # Green circles
-        # Optional: Add a small center dot
-        cv2.circle(caliper_img_with_centers, (x, y), 2, (0, 0, 255), -1)  # Red center dot
-
-    parent_dir = os.path.dirname(os.path.normpath(image_dir))
-    save_dir = os.path.join(parent_dir, "test_images")
-
-    # Use the caliper image name as the base for filenames
-    base_name = caliper_path.replace('.png', '').replace('.jpg', '').replace('.jpeg', '')
-    mask_filename = f"{base_name}_mask.png"
-    caliper_filename = f"{base_name}_caliper_with_centers.png"
-    clean_filename = f"{base_name}_clean.png"
-
-    mask_save_path = os.path.join(save_dir, mask_filename)
-    caliper_save_path = os.path.join(save_dir, caliper_filename)
-    clean_save_path = os.path.join(save_dir, clean_filename)
-
-    # Save both images
-    save_data(mask_img, mask_save_path)
-    save_data(caliper_img_with_centers, caliper_save_path)
-    save_data(clean_img, clean_save_path)
-    print(mask_save_path)
-    
-    
-    # Get parameters for pairing
-    px_spacing = float(image_data_row.get("delta_x", 0.1)) * 10 if "delta_x" in image_data_row else 1.0
-    
-    # Load the full image to extract expected lengths
-    try:
-        caliper_array = np.array(caliper_img, dtype=np.float32)
-        expected_lengths, _ = extract_expected_lengths(caliper_array)
-    except:
-        expected_lengths = [2.0, 1.5]  # Default values if OCR fails
+    # Extract expected lengths and get the legend crop coordinates
+    caliper_array = np.array(caliper_img, dtype=np.uint8)
+    expected_lengths, legend_crop_coords = extract_expected_lengths(caliper_array)
+    legend_x1, legend_y1, legend_x2, legend_y2 = legend_crop_coords
         
         
-    print(expected_lengths)
+    
     
     result = {
         'caliper_centers': caliper_centers,
@@ -352,12 +410,18 @@ def process_single_image_pair(pair, image_dir, image_data_row):
         result['status'] = "1_pair"
         
     elif len(caliper_centers) == 4:
+        px_spacing = float(image_data_row.get("PhysicalDeltaX", 0.1)) * 10 if "PhysicalDeltaX" in image_data_row else 1.0
+    
         # Complex case: 4 calipers = 2 pairs
         pairs, intersects = pair_calipers_best_matching(caliper_centers, expected_lengths, px_spacing)
+        result['status'] = "debug_1"
+        print(f'pairs: {pairs} - intersects: {intersects}')
+        print(f'expected_lengths: {expected_lengths} - caliper_centers: {caliper_centers}')
         
         if pairs:
             result['pairs'] = pairs
             result['caliper_pairs'] = str([(caliper_centers[i], caliper_centers[j]) for i, j in pairs])
+            result['status'] = "debug_2"
             
             if intersects:
                 result['status'] = "2_pairs_intersect"
@@ -368,8 +432,129 @@ def process_single_image_pair(pair, image_dir, image_data_row):
             else:
                 result['status'] = "2_pairs_nonintersect"
     
-    return result
+    
+    if save_debug_images:
+        # Create a copy of the caliper image to draw centers on
+        caliper_img_with_centers = caliper_img.copy()
 
+        # Convert PIL Image to numpy array and ensure RGB format
+        if isinstance(caliper_img_with_centers, Image.Image):
+            # Convert to RGB first if it's not already
+            if caliper_img_with_centers.mode != 'RGB':
+                caliper_img_with_centers = caliper_img_with_centers.convert('RGB')
+            caliper_img_with_centers = np.array(caliper_img_with_centers)
+            # Convert from RGB to BGR for OpenCV operations
+            caliper_img_with_centers = cv2.cvtColor(caliper_img_with_centers, cv2.COLOR_RGB2BGR)
+
+        # Draw caliper centers on the image
+        for center in caliper_centers:
+            x, y = center
+            # Draw green circles at caliper center locations
+            cv2.circle(caliper_img_with_centers, (x, y), 8, (0, 255, 0), 2)  # Green circles
+            # Optional: Add a small center dot
+            cv2.circle(caliper_img_with_centers, (x, y), 2, (0, 0, 255), -1)  # Red center dot
+
+        # Draw caliper pairs (lines connecting paired centers)
+        if result['pairs']:
+            for i, j in result['pairs']:
+                x1, y1 = caliper_centers[i]
+                x2, y2 = caliper_centers[j]
+                # Draw yellow lines connecting paired calipers
+                cv2.line(caliper_img_with_centers, (x1, y1), (x2, y2), (0, 255, 255), 2)  # Yellow lines
+
+        # Draw crop region box if crop data is available
+        if crop_x is not None and crop_y is not None and crop_w is not None and crop_h is not None:
+            crop_x2 = crop_x + crop_w
+            crop_y2 = crop_y + crop_h
+            # Draw blue rectangle for crop region
+            cv2.rectangle(caliper_img_with_centers, (crop_x, crop_y), (crop_x2, crop_y2), (255, 0, 0), 3)  # Blue rectangle
+            # Add text label for crop
+            cv2.putText(caliper_img_with_centers, "CROP", (crop_x, max(crop_y - 10, 20)), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
+
+        # Draw legend/OCR region box (purple)
+        cv2.rectangle(caliper_img_with_centers, (legend_x1, legend_y1), (legend_x2, legend_y2), (128, 0, 128), 3)  # Purple rectangle
+        # Add text label for legend region
+        cv2.putText(caliper_img_with_centers, f"LEGEND: {expected_lengths}", (legend_x1, max(legend_y1 - 10, 20)), 
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (128, 0, 128), 2)
+
+        # Draw caliper bounding box if it exists
+        if result['caliper_box'] and result['caliper_box'] != "":
+            try:
+                # Parse the bbox string (should be like "[xmin, ymin, xmax, ymax]")
+                bbox_str = result['caliper_box'].strip('[]')
+                bbox_coords = [int(float(x.strip())) for x in bbox_str.split(',')]
+                
+                if len(bbox_coords) == 4:
+                    xmin, ymin, xmax, ymax = bbox_coords
+                    # Draw magenta rectangle for caliper bounding box
+                    cv2.rectangle(caliper_img_with_centers, (xmin, ymin), (xmax, ymax), (255, 0, 255), 3)  # Magenta rectangle
+                    # Add text label for caliper box
+                    cv2.putText(caliper_img_with_centers, "CALIPER BOX", (xmin, max(ymin - 30, 20)), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 255), 2)
+                    print(f"Drew caliper box: {bbox_coords}")
+            except Exception as e:
+                print(f"Error parsing caliper box coordinates: {e}")
+
+        # Also create a version of the mask with the crop box for debugging
+        mask_img_with_box = np.array(mask_img)
+        # Convert grayscale to RGB then to BGR for colored annotations
+        if len(mask_img_with_box.shape) == 2:
+            mask_img_with_box = cv2.cvtColor(mask_img_with_box, cv2.COLOR_GRAY2RGB)
+            mask_img_with_box = cv2.cvtColor(mask_img_with_box, cv2.COLOR_RGB2BGR)
+        
+        # Draw crop region box on mask image
+        if crop_x is not None and crop_y is not None and crop_w is not None and crop_h is not None:
+            crop_x2 = crop_x + crop_w
+            crop_y2 = crop_y + crop_h
+            cv2.rectangle(mask_img_with_box, (crop_x, crop_y), (crop_x2, crop_y2), (255, 0, 0), 2)  # Blue rectangle
+
+        # Draw legend region box on mask image too (purple)
+        cv2.rectangle(mask_img_with_box, (legend_x1, legend_y1), (legend_x2, legend_y2), (128, 0, 128), 2)  # Purple rectangle
+
+        # Draw caliper bounding box on mask image too
+        if result['caliper_box'] and result['caliper_box'] != "":
+            try:
+                bbox_str = result['caliper_box'].strip('[]')
+                bbox_coords = [int(float(x.strip())) for x in bbox_str.split(',')]
+                
+                if len(bbox_coords) == 4:
+                    xmin, ymin, xmax, ymax = bbox_coords
+                    cv2.rectangle(mask_img_with_box, (xmin, ymin), (xmax, ymax), (255, 0, 255), 2)  # Magenta rectangle
+            except Exception as e:
+                pass  # Silent fail for mask image
+
+        # Convert images back to RGB for saving
+        caliper_img_with_centers = cv2.cvtColor(caliper_img_with_centers, cv2.COLOR_BGR2RGB)
+        mask_img_with_box = cv2.cvtColor(mask_img_with_box, cv2.COLOR_BGR2RGB)
+        
+        # Ensure clean image is also RGB
+        clean_img_rgb = clean_img.copy()
+        if isinstance(clean_img_rgb, Image.Image):
+            if clean_img_rgb.mode != 'RGB':
+                clean_img_rgb = clean_img_rgb.convert('RGB')
+            clean_img_rgb = np.array(clean_img_rgb)
+
+        parent_dir = os.path.dirname(os.path.normpath(image_dir))
+        save_dir = os.path.join(parent_dir, "test_images")
+
+        # Use the caliper image name as the base for filenames
+        base_name = caliper_path.replace('.png', '').replace('.jpg', '').replace('.jpeg', '')
+        mask_filename = f"{base_name}_mask.png"
+        caliper_filename = f"{base_name}_caliper_with_centers.png"
+        clean_filename = f"{base_name}_clean.png"
+
+        mask_save_path = os.path.join(save_dir, mask_filename)
+        caliper_save_path = os.path.join(save_dir, caliper_filename)
+        clean_save_path = os.path.join(save_dir, clean_filename)
+
+        # Save images (all now in RGB format)
+        save_data(mask_img_with_box, mask_save_path)
+        save_data(caliper_img_with_centers, caliper_save_path)
+        save_data(clean_img_rgb, clean_save_path)
+            
+        
+    return result
 def Locate_Lesions(csv_file_path, image_dir):
     
     print("Starting lesion location using mask-based caliper detection...")
@@ -406,6 +591,7 @@ def Locate_Lesions(csv_file_path, image_dir):
             detection_result = process_single_image_pair(pair, image_dir, clean_row)
             
             # Update only the clean image row
+            image_data.at[clean_idx, "caliper_status"] = detection_result['status']
             image_data.at[clean_idx, "caliper_pairs"] = detection_result['caliper_pairs']
             image_data.at[clean_idx, "caliper_box"] = detection_result['caliper_box']
             

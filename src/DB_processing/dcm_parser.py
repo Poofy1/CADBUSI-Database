@@ -502,6 +502,10 @@ def parse_files(CONFIG, dcm_files_list, database_path, batch_size=100):
     
     print(f'New Dicom Files: {len(dcm_files_list)}')
     
+    # Check if there are no new files to process
+    if len(dcm_files_list) == 0:
+        raise ValueError("No *new* DICOM files found to process.")
+    
     # Prepare batches
     batches = []
     for i in range(0, len(dcm_files_list), batch_size):
