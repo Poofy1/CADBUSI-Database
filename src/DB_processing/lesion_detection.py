@@ -149,7 +149,7 @@ def extract_expected_lengths(img_gray):
     x1, x2 = (nonblack_x[0], nonblack_x[-1]) if len(nonblack_x) > 0 else (0, w - 1)
     row_sums = np.sum(img_gray[:, x1:x2] > 100, axis=1)
     white_rows = np.where(row_sums > 0.9 * (x2 - x1))[0]
-    white_rows = white_rows[white_rows > h-73]
+    #white_rows = white_rows[white_rows > h-73]
     
     # Simplified: just use the highest (topmost) white row if any exist
     if len(white_rows) > 0:
@@ -185,15 +185,20 @@ def extract_expected_lengths(img_gray):
         # Try with paragraph=True first
         results = reader.readtext(legend_crop, paragraph=True, width_ths=0.9, height_ths=0.9)
         
-        # If that doesn't work well, try without paragraph grouping
-        if len(results) < 2:  # Expecting multiple measurements
-            results = reader.readtext(legend_crop, paragraph=False)
-        
         # Extract text and find measurements
         all_text = []
-        for (bbox, text, confidence) in results:
-            if confidence > 0.5:  # Filter low-confidence detections
-                all_text.append(text)
+        for result in results:
+            # Handle both 2-tuple and 3-tuple formats
+            if len(result) == 3:
+                bbox, text, confidence = result
+                if confidence > 0.5:  # Filter low-confidence detections
+                    all_text.append(text)
+            elif len(result) == 2:
+                bbox, text = result
+                all_text.append(text)  # No confidence filtering when confidence not available
+            else:
+                print(f"Unexpected result format: {result}")
+                continue
         
         # Combine all text and search for measurements
         combined_text = " ".join(all_text)
@@ -227,6 +232,15 @@ def pair_calipers_best_matching(centers, expected_lengths_cm, px_spacing_mm):
         if best_match:
             pairs.append(best_match)
             used.update(best_match)
+            
+    # Special case: 4 centers, 1 expected length, found 1 pair
+    # Assume the remaining 2 centers form the second pair
+    if len(centers) == 4 and len(expected_lengths_cm) == 1 and len(pairs) == 1:
+        remaining = [i for i in range(len(centers)) if i not in used]
+        if len(remaining) == 2:
+            pairs.append((remaining[0], remaining[1]))
+            used.update(remaining)    
+            
     intersects = False
     if len(pairs) == 2:
         i1, j1 = pairs[0]
@@ -256,9 +270,10 @@ def compute_oriented_bbox_and_cyan_bbox(centers):
 
 
 
-def detect_calipers_from_mask(difference_mask, min_area=20, max_area=500):
+def detect_calipers_from_mask(difference_mask, min_area=20, max_area=500, merge_distance=20):
     """
     Detect cross/X patterns by analyzing contour properties.
+    Merges nearby detections by averaging their positions.
     """
     # Convert to numpy if PIL Image
     if hasattr(difference_mask, 'convert'):
@@ -299,7 +314,45 @@ def detect_calipers_from_mask(difference_mask, min_area=20, max_area=500):
                     cy = int(M["m01"] / M["m00"])
                     caliper_centers.append((cx, cy))
     
+    # Merge nearby centers
+    if len(caliper_centers) > 1:
+        caliper_centers = merge_nearby_centers(caliper_centers, merge_distance)
+    
     return caliper_centers
+
+
+def merge_nearby_centers(centers, merge_distance):
+    """
+    Merge centers that are within merge_distance of each other by averaging their positions.
+    """
+    if len(centers) <= 1:
+        return centers
+    
+    centers = np.array(centers)
+    merged_centers = []
+    used = set()
+    
+    for i, center in enumerate(centers):
+        if i in used:
+            continue
+            
+        # Find all centers within merge_distance of this center
+        cluster = [i]
+        for j, other_center in enumerate(centers):
+            if j != i and j not in used:
+                distance = np.linalg.norm(center - other_center)
+                if distance <= merge_distance:
+                    cluster.append(j)
+        
+        # Mark all centers in this cluster as used
+        used.update(cluster)
+        
+        # Calculate average position of the cluster
+        cluster_centers = centers[cluster]
+        avg_center = np.mean(cluster_centers, axis=0)
+        merged_centers.append((int(avg_center[0]), int(avg_center[1])))
+    
+    return merged_centers
 
 def is_cross_or_x_shape(roi):
     """
