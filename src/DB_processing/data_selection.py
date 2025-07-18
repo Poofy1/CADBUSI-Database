@@ -35,7 +35,7 @@ def choose_images_to_label(db, breast_df, database_path):
     append_audit("image_processing.darkness_thresh", darkness_thresh)
     
     dark_count_before = len(db[db['label']])
-    db.loc[db['darkness'] > 65, 'label'] = False
+    db.loc[db['darkness'] > darkness_thresh, 'label'] = False
     dark_count_after = len(db[db['label']])
     dark_removed = dark_count_before - dark_count_after
     
@@ -216,48 +216,6 @@ def process_nearest_given_ids(pid, db_out, image_folder_path):
     subset = subset.drop('coord_key', axis=1)
     
     return subset
-
-def Remove_Green_Images(database_dir):
-    print("Searching for corrupted images")
-    input_file = f'{database_dir}/ImageData.csv'
-    
-    # Load the CSV file into a pandas DataFrame
-    df = read_csv(input_file)
-
-    image_folder_path = f"{database_dir}/images/"
-    
-    # Prepare a list of indices to drop from the DataFrame
-    drop_indices = []
-    
-    # Iterate over the rows of the dataframe using tqdm for a progress bar
-    for index, row in tqdm(df.iterrows(), total=df.shape[0]):
-        image_name = row['ImageName']
-        image_path = os.path.join(image_folder_path, image_name)
-        
-        # Read the image using OpenCV
-        img = read_image(image_path)
-
-        # If the image is RGB
-        if img is not None and len(img.shape) == 3:
-            b, g, r = cv2.split(img)
-            
-            # Calculate mean values for each channel
-            mean_b = np.mean(b)
-            mean_g = np.mean(g)
-            mean_r = np.mean(r)
-            
-            # Check if average of green channel is significantly higher than the others
-            if mean_g > mean_r + 10 and mean_g > mean_b + 10:
-                print(f'BAD IMAGE: {image_path}')
-                os.remove(image_path)  # Delete the image file
-                drop_indices.append(index)
-
-    # Drop rows from the DataFrame
-    df = df.drop(drop_indices)
-    append_audit("image_processing.corrupted_removed", len(drop_indices))
-    save_data(df, input_file)  # Save the updated DataFrame back to the CSV
-
-
 
 
 def create_caliper_file(database_path, image_df, breast_df, max_workers=None):

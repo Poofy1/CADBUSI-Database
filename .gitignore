@@ -18,6 +18,7 @@
 
 config.py
 encryption_key.pkl
+src/ML_processing/models/SAMUS.pth
 
 
 # User-specific files (MonoDevelop/Xamarin Studio)
