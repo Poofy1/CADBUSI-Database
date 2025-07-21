@@ -175,21 +175,10 @@ def create_difference_mask(caliper_path, clean_path, input_folder, threshold=30)
     return caliper_img, clean_img, mask_img
 
 
-def detect_calipers_from_mask(difference_mask, min_area=3, max_area=800, merge_distance=20, 
-                            crop_x=None, crop_y=None, crop_x2=None, crop_y2=None, edge_margin=30):
+def detect_calipers_from_mask(difference_mask, min_area=1, max_area=1000, merge_distance=20, 
+                            crop_x=None, crop_y=None, crop_x2=None, crop_y2=None, edge_margin=20):
     """
-    Detect cross/X patterns and crosshairs by analyzing contour properties.
-    Merges nearby detections by averaging their positions.
-    Ignores calipers found in the bottom right and bottom left tiles (3x3 grid).
-    Ignores calipers near the edges of the crop region.
-    
-    Args:
-        difference_mask: Binary mask image
-        min_area: Minimum contour area
-        max_area: Maximum contour area  
-        merge_distance: Distance threshold for merging nearby centers
-        crop_x, crop_y, crop_x2, crop_y2: Crop region bounds (optional)
-        edge_margin: Minimum distance from crop edges to consider calipers
+    Improved caliper detection with more lenient parameters and multi-pass detection.
     """
     # Convert to numpy if PIL Image
     if hasattr(difference_mask, 'convert'):
@@ -200,83 +189,87 @@ def detect_calipers_from_mask(difference_mask, min_area=3, max_area=800, merge_d
     # Ensure binary mask
     if len(mask_array.shape) == 3:
         mask_array = cv2.cvtColor(mask_array, cv2.COLOR_RGB2GRAY)
-    mask_array = (mask_array > 127).astype(np.uint8) * 255
     
-    # Get image dimensions for tile calculation
-    img_height, img_width = mask_array.shape
-    tile_height = img_height // 3
-    tile_width = img_width // 3
+    # Try multiple binary thresholds to catch different intensities
+    thresholds = [30, 50, 80, 127]  # Multiple sensitivity levels
+    all_caliper_centers = []
     
-    # Calculate bottom right tile bounds
-    bottom_right_x_start = 2 * tile_width
-    bottom_right_y_start = 2 * tile_height
-    bottom_right_x_end = img_width
-    bottom_right_y_end = img_height
-    
-    # Calculate bottom left tile bounds
-    bottom_left_x_start = 0
-    bottom_left_y_start = 2 * tile_height
-    bottom_left_x_end = tile_width
-    bottom_left_y_end = img_height
-    
-    # Calculate safe zone within crop region (excluding edges)
-    safe_crop_x = crop_x + edge_margin if crop_x is not None else edge_margin
-    safe_crop_y = crop_y + edge_margin if crop_y is not None else edge_margin
-    safe_crop_x2 = crop_x2 - edge_margin if crop_x2 is not None else img_width - edge_margin
-    safe_crop_y2 = crop_y2 - edge_margin if crop_y2 is not None else img_height - edge_margin
-    
-    # Find contours
-    contours, _ = cv2.findContours(mask_array, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
-    caliper_centers = []
-    
-    for contour in contours:
-        area = cv2.contourArea(contour)
+    for threshold in thresholds:
+        binary_mask = (mask_array > threshold).astype(np.uint8) * 255
         
-        if min_area <= area <= max_area:
-            # Get bounding box
-            x, y, w, h = cv2.boundingRect(contour)
+        # Preprocess to enhance thin structures
+        kernel = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
+        enhanced_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_CLOSE, kernel)
+        
+        # Get image dimensions for tile calculation
+        img_height, img_width = enhanced_mask.shape
+        tile_height = img_height // 3
+        tile_width = img_width // 3
+        
+        # Calculate exclusion zones
+        bottom_right_x_start = 2 * tile_width
+        bottom_right_y_start = 2 * tile_height
+        bottom_left_x_end = tile_width
+        bottom_left_y_start = 2 * tile_height
+        
+        # Calculate safe zone within crop region
+        safe_crop_x = crop_x + edge_margin if crop_x is not None else edge_margin
+        safe_crop_y = crop_y + edge_margin if crop_y is not None else edge_margin
+        safe_crop_x2 = crop_x2 - edge_margin if crop_x2 is not None else img_width - edge_margin
+        safe_crop_y2 = crop_y2 - edge_margin if crop_y2 is not None else img_height - edge_margin
+        
+        # Find contours
+        contours, _ = cv2.findContours(enhanced_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        for contour in contours:
+            area = cv2.contourArea(contour)
             
-            # Check aspect ratio (cross shapes and crosshairs should be roughly square)
-            aspect_ratio = max(w, h) / max(min(w, h), 1)
-            if aspect_ratio > 4:  # Slightly more lenient for crosshairs
-                continue
-            
-            # Extract the region of interest
-            roi = mask_array[y:y+h, x:x+w]
-            
-            if is_cross_crosshair_or_x_shape(roi):
-                # Calculate center
-                M = cv2.moments(contour)
-                if M["m00"] != 0:
-                    cx = int(M["m10"] / M["m00"])
-                    cy = int(M["m01"] / M["m00"])
-                    
-                    # Check if caliper center is in the bottom right tile
-                    if (bottom_right_x_start <= cx < bottom_right_x_end and 
-                        bottom_right_y_start <= cy < bottom_right_y_end):
-                        #print(f"Ignoring caliper at ({cx}, {cy}) - in bottom right tile")
-                        continue  # Skip this caliper
-                    
-                    # Check if caliper center is in the bottom left tile
-                    if (bottom_left_x_start <= cx < bottom_left_x_end and 
-                        bottom_left_y_start <= cy < bottom_left_y_end):
-                        #print(f"Ignoring caliper at ({cx}, {cy}) - in bottom left tile")
-                        continue  # Skip this caliper
-                    
-                    # Check if caliper center is too close to crop edges
-                    if crop_x is not None and crop_y is not None and crop_x2 is not None and crop_y2 is not None:
-                        if not (safe_crop_x <= cx <= safe_crop_x2 and safe_crop_y <= cy <= safe_crop_y2):
-                            #print(f"Ignoring caliper at ({cx}, {cy}) - too close to crop edge")
-                            continue  # Skip this caliper
-                    
-                    caliper_centers.append((cx, cy))
+            if min_area <= area <= max_area:
+                # Get bounding box
+                x, y, w, h = cv2.boundingRect(contour)
+                
+                # More lenient aspect ratio check
+                aspect_ratio = max(w, h) / max(min(w, h), 1)
+                if aspect_ratio > 8:  # More lenient
+                    continue
+                
+                # Extract ROI with padding for better analysis
+                pad = 2
+                roi_x1 = max(0, x - pad)
+                roi_y1 = max(0, y - pad)
+                roi_x2 = min(img_width, x + w + pad)
+                roi_y2 = min(img_height, y + h + pad)
+                roi = enhanced_mask[roi_y1:roi_y2, roi_x1:roi_x2]
+                
+                if is_cross_crosshair_or_x_shape(roi):
+                    # Calculate center
+                    M = cv2.moments(contour)
+                    if M["m00"] != 0:
+                        cx = int(M["m10"] / M["m00"])
+                        cy = int(M["m01"] / M["m00"])
+                        
+                        # Apply exclusion filters
+                        if (bottom_right_x_start <= cx < img_width and 
+                            bottom_right_y_start <= cy < img_height):
+                            continue
+                        
+                        if (0 <= cx < bottom_left_x_end and 
+                            bottom_left_y_start <= cy < img_height):
+                            continue
+                        
+                        if (crop_x is not None and crop_y is not None and 
+                            crop_x2 is not None and crop_y2 is not None):
+                            if not (safe_crop_x <= cx <= safe_crop_x2 and 
+                                   safe_crop_y <= cy <= safe_crop_y2):
+                                continue
+                        
+                        all_caliper_centers.append((cx, cy))
     
-    # Merge nearby centers
-    if len(caliper_centers) > 1:
-        caliper_centers = merge_nearby_centers(caliper_centers, merge_distance)
+    # Remove duplicates from multiple thresholds
+    if all_caliper_centers:
+        all_caliper_centers = merge_nearby_centers(all_caliper_centers, merge_distance)
     
-    return caliper_centers
+    return all_caliper_centers
 
 def merge_nearby_centers(centers, merge_distance):
     """
@@ -314,83 +307,109 @@ def merge_nearby_centers(centers, merge_distance):
 
 def is_cross_crosshair_or_x_shape(roi):
     """
-    Check if a binary ROI contains a cross, crosshair, or X shape by analyzing line intersections.
-    Enhanced to detect thin crosshairs as well as thicker cross/X patterns.
+    Improved version with better thin line detection and multiple validation approaches.
     """
     if roi.shape[0] < 3 or roi.shape[1] < 3:
         return False
     
-    # Enhance thin lines with morphological operations
-    kernel = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
+    # Ensure binary
+    roi = (roi > 127).astype(np.uint8) * 255
+    
+    # METHOD 1: Enhanced morphological approach
+    # Create specific kernels for horizontal and vertical line detection
+    h_size = max(3, roi.shape[1] // 4)  # Adaptive horizontal kernel
+    v_size = max(3, roi.shape[0] // 4)  # Adaptive vertical kernel
+    
+    horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (h_size, 1))
+    vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, v_size))
+    
+    # Extract horizontal and vertical lines separately
+    horizontal_lines = cv2.morphologyEx(roi, cv2.MORPH_OPEN, horizontal_kernel)
+    vertical_lines = cv2.morphologyEx(roi, cv2.MORPH_OPEN, vertical_kernel)
+    
+    # Check if we have both horizontal and vertical components
+    has_horizontal = np.sum(horizontal_lines > 0) > 2
+    has_vertical = np.sum(vertical_lines > 0) > 2
+    
+    if has_horizontal and has_vertical:
+        return True
+    
+    # METHOD 2: Enhanced Hough line detection with multiple parameter sets
+    # Preprocess for better edge detection
+    kernel = np.ones((3,3), np.uint8)
     enhanced_roi = cv2.morphologyEx(roi, cv2.MORPH_CLOSE, kernel)
+    enhanced_roi = cv2.morphologyEx(enhanced_roi, cv2.MORPH_OPEN, kernel)
     
-    # Use more sensitive edge detection for crosshairs
-    edges = cv2.Canny(enhanced_roi, 30, 100, apertureSize=3)
+    # More aggressive edge detection for thin lines
+    edges = cv2.Canny(enhanced_roi, 20, 60, apertureSize=3)
     
-    # Try multiple HoughLines parameters to catch both thick and thin lines
-    lines_sets = []
+    # Try multiple Hough parameter combinations
+    hough_params = [
+        (1, np.pi/180, max(1, min(roi.shape)//8)),   # Very sensitive
+        (1, np.pi/180, max(2, min(roi.shape)//6)),   # Medium sensitive  
+        (1, np.pi/180, max(2, min(roi.shape)//4)),   # Less sensitive
+        (2, np.pi/90, max(1, min(roi.shape)//8)),    # Different resolution
+    ]
     
-    # Parameters for thicker lines (crosses/X)
-    lines1 = cv2.HoughLines(edges, 1, np.pi/180, threshold=max(2, min(roi.shape)//4))
-    if lines1 is not None:
-        lines_sets.append(lines1)
-    
-    # Parameters for thinner lines (crosshairs)
-    lines2 = cv2.HoughLines(edges, 1, np.pi/180, threshold=max(2, min(roi.shape)//6))
-    if lines2 is not None:
-        lines_sets.append(lines2)
-    
-    # Combine all detected lines
     all_lines = []
-    for lines in lines_sets:
+    for rho, theta, threshold in hough_params:
+        lines = cv2.HoughLines(edges, rho, theta, threshold)
         if lines is not None:
             all_lines.extend(lines)
     
-    if len(all_lines) < 2:
-        return False
+    if len(all_lines) >= 2:
+        # Enhanced angle analysis
+        angles = [line[0][1] for line in all_lines]
+        angles = np.array(angles)
+        
+        # Remove very similar angles (within 0.05 radians)
+        unique_angles = []
+        for angle in angles:
+            if not any(abs(angle - ua) < 0.05 for ua in unique_angles):
+                unique_angles.append(angle)
+        
+        angles = np.array(unique_angles)
+        
+        if len(angles) >= 2:
+            # More lenient angle checks
+            horizontal = (np.sum(np.abs(angles - 0) < 0.3) + 
+                         np.sum(np.abs(angles - np.pi) < 0.3))
+            vertical = np.sum(np.abs(angles - np.pi/2) < 0.3)
+            
+            diagonal1 = np.sum(np.abs(angles - np.pi/4) < 0.4)
+            diagonal2 = np.sum(np.abs(angles - 3*np.pi/4) < 0.4)
+            
+            # Check for any perpendicular pairs
+            perpendicular_pairs = 0
+            for i in range(len(angles)):
+                for j in range(i + 1, len(angles)):
+                    angle_diff = abs(angles[i] - angles[j])
+                    if (abs(angle_diff - np.pi/2) < 0.4 or 
+                        abs(angle_diff - 3*np.pi/2) < 0.4):
+                        perpendicular_pairs += 1
+            
+            is_cross_or_crosshair = (horizontal > 0 and vertical > 0)
+            is_x_pattern = (diagonal1 > 0 and diagonal2 > 0)
+            has_perpendicular_lines = perpendicular_pairs > 0
+            
+            if is_cross_or_crosshair or is_x_pattern or has_perpendicular_lines:
+                return True
     
-    # Analyze line orientations
-    angles = []
-    for line in all_lines:
-        rho, theta = line[0]
-        angles.append(theta)
+    # METHOD 3: Template matching approach for very small ROIs
+    if roi.shape[0] <= 10 or roi.shape[1] <= 10:
+        # Simple cross templates for tiny calipers
+        templates = [
+            np.array([[0,1,0],[1,1,1],[0,1,0]], dtype=np.uint8) * 255,  # Plus
+            np.array([[1,0,1],[0,1,0],[1,0,1]], dtype=np.uint8) * 255,  # X
+        ]
+        
+        for template in templates:
+            if template.shape[0] <= roi.shape[0] and template.shape[1] <= roi.shape[1]:
+                result = cv2.matchTemplate(roi, template, cv2.TM_CCOEFF_NORMED)
+                if np.max(result) > 0.3:  # Lower threshold for small shapes
+                    return True
     
-    angles = np.array(angles)
-    
-    # Remove duplicate similar angles (within 0.1 radians)
-    unique_angles = []
-    for angle in angles:
-        if not any(abs(angle - ua) < 0.1 for ua in unique_angles):
-            unique_angles.append(angle)
-    
-    angles = np.array(unique_angles)
-    
-    if len(angles) < 2:
-        return False
-    
-    # For cross/crosshair: look for horizontal and vertical lines
-    horizontal = np.sum(np.abs(angles - 0) < 0.2) + np.sum(np.abs(angles - np.pi) < 0.2)
-    vertical = np.sum(np.abs(angles - np.pi/2) < 0.2)
-    
-    # For X: look for diagonal lines
-    diagonal1 = np.sum(np.abs(angles - np.pi/4) < 0.3)
-    diagonal2 = np.sum(np.abs(angles - 3*np.pi/4) < 0.3)
-    
-    # Also check for any two perpendicular lines (regardless of exact angle)
-    perpendicular_pairs = 0
-    for i in range(len(angles)):
-        for j in range(i + 1, len(angles)):
-            angle_diff = abs(angles[i] - angles[j])
-            # Check if angles are approximately perpendicular (90 degrees apart)
-            if abs(angle_diff - np.pi/2) < 0.3 or abs(angle_diff - 3*np.pi/2) < 0.3:
-                perpendicular_pairs += 1
-    
-    # Return True if we have evidence of cross, crosshair, or X pattern
-    is_cross_or_crosshair = (horizontal > 0 and vertical > 0)
-    is_x_pattern = (diagonal1 > 0 and diagonal2 > 0)
-    has_perpendicular_lines = perpendicular_pairs > 0
-    
-    return is_cross_or_crosshair or is_x_pattern or has_perpendicular_lines
+    return False
 
 
 def create_caliper_bounding_boxes(caliper_centers, max_calipers_per_box=4, padding=20, 
@@ -918,7 +937,7 @@ def Locate_Lesions(csv_file_path, image_dir, save_debug_images=False):
     image_data = read_csv(csv_file_path)
     
     # Add new columns if they don't exist
-    for col in ["caliper_pairs", "caliper_box"]:
+    for col in ["caliper_pairs", "caliper_boxes"]:
         if col not in image_data.columns:
             image_data[col] = ""
             
