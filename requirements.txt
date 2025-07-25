@@ -18,6 +18,7 @@ google-cloud-bigquery
 pydicom
 xxhash
 highdicom
+ultralytics
 python-bidi
 pylibjpeg>=2.0
 pylibjpeg-libjpeg>=2.1
