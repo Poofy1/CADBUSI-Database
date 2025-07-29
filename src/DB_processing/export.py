@@ -607,6 +607,11 @@ def Export_Database(CONFIG, reparse_images = True):
         image_to_physicaldelta_map = dict(zip(image_df['ImageName'], image_df['PhysicalDeltaX']))
         instance_data['PhysicalDeltaX'] = instance_data['ImageName'].map(image_to_physicaldelta_map)
     
+    # Add caliper_boxes to instance_data for all instances
+    if 'caliper_boxes' in image_df.columns:
+        image_to_caliperboxes_map = dict(zip(image_df['ImageName'], image_df['caliper_boxes']))
+        instance_data['caliper_boxes'] = instance_data['ImageName'].map(image_to_caliperboxes_map)
+    
     # If instance labels file exists, merge that data
     if file_exists(instance_labels_csv_file):
         labelbox_instance_data = read_csv(instance_labels_csv_file)

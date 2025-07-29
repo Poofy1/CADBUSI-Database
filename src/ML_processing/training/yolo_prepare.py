@@ -6,7 +6,7 @@ import shutil
 import yaml
 import ast
 import re
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 from tqdm import tqdm
 import multiprocessing as mp
 from functools import partial
@@ -68,6 +68,91 @@ def adjust_boxes_for_crop(boxes, crop_x, crop_y):
         adjusted_boxes.append([adj_x1, adj_y1, adj_x2, adj_y2])
     return adjusted_boxes
 
+def create_visualization(cropped_img, adjusted_boxes, image_name):
+    """
+    Create visualization of bounding boxes on cropped image
+    
+    Args:
+        cropped_img: PIL Image object (already cropped)
+        adjusted_boxes: List of bounding boxes [x1, y1, x2, y2] relative to cropped image
+        image_name: Name of the image for title/reference
+    
+    Returns:
+        PIL Image with bounding boxes drawn
+    """
+    # Create a copy of the image to draw on
+    vis_img = cropped_img.copy()
+    draw = ImageDraw.Draw(vis_img)
+    
+    # Define colors for different boxes (cycling through if multiple boxes)
+    colors = ['red', 'blue', 'green', 'yellow', 'magenta', 'cyan', 'orange']
+    
+    # Draw each bounding box
+    for i, box in enumerate(adjusted_boxes):
+        x1, y1, x2, y2 = box
+        
+        # Ensure coordinates are within image bounds
+        img_width, img_height = cropped_img.size
+        x1 = max(0, min(x1, img_width))
+        y1 = max(0, min(y1, img_height))
+        x2 = max(0, min(x2, img_width))
+        y2 = max(0, min(y2, img_height))
+        
+        # Skip invalid boxes
+        if x2 <= x1 or y2 <= y1:
+            continue
+            
+        # Select color (cycle through colors if more boxes than colors)
+        color = colors[i % len(colors)]
+        
+        # Draw rectangle
+        draw.rectangle([x1, y1, x2, y2], outline=color, width=3)
+        
+        # Add box number label
+        label = f"Box {i+1}"
+        
+        # Try to load a font, fall back to default if not available
+        try:
+            font = ImageFont.truetype("arial.ttf", 16)
+        except:
+            try:
+                font = ImageFont.load_default()
+            except:
+                font = None
+        
+        # Draw label background
+        if font:
+            bbox = draw.textbbox((x1, y1-20), label, font=font)
+            draw.rectangle(bbox, fill=color)
+            draw.text((x1, y1-20), label, fill='white', font=font)
+        else:
+            # Fallback without font
+            draw.rectangle([x1, y1-15, x1+50, y1], fill=color)
+            draw.text((x1+2, y1-12), label, fill='white')
+    
+    # Add image info at the bottom
+    img_width, img_height = cropped_img.size
+    info_text = f"{image_name} | {len(adjusted_boxes)} boxes | {img_width}x{img_height}"
+    
+    try:
+        font = ImageFont.truetype("arial.ttf", 12)
+    except:
+        try:
+            font = ImageFont.load_default()
+        except:
+            font = None
+    
+    # Draw info background at bottom
+    if font:
+        text_bbox = draw.textbbox((5, img_height-25), info_text, font=font)
+        draw.rectangle([0, img_height-30, img_width, img_height], fill='black', outline='white')
+        draw.text((5, img_height-25), info_text, fill='white', font=font)
+    else:
+        draw.rectangle([0, img_height-20, img_width, img_height], fill='black', outline='white')
+        draw.text((5, img_height-15), info_text, fill='white')
+    
+    return vis_img
+
 def process_single_image(args):
     """Process a single image - used for multiprocessing"""
     row_data, source_images_dir, output_dir, split_type = args
@@ -82,8 +167,9 @@ def process_single_image(args):
     # Source image path
     source_path = os.path.join(source_images_dir, image_name)
     
-    # Destination path for cropped image
+    # Destination paths
     dest_path = f"{output_dir}/images/{split_type}/{image_name}"
+    vis_path = f"{output_dir}/visualized/{split_type}/{image_name}"
     
     # Try to crop and save image
     try:
@@ -102,10 +188,17 @@ def process_single_image(args):
         # FIXED: Adjust boxes for crop position before converting to YOLO format
         adjusted_boxes = adjust_boxes_for_crop(boxes, crop_x, crop_y)
         
+        # Create and save visualization
+        debug = False
+        if debug:
+            vis_img = create_visualization(cropped_img, adjusted_boxes, image_name)
+            vis_img.save(vis_path)
+        
         # Create label file
         label_name = os.path.splitext(image_name)[0] + '.txt'
         label_path = f"{output_dir}/labels/{split_type}/{label_name}"
         
+        valid_boxes = 0
         with open(label_path, 'w') as f:
             for adj_box in adjusted_boxes:
                 x1, y1, x2, y2 = adj_box
@@ -116,11 +209,12 @@ def process_single_image(args):
                     # Use crop dimensions for normalization (boxes are now relative to crop)
                     yolo_box = convert_to_yolo_format(adj_box, crop_w, crop_h)
                     f.write(' '.join(map(str, yolo_box)) + '\n')
+                    valid_boxes += 1
         
-        return True
+        return True, valid_boxes
     except Exception as e:
         print(f"\nError processing image {source_path}: {e}")
-        return False
+        return False, 0
 
 def prepare_yolo_dataset(csv_path, source_images_dir, output_dir='yolo_dataset', train_ratio=0.8, num_workers=None):
     """Prepare YOLO dataset from CSV file with image cropping using multiprocessing"""
@@ -161,6 +255,10 @@ def prepare_yolo_dataset(csv_path, source_images_dir, output_dir='yolo_dataset',
     os.makedirs(f"{output_dir}/labels/train", exist_ok=True)
     os.makedirs(f"{output_dir}/labels/val", exist_ok=True)
     
+    # Create visualization directories
+    os.makedirs(f"{output_dir}/visualized/train", exist_ok=True)
+    os.makedirs(f"{output_dir}/visualized/val", exist_ok=True)
+    
     # Prepare arguments for multiprocessing
     train_args = [(row.to_dict(), source_images_dir, output_dir, 'train') 
                   for _, row in train_df.iterrows()]
@@ -176,7 +274,8 @@ def prepare_yolo_dataset(csv_path, source_images_dir, output_dir='yolo_dataset',
             desc="Training set"
         ))
     
-    train_success = sum(train_results)
+    train_success = sum(result[0] for result in train_results)
+    train_total_boxes = sum(result[1] for result in train_results)
     
     # Process validation data with multiprocessing
     print("\nProcessing validation images...")
@@ -187,10 +286,13 @@ def prepare_yolo_dataset(csv_path, source_images_dir, output_dir='yolo_dataset',
             desc="Validation set"
         ))
     
-    val_success = sum(val_results)
+    val_success = sum(result[0] for result in val_results)
+    val_total_boxes = sum(result[1] for result in val_results)
     
-    print(f"\nSuccessfully cropped {train_success}/{len(train_df)} training images")
-    print(f"Successfully cropped {val_success}/{len(val_df)} validation images")
+    print(f"\nSuccessfully processed {train_success}/{len(train_df)} training images")
+    print(f"Total training boxes: {train_total_boxes}")
+    print(f"Successfully processed {val_success}/{len(val_df)} validation images")
+    print(f"Total validation boxes: {val_total_boxes}")
     
     # Create data.yaml file for YOLO
     data_yaml = {
@@ -214,20 +316,23 @@ def prepare_yolo_dataset(csv_path, source_images_dir, output_dir='yolo_dataset',
     
     print(f"\nDataset prepared in: {output_dir}/")
     print(f"Data configuration saved to: {output_dir}/data.yaml")
+    print(f"🎯 CHECK THE VISUALIZATIONS IN: {output_dir}/visualized/")
+    print(f"   - Training examples: {output_dir}/visualized/train/")
+    print(f"   - Validation examples: {output_dir}/visualized/val/")
     
     return train_df, val_df
 
 # Usage
 if __name__ == "__main__":
     # Replace with your paths
-    csv_path = "C:/Users/Tristan/Desktop/Calipers/ImageData.csv"
-    source_images_dir = "C:/Users/Tristan/Desktop/Calipers/caliper_images/"  # Directory containing original images
+    csv_path = "F:/Train_data/Calipers2/ImageData.csv"
+    source_images_dir = "F:/Train_data/Calipers2/caliper_images/"  # Directory containing original images
     
     # Prepare dataset
     train_df, val_df = prepare_yolo_dataset(
         csv_path=csv_path,
         source_images_dir=source_images_dir,
-        output_dir="C:/Users/Tristan/Desktop/Yolo2/",
+        output_dir="C:/Users/Tristan/Desktop/Yolo5/",
         train_ratio=0.8,  # 80% train, 20% validation
         num_workers=None  # Set to None to use all available CPUs - 1
     )

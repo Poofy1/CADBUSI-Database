@@ -14,7 +14,10 @@ def load_model_and_data(base_dir="C:/Users/Tristan/Desktop/Yolo2/", data_yaml_pa
     
     # Look for the trained model in various possible locations
     possible_model_paths = [
+        base_path / "ultrasound_lesion_detection" / "yolo11m_lesions11" / "weights" / "best.pt",
         base_path / "yolo11m_lesions11" / "weights" / "best.pt",
+        base_path / "weights" / "best.pt",
+        base_path / "best.pt",
     ]
     
     model_path = None
@@ -52,8 +55,80 @@ def load_model_and_data(base_dir="C:/Users/Tristan/Desktop/Yolo2/", data_yaml_pa
     
     return model, data_config
 
-def get_validation_images(data_config, base_dir="C:/Users/Tristan/Desktop/Yolo/", num_images=20):
-    """Get random validation images"""
+def run_full_validation(model, data_yaml_path="C:/Users/Tristan/Desktop/Yolo2/data.yaml"):
+    """Run validation on entire validation dataset and get mAP scores"""
+    
+    print("\n" + "="*60)
+    print("RUNNING FULL VALIDATION ON ENTIRE DATASET")
+    print("="*60)
+    
+    try:
+        # Run validation on entire validation set
+        results = model.val(
+            data=data_yaml_path,
+            save_json=True,  # Save detailed results
+            plots=True,      # Generate validation plots
+            verbose=True     # Show detailed output
+        )
+        
+        # Extract key metrics
+        metrics = results.results_dict
+        
+        print(f"\n" + "="*50)
+        print("VALIDATION RESULTS - ENTIRE DATASET")
+        print("="*50)
+        
+        # Main mAP metrics
+        if 'metrics/mAP50(B)' in metrics:
+            map50 = metrics['metrics/mAP50(B)']
+            print(f"mAP@0.50         : {map50:.4f} ({map50*100:.2f}%)")
+        
+        if 'metrics/mAP50-95(B)' in metrics:
+            map50_95 = metrics['metrics/mAP50-95(B)']
+            print(f"mAP@0.50:0.95    : {map50_95:.4f} ({map50_95*100:.2f}%)")
+        
+        # Additional metrics
+        if 'metrics/precision(B)' in metrics:
+            precision = metrics['metrics/precision(B)']
+            print(f"Precision        : {precision:.4f} ({precision*100:.2f}%)")
+        
+        if 'metrics/recall(B)' in metrics:
+            recall = metrics['metrics/recall(B)']
+            print(f"Recall           : {recall:.4f} ({recall*100:.2f}%)")
+        
+        # F1 Score calculation
+        if 'metrics/precision(B)' in metrics and 'metrics/recall(B)' in metrics:
+            precision = metrics['metrics/precision(B)']
+            recall = metrics['metrics/recall(B)']
+            if precision + recall > 0:
+                f1 = 2 * (precision * recall) / (precision + recall)
+                print(f"F1 Score         : {f1:.4f} ({f1*100:.2f}%)")
+        
+        # Speed metrics
+        if hasattr(results, 'speed'):
+            speed = results.speed
+            print(f"\nInference Speed:")
+            if 'preprocess' in speed:
+                print(f"  Preprocess     : {speed['preprocess']:.2f}ms")
+            if 'inference' in speed:
+                print(f"  Inference      : {speed['inference']:.2f}ms") 
+            if 'postprocess' in speed:
+                print(f"  Postprocess    : {speed['postprocess']:.2f}ms")
+        
+        print("\n" + "="*50)
+        
+        return results
+        
+    except Exception as e:
+        print(f"Error during validation: {e}")
+        print("This might be due to:")
+        print("1. Incorrect data.yaml path or format")
+        print("2. Missing ground truth labels") 
+        print("3. Mismatched image and label files")
+        return None
+
+def get_validation_images(data_config, base_dir="C:/Users/Tristan/Desktop/Yolo2/", num_images=20):
+    """Get random validation images for visualization"""
     
     if data_config is None:
         # Fallback: look for images in common validation directories
@@ -77,7 +152,6 @@ def get_validation_images(data_config, base_dir="C:/Users/Tristan/Desktop/Yolo/"
         
         if val_path is None:
             print("Could not find validation directory. Looking for any images...")
-            # Look for any images in the base directory
             image_extensions = ['.jpg', '.jpeg', '.png', '.bmp', '.tiff']
             image_files = []
             for ext in image_extensions:
@@ -109,18 +183,20 @@ def get_validation_images(data_config, base_dir="C:/Users/Tristan/Desktop/Yolo/"
         print(f"No images found in {val_path}")
         return []
     
-    # Randomly select images
+    print(f"Total validation images available: {len(image_files)}")
+    
+    # Randomly select images for visualization
     selected_images = random.sample(image_files, min(num_images, len(image_files)))
     return selected_images
 
 def visualize_predictions(model, image_paths, class_names, confidence_threshold=0.5, save_dir="C:/Users/Tristan/Desktop/Yolo/validation_results"):
-    """Visualize model predictions on validation images"""
+    """Visualize model predictions on sample validation images"""
     
     # Create save directory
     os.makedirs(save_dir, exist_ok=True)
     
     # Set up the plot
-    fig_size = (20, 25)  # Adjust based on your needs
+    fig_size = (20, 25)
     cols = 4
     rows = (len(image_paths) + cols - 1) // cols
     
@@ -203,7 +279,7 @@ def visualize_predictions(model, image_paths, class_names, confidence_threshold=
     plt.show()
 
 def create_confidence_histogram(model, image_paths, save_dir="C:/Users/Tristan/Desktop/Yolo/validation_results"):
-    """Create histogram of prediction confidences"""
+    """Create histogram of prediction confidences on sample images"""
     
     all_confidences = []
     
@@ -218,85 +294,21 @@ def create_confidence_histogram(model, image_paths, save_dir="C:/Users/Tristan/D
         plt.hist(all_confidences, bins=20, alpha=0.7, edgecolor='black')
         plt.xlabel('Confidence Score')
         plt.ylabel('Frequency')
-        plt.title('Distribution of Prediction Confidences on Validation Set')
+        plt.title('Distribution of Prediction Confidences (Sample Images)')
         plt.grid(True, alpha=0.3)
         plt.savefig(f"{save_dir}/confidence_histogram.png", dpi=150, bbox_inches='tight')
         plt.show()
         
-        print(f"Average confidence: {np.mean(all_confidences):.3f}")
-        print(f"Median confidence: {np.median(all_confidences):.3f}")
-        print(f"Min confidence: {np.min(all_confidences):.3f}")
-        print(f"Max confidence: {np.max(all_confidences):.3f}")
+        print(f"Sample Images Confidence Stats:")
+        print(f"  Average confidence: {np.mean(all_confidences):.3f}")
+        print(f"  Median confidence: {np.median(all_confidences):.3f}")
+        print(f"  Min confidence: {np.min(all_confidences):.3f}")
+        print(f"  Max confidence: {np.max(all_confidences):.3f}")
     else:
-        print("No detections found to analyze confidence scores.")
-
-def detailed_validation_analysis(model, image_paths, class_names, save_dir="C:/Users/Tristan/Desktop/Yolo/validation_results"):
-    """Provide detailed analysis of validation performance"""
-    
-    total_detections = 0
-    images_with_detections = 0
-    class_counts = {name: 0 for name in class_names} if class_names else {}
-    
-    print("\n" + "="*60)
-    print("DETAILED VALIDATION ANALYSIS")
-    print("="*60)
-    
-    for i, image_path in enumerate(image_paths):
-        results = model(str(image_path))
-        num_detections = len(results[0].boxes)
-        total_detections += num_detections
-        
-        if num_detections > 0:
-            images_with_detections += 1
-            classes = results[0].boxes.cls.cpu().numpy().astype(int)
-            confidences = results[0].boxes.conf.cpu().numpy()
-            
-            print(f"\nImage {i+1}: {image_path.name}")
-            print(f"  Detections: {num_detections}")
-            
-            for cls, conf in zip(classes, confidences):
-                if class_names and cls < len(class_names):
-                    class_name = class_names[cls]
-                    if class_name in class_counts:
-                        class_counts[class_name] += 1
-                    print(f"    {class_name}: {conf:.3f}")
-                else:
-                    print(f"    Class {cls}: {conf:.3f}")
-    
-    print(f"\n" + "-"*40)
-    print("SUMMARY STATISTICS:")
-    print(f"  Total images analyzed: {len(image_paths)}")
-    print(f"  Images with detections: {images_with_detections}")
-    print(f"  Images without detections: {len(image_paths) - images_with_detections}")
-    print(f"  Total detections: {total_detections}")
-    print(f"  Average detections per image: {total_detections/len(image_paths):.2f}")
-    
-    if class_counts and total_detections > 0:
-        print(f"\nCLASS DISTRIBUTION:")
-        for class_name, count in class_counts.items():
-            percentage = (count / total_detections * 100) if total_detections > 0 else 0
-            print(f"  {class_name}: {count} ({percentage:.1f}%)")
-
-def save_individual_predictions(model, image_paths, class_names, save_dir="C:/Users/Tristan/Desktop/Yolo/validation_results/individual"):
-    """Save individual prediction images"""
-    
-    os.makedirs(save_dir, exist_ok=True)
-    
-    for i, image_path in enumerate(image_paths):
-        # Run prediction
-        results = model(str(image_path))
-        
-        # Get annotated image
-        annotated_image = results[0].plot()
-        
-        # Save
-        output_path = f"{save_dir}/prediction_{i+1:02d}_{image_path.stem}.jpg"
-        cv2.imwrite(output_path, annotated_image)
-    
-    print(f"Individual prediction images saved to: {save_dir}")
+        print("No detections found in sample images to analyze confidence scores.")
 
 def main():
-    """Main function to run validation visualization"""
+    """Main function to run validation analysis"""
     
     print("Loading model and dataset configuration...")
     model, data_config = load_model_and_data()
@@ -313,42 +325,49 @@ def main():
             class_names = list(class_names.values())
     else:
         print("No class names found in data config. Using generic names.")
-        # You can manually specify your class names here if needed
         class_names = ["lesion"]  # Adjust this based on your classes
     
     print(f"Classes: {class_names}")
-    
-    # Get validation images
-    print("Selecting validation images...")
-    image_paths = get_validation_images(data_config, num_images=20)
-    
-    if not image_paths:
-        print("No validation images found!")
-        return
-        
-    print(f"Selected {len(image_paths)} validation images")
     
     # Create results directory
     save_dir = "C:/Users/Tristan/Desktop/Yolo/validation_results"
     os.makedirs(save_dir, exist_ok=True)
     
-    # Run different visualizations
-    print("\nGenerating validation visualizations...")
+    # 1. RUN FULL VALIDATION ON ENTIRE DATASET FOR mAP SCORES
+    print("\n" + "="*60)
+    print("STEP 1: FULL DATASET VALIDATION")
+    print("="*60)
     
-    # 1. Main prediction visualization
-    visualize_predictions(model, image_paths, class_names, confidence_threshold=0.3)
+    validation_results = run_full_validation(model, "C:/Users/Tristan/Desktop/Yolo2/data.yaml")
     
-    # 2. Confidence histogram
+    # 2. SAMPLE VISUALIZATION
+    print("\n" + "="*60) 
+    print("STEP 2: SAMPLE VISUALIZATION (20 images)")
+    print("="*60)
+    
+    # Get sample validation images for visualization
+    image_paths = get_validation_images(data_config, num_images=20)
+    
+    if not image_paths:
+        print("No validation images found for visualization!")
+        return
+        
+    print(f"Selected {len(image_paths)} sample images for visualization")
+    
+    # Visualize sample predictions
+    print("\nGenerating sample visualizations...")
+    visualize_predictions(model, image_paths, class_names, confidence_threshold=0.3, save_dir=save_dir)
+    
+    # Create confidence histogram from samples
     create_confidence_histogram(model, image_paths, save_dir)
     
-    # 3. Detailed analysis
-    detailed_validation_analysis(model, image_paths, class_names, save_dir)
-    
-    # 4. Save individual predictions
-    save_individual_predictions(model, image_paths, class_names)
-    
     print(f"\nAll validation results saved to: {save_dir}")
-    print("Validation analysis complete!")
+    print("\n" + "="*60)
+    print("VALIDATION ANALYSIS COMPLETE!")
+    print("="*60)
+    print("✓ Full dataset mAP scores calculated")
+    print("✓ Sample images visualized")
+    print("✓ Confidence analysis completed")
 
 if __name__ == "__main__":
     # Set random seed for reproducible results

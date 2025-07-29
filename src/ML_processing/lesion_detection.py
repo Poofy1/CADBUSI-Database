@@ -45,7 +45,7 @@ class Config_BUSI:
     modelname = "SAM"
 
 
-def get_target_data(csv_file_path):
+def get_target_data(csv_file_path, paired_only=False, limit=None):
     """
     Find all target images (has_calipers = False) and their corresponding caliper images if they exist.
     
@@ -58,13 +58,19 @@ def get_target_data(csv_file_path):
     
     Ignores pairs where either image has PhotometricInterpretation = 'RGB'
     
+    Args:
+        csv_file_path: Path to the CSV file
+        paired_only: If True, only return target images that have corresponding caliper images
+        limit: If specified, only process this many target images (for debugging)
+    
     Returns:
         List of dictionaries with keys:
         - 'clean_image': target image name (has_calipers = False)
         - 'caliper_image': corresponding caliper image name (or None if no match)
         - 'type': 'target_pair'
     """
-    print("Finding target images and their corresponding caliper images...")
+    limit_msg = f" (processing max {limit} for debugging)" if limit else ""
+    print(f"Finding target images and their corresponding caliper images{limit_msg}...")
     
     # Load the CSV file
     data = read_csv(csv_file_path)
@@ -100,8 +106,14 @@ def get_target_data(csv_file_path):
     
     pairs = []
     matched_targets = 0
+    processed_count = 0
     
     for index, target_row in target_images.iterrows():
+        # Check limit for debugging
+        if limit and processed_count >= limit:
+            print(f"Reached debug limit of {limit} target images, stopping...")
+            break
+            
         # Skip if target image has PhotometricInterpretation = 'RGB'
         if target_row.get('PhotometricInterpretation') == 'RGB':
             continue
@@ -123,6 +135,11 @@ def get_target_data(csv_file_path):
                 matched_targets += 1
                 break
         
+        # If paired_only is True, skip entries without caliper pairs
+        if paired_only and caliper_image is None:
+            processed_count += 1  # Still count this as processed
+            continue
+        
         # Create the pair dictionary
         pair = {
             'type': 'target_pair',
@@ -131,10 +148,13 @@ def get_target_data(csv_file_path):
         }
         
         pairs.append(pair)
+        processed_count += 1
     
-    print(f"Found {len(pairs)} target images")
-    print(f"Found {matched_targets} target images with corresponding caliper images")
-    print(f"Found {len(pairs) - matched_targets} target images without caliper pairs")
+    limit_suffix = f" (debug limit: {limit})" if limit else ""
+    print(f"Found {len(pairs)} target images" + (" with caliper pairs" if paired_only else "") + limit_suffix)
+    if not paired_only:
+        print(f"Found {matched_targets} target images with corresponding caliper images")
+        print(f"Found {len(pairs) - matched_targets} target images without caliper pairs")
     
     return pairs
 
@@ -302,7 +322,7 @@ def detect_calipers_yolo(image, yolo_model, confidence_threshold=0.5):
         image_np = image
     
     # Run YOLO inference
-    results = yolo_model(image_np, conf=confidence_threshold)
+    results = yolo_model(image_np, conf=confidence_threshold, verbose=False)
     
     caliper_boxes = []
     
@@ -332,7 +352,7 @@ def get_image_crop_coordinates(image_width, image_height, crop_margin=50):
     
     return crop_x, crop_y, crop_x2, crop_y2
 
-def load_image(caliper_path, clean_path, image_dir, image_data_row):
+def load_image(caliper_path, clean_path, image_dir):
     
     # Determine which image to load and process
     if caliper_path is not None:
@@ -352,9 +372,12 @@ def load_image(caliper_path, clean_path, image_dir, image_data_row):
         
     return target_img
             
-def process_single_image_pair(pair, image_dir, image_data_row, model, yolo_model, transform, device, encoder_input_size, save_debug_images=True):
+def process_single_image_pair(pair, image_dir, image_data_row, model, yolo_model, transform, device, encoder_input_size, save_debug_images=True, use_samus_model=True):
     """
-    Process a single image pair to detect calipers using YOLO and compute bounding boxes.
+    Process a single image pair to detect calipers using YOLO and optionally compute bounding boxes with SAMUS.
+    
+    Args:
+        use_samus_model (bool): If True, runs SAMUS segmentation model. If False, only returns YOLO bounding boxes.
     """
     caliper_path = pair['caliper_image']
     clean_path = pair['clean_image']
@@ -365,7 +388,7 @@ def process_single_image_pair(pair, image_dir, image_data_row, model, yolo_model
     }
     
     try:
-        target_image = load_image(caliper_path, clean_path, image_dir, image_data_row)
+        target_image = load_image(caliper_path, clean_path, image_dir)
         
         # Extract crop parameters from the data row
         crop_x = image_data_row.get('crop_x', None)
@@ -394,7 +417,7 @@ def process_single_image_pair(pair, image_dir, image_data_row, model, yolo_model
         crop_y2 = max(crop_y, min(crop_y2, img_height))
         
         # Crop and return the target image
-        target_image.crop((crop_x, crop_y, crop_x2, crop_y2))
+        target_image = target_image.crop((crop_x, crop_y, crop_x2, crop_y2))
 
         # Detect calipers using YOLO on the CROPPED caliper image
         caliper_boxes = detect_calipers_yolo(target_image, yolo_model, confidence_threshold=0.3)
@@ -425,151 +448,153 @@ def process_single_image_pair(pair, image_dir, image_data_row, model, yolo_model
                     bbox_strings.append(f"[{bbox[0]}, {bbox[1]}, {bbox[2]}, {bbox[3]}]")
                 result['caliper_boxes'] = "; ".join(bbox_strings)
             
-            # Crop the clean image using the SAME crop parameters
-            cropped_width, cropped_height = target_image.size
-            
-            # Adjust caliper boxes to be relative to the cropped region for SAMUS
-            adjusted_caliper_boxes = []
-            for bbox in full_image_caliper_boxes:
-                # Subtract crop offsets to make coordinates relative to cropped image
-                adjusted_bbox = [
-                    bbox[0] - crop_x,  # x1
-                    bbox[1] - crop_y,  # y1  
-                    bbox[2] - crop_x,  # x2
-                    bbox[3] - crop_y   # y2
-                ]
+            # Only run SAMUS model if use_samus_model is True
+            if use_samus_model:
+                # Crop the clean image using the SAME crop parameters
+                cropped_width, cropped_height = target_image.size
                 
-                # Ensure coordinates are within cropped image bounds
-                adjusted_bbox = list(clamp_coordinates(
-                    adjusted_bbox[0], adjusted_bbox[1], adjusted_bbox[2], adjusted_bbox[3],
-                    cropped_width, cropped_height
-                ))
+                # Adjust caliper boxes to be relative to the cropped region for SAMUS
+                adjusted_caliper_boxes = []
+                for bbox in full_image_caliper_boxes:
+                    # Subtract crop offsets to make coordinates relative to cropped image
+                    adjusted_bbox = [
+                        bbox[0] - crop_x,  # x1
+                        bbox[1] - crop_y,  # y1  
+                        bbox[2] - crop_x,  # x2
+                        bbox[3] - crop_y   # y2
+                    ]
+                    
+                    # Ensure coordinates are within cropped image bounds
+                    adjusted_bbox = list(clamp_coordinates(
+                        adjusted_bbox[0], adjusted_bbox[1], adjusted_bbox[2], adjusted_bbox[3],
+                        cropped_width, cropped_height
+                    ))
+                    
+                    # Only add boxes that have valid dimensions
+                    if adjusted_bbox[2] > adjusted_bbox[0] and adjusted_bbox[3] > adjusted_bbox[1]:
+                        adjusted_caliper_boxes.append(adjusted_bbox)
                 
-                # Only add boxes that have valid dimensions
-                if adjusted_bbox[2] > adjusted_bbox[0] and adjusted_bbox[3] > adjusted_bbox[1]:
-                    adjusted_caliper_boxes.append(adjusted_bbox)
-            
-            if not adjusted_caliper_boxes:
-                print(f"No valid caliper boxes after adjustment for {clean_path}")
-                return result
-            
-            # Prepare box prompts for the model
-            box_tensor = prepare_box_prompts(
-                adjusted_caliper_boxes,
-                (cropped_width, cropped_height),
-                encoder_input_size
-            )
-            
-            # Transform cropped image for model input
-            image_tensor = transform(target_image).unsqueeze(0).to(device)
-            
-            if box_tensor is not None:
-                box_tensor = box_tensor.to(device)
+                if not adjusted_caliper_boxes:
+                    print(f"No valid caliper boxes after adjustment for {clean_path}")
+                    return result
                 
-                with torch.no_grad():
-                    outputs = model(image_tensor, bbox=box_tensor.unsqueeze(0))
+                # Prepare box prompts for the model
+                box_tensor = prepare_box_prompts(
+                    adjusted_caliper_boxes,
+                    (cropped_width, cropped_height),
+                    encoder_input_size
+                )
+                
+                # Transform cropped image for model input
+                image_tensor = transform(target_image).unsqueeze(0).to(device)
+                
+                if box_tensor is not None:
+                    box_tensor = box_tensor.to(device)
+                    
+                    with torch.no_grad():
+                        outputs = model(image_tensor, bbox=box_tensor.unsqueeze(0))
 
-                    # Get the segmentation mask
-                    if isinstance(outputs, tuple):
-                        mask = outputs[0]
-                    elif isinstance(outputs, dict):
-                        possible_keys = ['masks', 'pred_masks', 'output', 'prediction', 'segmentation', 'mask', 'pred']
-                        mask = None
-                        for key in possible_keys:
-                            if key in outputs:
-                                mask = outputs[key]
-                                break
-                        
-                        if mask is None:
-                            first_key = list(outputs.keys())[0]
-                            mask = outputs[first_key]
-                    else:
-                        mask = outputs
-                        
-                    # Convert mask to numpy for visualization
-                    mask_np = mask.squeeze().cpu().numpy()
-                    mask_np = torch.sigmoid(torch.tensor(mask_np)).numpy()
-                    
-                    # Threshold the mask
-                    mask_binary = (mask_np > 0.5).astype(np.uint8)
-                    
-                    # Resize mask to match cropped image dimensions
-                    mask_resized = cv2.resize(mask_binary, (cropped_width, cropped_height), 
-                                            interpolation=cv2.INTER_NEAREST)
-                    
-                    # Clean the mask: fill holes and remove small islands
-                    mask_cleaned = clean_mask(mask_resized)
-
-                    # Use the cleaned mask for further processing
-                    mask_resized = mask_cleaned
-
-                    # Calculate mask coverage within bounding boxes
-                    coverage_percentage = calculate_mask_coverage_in_boxes(mask_resized, adjusted_caliper_boxes)
-                    
-                    # Check if most of the mask is outside the boxes
-                    if coverage_percentage < 50:
-                        print(f"Skipping image {clean_path}: Only {coverage_percentage:.1f}% of mask is inside boxes")
-                        return result
-                    
-                    # Save the binary lesion mask
-                    parent_dir = os.path.dirname(os.path.normpath(image_dir))
-                    lesion_mask_dir = os.path.join(parent_dir, "lesion_masks")
-   
-                    # Use the clean image name as the base for filename
-                    base_name = clean_path.replace('.png', '').replace('.jpg', '').replace('.jpeg', '')
-                    mask_filename = f"{base_name}.png"
-                    mask_save_path = os.path.join(lesion_mask_dir, mask_filename)
-                    
-                    # Convert binary mask to 0-255 range and save
-                    mask_to_save = mask_resized.astype(np.uint8)
-                    save_data(mask_to_save, mask_save_path)
-                    result['has_caliper_mask'] = True
-
-                    # Save debug images if requested
-                    if save_debug_images:
-                        # Create debug image using CROPPED clean image as base
-                        debug_img = target_image.copy()
-                        
-                        # Convert PIL Image to numpy array and ensure RGB format
-                        if isinstance(debug_img, Image.Image):
-                            if debug_img.mode != 'RGB':
-                                debug_img = debug_img.convert('RGB')
-                            debug_img = np.array(debug_img)
-                            debug_img = cv2.cvtColor(debug_img, cv2.COLOR_RGB2BGR)
-
-                        # Draw ADJUSTED bounding boxes (relative to cropped image)
-                        for adjusted_bbox in adjusted_caliper_boxes:
-                            x1, y1, x2, y2 = adjusted_bbox
+                        # Get the segmentation mask
+                        if isinstance(outputs, tuple):
+                            mask = outputs[0]
+                        elif isinstance(outputs, dict):
+                            possible_keys = ['masks', 'pred_masks', 'output', 'prediction', 'segmentation', 'mask', 'pred']
+                            mask = None
+                            for key in possible_keys:
+                                if key in outputs:
+                                    mask = outputs[key]
+                                    break
                             
-                            # Draw bounding box
-                            cv2.rectangle(debug_img, (int(x1), int(y1)), (int(x2), int(y2)), 
-                                        (0, 255, 0), 2)  # Green box
+                            if mask is None:
+                                first_key = list(outputs.keys())[0]
+                                mask = outputs[first_key]
+                        else:
+                            mask = outputs
+                            
+                        # Convert mask to numpy for visualization
+                        mask_np = mask.squeeze().cpu().numpy()
+                        mask_np = torch.sigmoid(torch.tensor(mask_np)).numpy()
+                        
+                        # Threshold the mask
+                        mask_binary = (mask_np > 0.5).astype(np.uint8)
+                        
+                        # Resize mask to match cropped image dimensions
+                        mask_resized = cv2.resize(mask_binary, (cropped_width, cropped_height), 
+                                                interpolation=cv2.INTER_NEAREST)
+                        
+                        # Clean the mask: fill holes and remove small islands
+                        mask_cleaned = clean_mask(mask_resized)
 
-                        mask_overlay = np.zeros_like(debug_img)
-                        mask_overlay[mask_resized > 0] = [0, 255, 255]  # Yellow in BGR
+                        # Use the cleaned mask for further processing
+                        mask_resized = mask_cleaned
+
+                        # Calculate mask coverage within bounding boxes
+                        coverage_percentage = calculate_mask_coverage_in_boxes(mask_resized, adjusted_caliper_boxes)
                         
-                        # Blend the mask with the image (30% mask opacity)
-                        debug_img = cv2.addWeighted(debug_img, 0.7, mask_overlay, 0.3, 0)
+                        # Check if most of the mask is outside the boxes
+                        if coverage_percentage < 50:
+                            print(f"Skipping image {clean_path}: Only {coverage_percentage:.1f}% of mask is inside boxes")
+                            return result
                         
-                        # Convert back to RGB for saving
-                        debug_img = cv2.cvtColor(debug_img, cv2.COLOR_BGR2RGB)
-                        
-                        # Save the debug image
+                        # Save the binary lesion mask
                         parent_dir = os.path.dirname(os.path.normpath(image_dir))
-                        save_dir = os.path.join(parent_dir, "test_images")
-                        
+                        lesion_mask_dir = os.path.join(parent_dir, "lesion_masks")
+       
                         # Use the clean image name as the base for filename
                         base_name = clean_path.replace('.png', '').replace('.jpg', '').replace('.jpeg', '')
-                        debug_filename = f"{base_name}.png"
-                        debug_save_path = os.path.join(save_dir, debug_filename)
+                        mask_filename = f"{base_name}.png"
+                        mask_save_path = os.path.join(lesion_mask_dir, mask_filename)
                         
-                        # Save using your save_data function
-                        save_data(debug_img, debug_save_path)
-                        
-                        print(f"Debug image saved: {debug_save_path}")
+                        # Convert binary mask to 0-255 range and save
+                        mask_to_save = mask_resized.astype(np.uint8)
+                        save_data(mask_to_save, mask_save_path)
+                        result['has_caliper_mask'] = True
+
+                        # Save debug images if requested
+                        if save_debug_images:
+                            # Create debug image using CROPPED clean image as base
+                            debug_img = target_image.copy()
+                            
+                            # Convert PIL Image to numpy array and ensure RGB format
+                            if isinstance(debug_img, Image.Image):
+                                if debug_img.mode != 'RGB':
+                                    debug_img = debug_img.convert('RGB')
+                                debug_img = np.array(debug_img)
+                                debug_img = cv2.cvtColor(debug_img, cv2.COLOR_RGB2BGR)
+
+                            # Draw ADJUSTED bounding boxes (relative to cropped image)
+                            for adjusted_bbox in adjusted_caliper_boxes:
+                                x1, y1, x2, y2 = adjusted_bbox
+                                
+                                # Draw bounding box
+                                cv2.rectangle(debug_img, (int(x1), int(y1)), (int(x2), int(y2)), 
+                                            (0, 255, 0), 2)  # Green box
+
+                            mask_overlay = np.zeros_like(debug_img)
+                            mask_overlay[mask_resized > 0] = [0, 255, 255]  # Yellow in BGR
+                            
+                            # Blend the mask with the image (30% mask opacity)
+                            debug_img = cv2.addWeighted(debug_img, 0.7, mask_overlay, 0.3, 0)
+                            
+                            # Convert back to RGB for saving
+                            debug_img = cv2.cvtColor(debug_img, cv2.COLOR_BGR2RGB)
+                            
+                            # Save the debug image
+                            parent_dir = os.path.dirname(os.path.normpath(image_dir))
+                            save_dir = os.path.join(parent_dir, "test_images")
+                            
+                            # Use the clean image name as the base for filename
+                            base_name = clean_path.replace('.png', '').replace('.jpg', '').replace('.jpeg', '')
+                            debug_filename = f"{base_name}.png"
+                            debug_save_path = os.path.join(save_dir, debug_filename)
+                            
+                            # Save using your save_data function
+                            save_data(debug_img, debug_save_path)
+                            
+                            print(f"Debug image saved: {debug_save_path}")
         
     except Exception as e:
-        print(f"Error processing pair {caliper_path} -> {clean_path}: {str(e)}")
+        print(f"Error processing pair {clean_path} -> {clean_path}: {str(e)}")
         return result
     
     return result
@@ -586,37 +611,42 @@ def process_image_pairs_multithreading(pairs, image_dir, image_data_df, model, y
     for idx, row in image_data_df.iterrows():
         image_name_to_row[row['ImageName']] = row
     
-    def worker(pair):
+    def worker(pair_with_index):
+        pair_index, pair = pair_with_index
         # O(1) dictionary lookup
-        caliper_name = pair['caliper_image']
-        image_data_row = image_name_to_row[caliper_name]
+        image_name = pair['clean_image']
+        image_data_row = image_name_to_row[image_name]
         
-        return process_single_image_pair(
+        result = process_single_image_pair(
             pair, image_dir, image_data_row, 
             model, yolo_model, transform, device, encoder_input_size, save_debug_images
         )
+        return pair_index, result  # Return both index and result
     
-    results = []
+    results = [None] * len(pairs)  # Pre-allocate results array
     with ThreadPoolExecutor(max_workers=num_threads) as executor:
-        # Submit all tasks
-        future_to_pair = {executor.submit(worker, pair): pair for pair in pairs}
+        # Submit all tasks with their indices
+        futures = {
+            executor.submit(worker, (i, pair)): i 
+            for i, pair in enumerate(pairs)
+        }
         
         # Collect results with tqdm progress bar
         with tqdm(total=len(pairs), desc="Processing image pairs") as pbar:
-            for future in as_completed(future_to_pair):
-                pair = future_to_pair[future]
+            for future in as_completed(futures):
                 try:
-                    result = future.result()
-                    results.append(result)
+                    pair_index, result = future.result()
+                    results[pair_index] = result  # ✅ Store in correct position
                 except Exception as e:
-                    print(f"Error processing {pair['caliper_image']}: {e}")
-                    results.append(None)
+                    pair_index = futures[future]
+                    print(f"Error processing {pairs[pair_index]['clean_image']}: {e}")
+                    results[pair_index] = None
                 
                 pbar.update(1)
     
     return results
 
-def Locate_Lesions(csv_file_path, image_dir, save_debug_images=True):
+def Locate_Lesions(csv_file_path, image_dir, save_debug_images=False):
     # Download model
     download_samus_model()
     
@@ -635,8 +665,7 @@ def Locate_Lesions(csv_file_path, image_dir, save_debug_images=True):
     
     # Add new columns if they don't exist
     for col in ["caliper_pairs", "caliper_boxes"]:
-        if col not in image_data.columns:
-            image_data[col] = ""
+        image_data[col] = ""
             
     # Initialize has_caliper_mask to False for ALL rows
     if "has_caliper_mask" not in image_data.columns:

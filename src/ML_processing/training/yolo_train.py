@@ -9,57 +9,45 @@ if torch.cuda.is_available():
     print("CUDA version:", torch.version.cuda)
 print("PyTorch version:", torch.__version__)
 
-def train_yolo_model(data_yaml_path="C:/Users/Tristan/Desktop/Yolo2/data.yaml"):
-    """Train YOLO11m model on ultrasound lesion detection"""
+def train_yolo_model(data_yaml_path):
+    """Train YOLO optimized for B&W ultrasound images"""
     
-    # Check if CUDA is available
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    print(f"Using device: {device}")
+    model = YOLO('yolo11s.pt')  # Start with smaller model
     
-    # Load pre-trained YOLO11m model
-    model = YOLO('yolo11s.pt')
-    
-    # Train the model
     results = model.train(
         data=data_yaml_path,
         epochs=100,
         imgsz=640,
-        batch=32,
+        batch=16,
         device=device,
-        project='ultrasound_lesion_detection',
-        name='yolo11m_lesions',
         patience=5,
-        save=True,
-        plots=True,  # Enable plotting - saves train_batch images
-        save_period=1,  # Save model checkpoint every epoch
-        pretrained=True,
-        optimizer='AdamW',
-        lr0=0.001,
-        lrf=0.01,
-        momentum=0.937,
-        weight_decay=0.0005,
-        warmup_epochs=3.0,
-        warmup_momentum=0.8,
-        warmup_bias_lr=0.1,
+        
+        # Ultrasound-appropriate augmentations
+        hsv_h=0.0,        # No hue changes (B&W images)
+        hsv_s=0.0,        # No saturation changes (B&W images)  
+        hsv_v=0.3,        # Brightness/contrast changes (important for ultrasound)
+        degrees=10.0,     # Small rotations (probe angle variations)
+        translate=0.1,    # Translations (probe positioning)
+        scale=0.3,        # Scaling (zoom variations)
+        shear=0.0,        # No shearing
+        perspective=0.0,  # No perspective changes
+        flipud=0.0,       # No vertical flips (ultrasound orientation matters)
+        fliplr=0.5,       # Horizontal flips (left/right lesions)
+        mosaic=0.3,       # Reduced mosaic
+        mixup=0.0,        # No mixup for medical data
+        copy_paste=0.0,   # No copy-paste
+        auto_augment='',  # Disable auto augment (designed for color images)
+        erasing=0.1,      # Light random erasing
+        
+        # Loss weights
         box=7.5,
         cls=0.5,
         dfl=1.5,
-        hsv_h=0.015,
-        hsv_s=0.7,
-        hsv_v=0.4,
-        degrees=0.0,
-        translate=0.1,
-        scale=0.5,
-        shear=0.0,
-        perspective=0.0,
-        flipud=0.0,
-        fliplr=0.5,
-        mosaic=1.0,
-        mixup=0.0,
-        copy_paste=0.0,
-        auto_augment='randaugment',
-        erasing=0.4,
-        crop_fraction=1.0
+        
+        # Conservative learning rate for medical data
+        lr0=0.0005,
+        lrf=0.01,
     )
     
     # Validate the model
@@ -73,4 +61,4 @@ def train_yolo_model(data_yaml_path="C:/Users/Tristan/Desktop/Yolo2/data.yaml"):
 
 # Train the model
 if __name__ == "__main__":
-    model = train_yolo_model()
+    model = train_yolo_model(data_yaml_path="C:/Users/Tristan/Desktop/Yolo2/data.yaml")
