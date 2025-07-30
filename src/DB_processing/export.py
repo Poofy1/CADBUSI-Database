@@ -13,6 +13,7 @@ parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
 from storage_adapter import *
 from src.DB_processing.tools import append_audit
+from src.DB_processing.mask_images import Mask_Lesions
 
 
 # Paths
@@ -256,28 +257,25 @@ def format_data(breast_data, image_data):
         if col + '_image_data' in data.columns:
             data.drop(col + '_image_data', axis=1, inplace=True)
 
-    # Keep only the specified columns
-    columns_to_keep = ['Patient_ID', 'Accession_Number', 'Study_Laterality', 'ImageName', 'Has_Malignant', 'Has_Benign', 'valid']
+    # Keep only the specified columns (ADD AGE_AT_EVENT HERE)
+    columns_to_keep = ['Patient_ID', 'Accession_Number', 'Study_Laterality', 'ImageName', 'Has_Malignant', 'Has_Benign', 'valid', 'AGE_AT_EVENT']
     data = data[columns_to_keep]
     
-    
-    
-    # Group by Accession_Number and Breast, and aggregate
+    # Group by Accession_Number and Breast, and aggregate (ADD AGE_AT_EVENT TO AGGREGATION)
     data = data.groupby(['Accession_Number', 'Study_Laterality']).agg({
         'Patient_ID': 'first',
         'ImageName': lambda x: list(x),
         'Has_Malignant': 'first',
         'Has_Benign': 'first',
         'valid': 'first',
+        'AGE_AT_EVENT': 'first',  # ADD THIS LINE
     }).reset_index()
     
-    #data.to_csv('D:\DATA\CASBUSI\exports\export_01_30_2024/test.csv', index=False)
-
     # Remove the Patient_ID column
     data.drop('Patient_ID', axis=1, inplace=True)
 
-    # Rename columns
-    data.rename(columns={'ImageName': 'Images', 'valid': 'Valid'}, inplace=True)
+    # Rename columns (ADD AGE_AT_EVENT -> age RENAME)
+    data.rename(columns={'ImageName': 'Images', 'valid': 'Valid', 'AGE_AT_EVENT': 'age'}, inplace=True)
     
     # Add a new column 'ID' that counts up from 0
     data['ID'] = range(len(data))
@@ -698,6 +696,7 @@ def Export_Database(CONFIG, reparse_images = True):
         # Crop the images for the relevant studies
         Crop_Images(image_df, parsed_database, output_dir)
         Crop_Videos(video_df, parsed_database, output_dir)
+        image_df = Mask_Lesions(image_df, parsed_database, output_dir)
     
     # Convert 'Patient_ID' columns to integers
     labeled_df['Patient_ID'] = labeled_df['Patient_ID'].astype(int).astype(str)
