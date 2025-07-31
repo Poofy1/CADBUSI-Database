@@ -352,7 +352,7 @@ def get_image_crop_coordinates(image_width, image_height, crop_margin=50):
     
     return crop_x, crop_y, crop_x2, crop_y2
 
-def load_image(caliper_path, clean_path, image_dir):
+def load_image(caliper_path, clean_path, image_data_row, image_dir):
     
     # Determine which image to load and process
     is_caliper = False
@@ -367,12 +367,41 @@ def load_image(caliper_path, clean_path, image_dir):
     # Load the target image
     target_path = os.path.normpath(target_path)
     target_image_path = os.path.join(image_dir, target_path)
-    target_img = read_image(target_image_path, use_pil=True)
+    target_image = read_image(target_image_path, use_pil=True)
         
-    if target_img.mode != 'RGB':
-        target_img = target_img.convert('RGB')
+    if target_image.mode != 'RGB':
+        target_image = target_image.convert('RGB')
         
-    return target_img, is_caliper
+    # Extract crop parameters from the data row
+    crop_x = image_data_row.get('crop_x', None)
+    crop_y = image_data_row.get('crop_y', None)
+    crop_w = image_data_row.get('crop_w', None)
+    crop_h = image_data_row.get('crop_h', None)
+    
+    # Handle missing or null crop parameters
+    if pd.isna(crop_x) or pd.isna(crop_y) or pd.isna(crop_w) or pd.isna(crop_h):
+        # Use full image if crop parameters are missing
+        crop_x, crop_y = 0, 0
+        crop_w, crop_h = target_image.size[0], target_image.size[1]
+    else:
+        # Convert to integers
+        crop_x, crop_y, crop_w, crop_h = int(crop_x), int(crop_y), int(crop_w), int(crop_h)
+    
+    # Calculate crop coordinates
+    crop_x2 = crop_x + crop_w
+    crop_y2 = crop_y + crop_h
+    
+    # Ensure crop coordinates are within image bounds
+    img_width, img_height = target_image.size
+    crop_x = max(0, min(crop_x, img_width))
+    crop_y = max(0, min(crop_y, img_height))
+    crop_x2 = max(crop_x, min(crop_x2, img_width))
+    crop_y2 = max(crop_y, min(crop_y2, img_height))
+    
+    # Crop and return the target image
+    target_image = target_image.crop((crop_x, crop_y, crop_x2, crop_y2))
+        
+    return target_image, is_caliper, (crop_x, crop_y, crop_x2, crop_y2), (img_width, img_height)
             
 def process_single_image_pair(pair, image_dir, image_data_row, model, yolo_model, transform, device, encoder_input_size, save_debug_images=True, use_samus_model=True):
     """
@@ -391,168 +420,84 @@ def process_single_image_pair(pair, image_dir, image_data_row, model, yolo_model
     
     # Initialize variables for debug saving
     target_image = None
-    adjusted_caliper_boxes = []
     mask_resized = None
     is_caliper = False
     
     try:
-        target_image, is_caliper = load_image(caliper_path, clean_path, image_dir)
-
-        # Extract crop parameters from the data row
-        crop_x = image_data_row.get('crop_x', None)
-        crop_y = image_data_row.get('crop_y', None)
-        crop_w = image_data_row.get('crop_w', None)
-        crop_h = image_data_row.get('crop_h', None)
-        
-        # Handle missing or null crop parameters
-        if pd.isna(crop_x) or pd.isna(crop_y) or pd.isna(crop_w) or pd.isna(crop_h):
-            # Use full image if crop parameters are missing
-            crop_x, crop_y = 0, 0
-            crop_w, crop_h = target_image.size[0], target_image.size[1]
-        else:
-            # Convert to integers
-            crop_x, crop_y, crop_w, crop_h = int(crop_x), int(crop_y), int(crop_w), int(crop_h)
-        
-        # Calculate crop coordinates
-        crop_x2 = crop_x + crop_w
-        crop_y2 = crop_y + crop_h
-        
-        # Ensure crop coordinates are within image bounds
-        img_width, img_height = target_image.size
-        crop_x = max(0, min(crop_x, img_width))
-        crop_y = max(0, min(crop_y, img_height))
-        crop_x2 = max(crop_x, min(crop_x2, img_width))
-        crop_y2 = max(crop_y, min(crop_y2, img_height))
-        
-        # Crop and return the target image
-        target_image = target_image.crop((crop_x, crop_y, crop_x2, crop_y2))
+        target_image, is_caliper, crops, dim = load_image(caliper_path, clean_path, image_data_row, image_dir)
+        crop_x, crop_y, crop_x2, crop_y2 = crops
+        img_width, img_height = dim
 
         # Detect calipers using YOLO on the CROPPED caliper image
-        caliper_boxes = detect_calipers_yolo(target_image, yolo_model, confidence_threshold=0.3)
+        cropped_caliper_boxes = detect_calipers_yolo(target_image, yolo_model, confidence_threshold=0.3)
+
+        if len(cropped_caliper_boxes) == 0:
+            return result
+
+        # Convert to full image coordinates ONLY for storage in result
+        full_image_caliper_boxes = []
+        for bbox in cropped_caliper_boxes:
+            x1, y1, x2, y2 = bbox
+            full_bbox = [x1 + crop_x, y1 + crop_y, x2 + crop_x, y2 + crop_y]
+            full_image_caliper_boxes.append(full_bbox)
+
+        # Store caliper boxes in result format (using full image coordinates)
+        bbox_strings = [f"[{bbox[0]}, {bbox[1]}, {bbox[2]}, {bbox[3]}]" for bbox in full_image_caliper_boxes]
+        result['caliper_boxes'] = "; ".join(bbox_strings)
         
-        if len(caliper_boxes) > 0:
-            # IMPORTANT: Adjust caliper boxes to full image coordinates
-            # (YOLO detected on cropped image, so we need to add crop offset)
-            full_image_caliper_boxes = []
-            for bbox in caliper_boxes:
-                x1, y1, x2, y2 = bbox
-                # Add crop offset to get coordinates relative to full image
-                full_bbox = [
-                    x1 + crop_x,
-                    y1 + crop_y,
-                    x2 + crop_x,
-                    y2 + crop_y
-                ]
-                full_image_caliper_boxes.append(full_bbox)
+        # Only run SAMUS model if use_samus_model is True
+        if use_samus_model and cropped_caliper_boxes:
             
-            # Store caliper boxes in result format (using full image coordinates)
-            if len(full_image_caliper_boxes) == 1:
-                bbox = full_image_caliper_boxes[0]
-                result['caliper_boxes'] = f"[{bbox[0]}, {bbox[1]}, {bbox[2]}, {bbox[3]}]"
-            else:
-                # Multiple boxes - join with semicolon
-                bbox_strings = []
-                for bbox in full_image_caliper_boxes:
-                    bbox_strings.append(f"[{bbox[0]}, {bbox[1]}, {bbox[2]}, {bbox[3]}]")
-                result['caliper_boxes'] = "; ".join(bbox_strings)
-            
-            # Adjust caliper boxes to be relative to the cropped region for SAMUS
+            # Prepare box prompts for the model
             cropped_width, cropped_height = target_image.size
-            for bbox in full_image_caliper_boxes:
-                # Subtract crop offsets to make coordinates relative to cropped image
-                adjusted_bbox = [
-                    bbox[0] - crop_x,  # x1
-                    bbox[1] - crop_y,  # y1  
-                    bbox[2] - crop_x,  # x2
-                    bbox[3] - crop_y   # y2
-                ]
-                
-                # Ensure coordinates are within cropped image bounds
-                adjusted_bbox = list(clamp_coordinates(
-                    adjusted_bbox[0], adjusted_bbox[1], adjusted_bbox[2], adjusted_bbox[3],
-                    cropped_width, cropped_height
-                ))
-                
-                # Only add boxes that have valid dimensions
-                if adjusted_bbox[2] > adjusted_bbox[0] and adjusted_bbox[3] > adjusted_bbox[1]:
-                    adjusted_caliper_boxes.append(adjusted_bbox)
+            box_tensor = prepare_box_prompts(
+                cropped_caliper_boxes,
+                (cropped_width, cropped_height),
+                encoder_input_size
+            )
             
-            # Only run SAMUS model if use_samus_model is True
-            if use_samus_model and adjusted_caliper_boxes:
-                # Prepare box prompts for the model
-                box_tensor = prepare_box_prompts(
-                    adjusted_caliper_boxes,
-                    (cropped_width, cropped_height),
-                    encoder_input_size
-                )
-                
+            if box_tensor is not None:
                 # Transform cropped image for model input
                 image_tensor = transform(target_image).unsqueeze(0).to(device)
+                box_tensor = box_tensor.to(device)
                 
-                if box_tensor is not None:
-                    box_tensor = box_tensor.to(device)
+                with torch.no_grad():
+                    outputs = model(image_tensor, bbox=box_tensor.unsqueeze(0))
+                    mask = outputs['masks']
+                        
+                    # Convert mask to numpy for visualization
+                    mask_np = mask.squeeze().cpu().numpy()
+                    mask_np = torch.sigmoid(torch.tensor(mask_np)).numpy()
+                    mask_binary = (mask_np > 0.5).astype(np.uint8)
                     
-                    with torch.no_grad():
-                        outputs = model(image_tensor, bbox=box_tensor.unsqueeze(0))
+                    # Resize mask to match cropped image dimensions
+                    mask_resized = cv2.resize(mask_binary, (cropped_width, cropped_height), interpolation=cv2.INTER_NEAREST)
 
-                        # Get the segmentation mask
-                        if isinstance(outputs, tuple):
-                            mask = outputs[0]
-                        elif isinstance(outputs, dict):
-                            possible_keys = ['masks', 'pred_masks', 'output', 'prediction', 'segmentation', 'mask', 'pred']
-                            mask = None
-                            for key in possible_keys:
-                                if key in outputs:
-                                    mask = outputs[key]
-                                    break
-                            
-                            if mask is None:
-                                first_key = list(outputs.keys())[0]
-                                mask = outputs[first_key]
-                        else:
-                            mask = outputs
-                            
-                        # Convert mask to numpy for visualization
-                        mask_np = mask.squeeze().cpu().numpy()
-                        mask_np = torch.sigmoid(torch.tensor(mask_np)).numpy()
-                        
-                        # Threshold the mask
-                        mask_binary = (mask_np > 0.5).astype(np.uint8)
-                        
-                        # Resize mask to match cropped image dimensions
-                        mask_resized = cv2.resize(mask_binary, (cropped_width, cropped_height), 
-                                                interpolation=cv2.INTER_NEAREST)
+                    # Clean the mask: fill holes and remove small islands
+                    mask_resized = clean_mask(mask_resized)
 
-                        # Clean the mask: fill holes and remove small islands
-                        mask_cleaned = clean_mask(mask_resized)
-                        mask_resized = mask_cleaned
+                    # Calculate mask coverage within bounding boxes (using cropped mask and adjusted boxes)
+                    """
+                    coverage_percentage = calculate_mask_coverage_in_boxes(mask_resized, cropped_caliper_boxes)
+                    if coverage_percentage < 50:
+                        print(f"Skipping image {clean_path}: Only {coverage_percentage:.1f}% of mask is inside boxes")
+                        return result
+                    """ # was unnessesary? 
+                    
 
-                        # Calculate mask coverage within bounding boxes (using cropped mask and adjusted boxes)
-                        coverage_percentage = calculate_mask_coverage_in_boxes(mask_resized, adjusted_caliper_boxes)
-
-                        # Check if most of the mask is outside the boxes
-                        if coverage_percentage < 50:
-                            print(f"Skipping image {clean_path}: Only {coverage_percentage:.1f}% of mask is inside boxes")
-                        else:
-                            # Coverage check passed - now create full-sized mask for saving
-                            full_mask = np.zeros((img_height, img_width), dtype=np.uint8)
-                            
-                            # Place the cropped mask in the correct position within the full mask
-                            full_mask[crop_y:crop_y2, crop_x:crop_x2] = mask_resized
-                            
-                            # Save the binary lesion mask (now full-sized)
-                            parent_dir = os.path.dirname(os.path.normpath(image_dir))
-                            lesion_mask_dir = os.path.join(parent_dir, "lesion_masks")
-
-                            # Use the clean image name as the base for filename
-                            base_name = clean_path.replace('.png', '').replace('.jpg', '').replace('.jpeg', '')
-                            mask_filename = f"{base_name}.png"
-                            mask_save_path = os.path.join(lesion_mask_dir, mask_filename)
-                            
-                            # Convert binary mask to 0-255 range and save (using full-sized mask)
-                            mask_to_save = full_mask.astype(np.uint8)
-                            save_data(mask_to_save, mask_save_path)
-                            result['has_caliper_mask'] = True
+                    # Place the cropped mask in the correct position within the full mask
+                    full_mask = np.zeros((img_height, img_width), dtype=np.uint8)
+                    full_mask[crop_y:crop_y2, crop_x:crop_x2] = mask_resized
+                    
+                    # Save the binary lesion mask (now full-sized)
+                    parent_dir = os.path.dirname(os.path.normpath(image_dir))
+                    lesion_mask_dir = os.path.join(parent_dir, "lesion_masks")
+                    mask_save_path = os.path.join(lesion_mask_dir, clean_path)
+                    
+                    # Convert binary mask to 0-255 range and save (using full-sized mask)
+                    mask_to_save = full_mask.astype(np.uint8)
+                    save_data(mask_to_save, mask_save_path)
+                    result['has_caliper_mask'] = True
         
     except Exception as e:
         print(f"Error processing pair {clean_path} -> {clean_path}: {str(e)}")
@@ -571,8 +516,8 @@ def process_single_image_pair(pair, image_dir, image_data_row, model, yolo_model
                 debug_img = cv2.cvtColor(debug_img, cv2.COLOR_RGB2BGR)
 
             # Draw bounding boxes if they exist
-            if adjusted_caliper_boxes:
-                for adjusted_bbox in adjusted_caliper_boxes:
+            if cropped_caliper_boxes:
+                for adjusted_bbox in cropped_caliper_boxes:
                     x1, y1, x2, y2 = adjusted_bbox
                     # Draw bounding box
                     cv2.rectangle(debug_img, (int(x1), int(y1)), (int(x2), int(y2)), 
