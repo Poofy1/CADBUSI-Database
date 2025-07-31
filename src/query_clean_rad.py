@@ -316,7 +316,91 @@ def remove_outside_records(radiology_df):
     
     return filtered_df
 
-
+def add_previous_worst_mg_column(radiology_df):
+    """
+    Add a column 'previous_worst_MG' that contains the worst BI-RADS value from previous
+    mammography exams with matching laterality for each US record.
+    Optimized version that processes data much faster.
+    
+    Args:
+        radiology_df: DataFrame containing radiology data with columns:
+                     PATIENT_ID, MODALITY, BI-RADS, Study_Laterality, RADIOLOGY_DTM
+                     
+    Returns:
+        DataFrame with added 'previous_worst_MG' column
+    """
+    
+    # Define valid BI-RADS values in order from best to worst
+    valid_birads_order = ['0', '1', '2', '3', '4', '4A', '4B', '4C', '5', '6']
+    
+    def is_valid_birads(birads_value):
+        """Check if BI-RADS value is one of the accepted values."""
+        if pd.isna(birads_value) or birads_value is None:
+            return False
+        birads_str = str(birads_value).upper().strip()
+        return birads_str in valid_birads_order
+    
+    def get_worse_birads(current_worst, new_birads):
+        """Return the worse of two BI-RADS values."""
+        if current_worst is None:
+            return new_birads
+        
+        current_idx = valid_birads_order.index(str(current_worst).upper().strip())
+        new_idx = valid_birads_order.index(str(new_birads).upper().strip())
+        
+        return str(new_birads).upper().strip() if new_idx > current_idx else current_worst
+    
+    print("Processing previous worst MG...")
+    
+    # Convert RADIOLOGY_DTM to datetime if it isn't already
+    radiology_df['RADIOLOGY_DTM'] = pd.to_datetime(radiology_df['RADIOLOGY_DTM'], errors='coerce')
+    
+    # Initialize the new column
+    radiology_df['previous_worst_MG'] = None
+    
+    # Sort by patient, laterality, and date for efficient processing
+    df_sorted = radiology_df.sort_values(['PATIENT_ID', 'Study_Laterality', 'RADIOLOGY_DTM']).copy()
+    
+    # Group by patient and laterality for efficient processing
+    grouped = df_sorted.groupby(['PATIENT_ID', 'Study_Laterality'])
+    
+    total_groups = len(grouped)
+    us_records_processed = 0
+    
+    print(f"Processing {total_groups} patient-laterality groups...")
+    
+    # Process each patient-laterality group
+    for (patient_id, laterality), group in grouped:
+        
+        # Skip if laterality is missing
+        if pd.isna(laterality):
+            continue
+            
+        # Track the worst MG BI-RADS seen so far for this patient-laterality combination
+        current_worst_mg = None
+        
+        # Iterate through records in chronological order
+        for idx, row in group.iterrows():
+            if row['MODALITY'] == 'MG' and is_valid_birads(row['BI-RADS']):
+                # Update the worst MG BI-RADS seen so far
+                current_worst_mg = get_worse_birads(current_worst_mg, row['BI-RADS'])
+                
+            elif row['MODALITY'] == 'US':
+                # Assign the current worst MG to this US record
+                if current_worst_mg is not None:
+                    radiology_df.loc[idx, 'previous_worst_MG'] = current_worst_mg
+                us_records_processed += 1
+    
+    # Count results
+    us_with_prev_mg = radiology_df[
+        (radiology_df['MODALITY'] == 'US') & 
+        (radiology_df['previous_worst_MG'].notna())
+    ]
+    
+    print(f"Processed {us_records_processed} US records")
+    print(f"Found previous MG data for {len(us_with_prev_mg)} US records")
+    
+    return radiology_df
 
 def remove_bad_data(radiology_df, output_path):
     # Count and remove rows with BI-RADS = '0'
@@ -394,7 +478,10 @@ def filter_rad_data(radiology_df, output_path):
     results = radiology_df.apply(check_for_biopsy, axis=1)
     radiology_df['is_biopsy'] = results.str[0]
     radiology_df['is_us_biopsy'] = results.str[1]
-            
+    
+    # Add previous worst MG column
+    radiology_df = add_previous_worst_mg_column(radiology_df)
+    
     pd.set_option('display.max_colwidth', None)
     # Columns to drop
     columns_to_drop = ['RADIOLOGY_NARRATIVE', 'PROCEDURE_CODE_TEXT', 'SERVICE_RESULT_STATUS', 'RADIOLOGY_REPORT', 'RAD_SERVICE_RESULT_STATUS']
@@ -416,4 +503,5 @@ def filter_rad_data(radiology_df, output_path):
     
 if __name__ == "__main__":
     rad_df = pd.read_csv(f'{env}/raw_data/raw_radiology.csv')
-    filter_rad_data(rad_df)
+    output_path = os.path.join(env, "raw_data")
+    filter_rad_data(rad_df, output_path)
