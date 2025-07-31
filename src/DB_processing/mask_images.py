@@ -6,6 +6,7 @@ import cv2
 from tqdm import tqdm
 from storage_adapter import read_csv, read_image, save_data
 import ast
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 def parse_caliper_boxes(caliper_boxes_str):
     """
@@ -167,10 +168,139 @@ def format_caliper_boxes(boxes):
             bbox_strings.append(f"[{bbox[0]}, {bbox[1]}, {bbox[2]}, {bbox[3]}]")
         return "; ".join(bbox_strings)
 
-def Mask_Lesions(image_data, input_dir, output_dir):
+def process_single_mask(args):
+    """
+    Process a single image mask. This function will be called by each thread.
+    
+    Args:
+        args: Tuple containing (idx, row, image_dir, mask_dir, output_dir)
+    
+    Returns:
+        Dict containing results for this image processing
+    """
+    idx, row, image_dir, mask_dir, output_dir = args
+    
+    try:
+        image_name = row['ImageName']
+        
+        # Construct paths and fix double slashes
+        image_path = os.path.join(image_dir, image_name).replace('//', '/')
+        
+        # Construct mask path (replace extension with .png)
+        base_name = image_name.replace('.png', '')
+        mask_filename = f"{base_name}.png"
+        mask_path = os.path.join(mask_dir, mask_filename).replace('//', '/')
+        
+        # Load the original image (converted to grayscale)
+        original_image = read_image(image_path, use_pil=True).convert('L')
+        
+        # Load the mask using read_image
+        mask_pil = read_image(mask_path, use_pil=True)
+        if mask_pil is None:
+            return {
+                'idx': idx,
+                'success': False,
+                'error': f"Could not load mask: {mask_path}",
+                'lesion_images': "",
+                'caliper_boxes_expand': "",
+                'lesions_created': 0
+            }
+        
+        # Convert mask to grayscale numpy array
+        if mask_pil.mode != 'L':
+            mask_pil = mask_pil.convert('L')
+        mask = np.array(mask_pil)
+        
+        # Resize mask to match image dimensions if needed
+        img_width, img_height = original_image.size
+        if mask.shape[:2] != (img_height, img_width):
+            mask = cv2.resize(mask, (img_width, img_height), interpolation=cv2.INTER_NEAREST)
+        
+        # Dilate the mask to enlarge it slightly
+        mask = dilate_mask(mask)
+        
+        # Apply mask with white background
+        result_image = apply_mask_with_white_background(original_image, mask)
+        
+        # Parse caliper boxes
+        caliper_boxes_str = row.get('caliper_boxes', '')
+        caliper_boxes = parse_caliper_boxes(caliper_boxes_str)
+        
+        # Track created lesion image names
+        created_lesion_files = []
+        lesions_created = 0
+        
+        # If no caliper boxes, save the full masked image
+        if not caliper_boxes:
+            output_filename = f"{base_name}.png"
+            output_path = os.path.join(output_dir, output_filename).replace('//', '/')
+            result_pil = Image.fromarray(result_image, mode='L')
+            save_data(result_pil, output_path)
+            lesions_created += 1
+            created_lesion_files.append(output_filename)
+            
+            caliper_boxes_expand = ""
+        else:
+            # Process each caliper box separately
+            expanded_boxes = []
+            
+            for box_idx, caliper_box in enumerate(caliper_boxes):
+                # Crop the result with 40% expansion for this specific box
+                cropped_image, expanded_box = crop_to_caliper_box(result_image, caliper_box, expand_factor=1.4)
+                expanded_boxes.append(expanded_box)
+                
+                # Generate output filename with index if multiple boxes
+                output_filename = f"{base_name}_{box_idx}.png"
+                created_lesion_files.append(output_filename)
+                
+                output_path = os.path.join(output_dir, output_filename).replace('//', '/')
+                
+                # Convert numpy array back to PIL for saving
+                result_pil = Image.fromarray(cropped_image, mode='L')  # 'L' for grayscale
+                save_data(result_pil, output_path)
+                lesions_created += 1
+            
+            # Format the expanded box coordinates
+            caliper_boxes_expand = format_caliper_boxes(expanded_boxes)
+        
+        # Format the created lesion image filenames
+        lesion_files_str = "; ".join(created_lesion_files)
+        
+        return {
+            'idx': idx,
+            'success': True,
+            'error': None,
+            'lesion_images': lesion_files_str,
+            'caliper_boxes_expand': caliper_boxes_expand,
+            'lesions_created': lesions_created
+        }
+        
+    except Exception as e:
+        return {
+            'idx': idx,
+            'success': False,
+            'error': f"Error processing {row['ImageName']}: {str(e)}",
+            'lesion_images': "",
+            'caliper_boxes_expand': "",
+            'lesions_created': 0
+        }
+
+def Mask_Lesions(image_data, input_dir, output_dir, max_workers=None):
+    """
+    Multithreaded version of Mask_Lesions for faster processing.
+    
+    Args:
+        image_data: DataFrame containing image data
+        input_dir: Input directory path
+        output_dir: Output directory path  
+        max_workers: Maximum number of worker threads (None = use all CPU cores)
+    """
     image_dir = f"{input_dir}/images/"
     mask_dir = f"{input_dir}/lesion_masks/"
-    output_dir = f"{output_dir}/lesions/"
+    lesion_output_dir = f"{output_dir}/lesions/"
+
+    # Create output directory
+    os.makedirs(lesion_output_dir, exist_ok=True)
 
     # Filter for rows where has_caliper_mask = True
     masked_images = image_data[image_data['has_caliper_mask'] == True]
@@ -181,95 +311,53 @@ def Mask_Lesions(image_data, input_dir, output_dir):
     
     print(f"Found {len(masked_images)} images with masks")
 
-    # Initialize the new column if it doesn't exist
+    # Initialize the new columns if they don't exist
     if 'caliper_boxes_expand' not in image_data.columns:
         image_data['caliper_boxes_expand'] = ""
+    if 'lesion_images' not in image_data.columns:
+        image_data['lesion_images'] = ""
 
+    # Prepare arguments for each worker
+    worker_args = []
+    for idx, row in masked_images.iterrows():
+        worker_args.append((idx, row, image_dir, mask_dir, lesion_output_dir))
+
+    # Initialize counters
     processed_count = 0
     failed_count = 0
     total_lesions_created = 0
     
-    # Process each image with a mask
-    for idx, row in tqdm(masked_images.iterrows(), total=len(masked_images), desc="Processing masked images"):
-        try:
-            image_name = row['ImageName']
-            
-            # Construct paths and fix double slashes
-            image_path = os.path.join(image_dir, image_name).replace('//', '/')
-            
-            # Construct mask path (replace extension with .png)
-            base_name = image_name.replace('.png', '')
-            mask_filename = f"{base_name}.png"
-            mask_path = os.path.join(mask_dir, mask_filename).replace('//', '/')
-            
-            # Load the original image (converted to grayscale)
-            original_image = read_image(image_path, use_pil=True).convert('L')
-            
-            # Load the mask using read_image
-            mask_pil = read_image(mask_path, use_pil=True)
-            if mask_pil is None:
-                print(f"Warning: Could not load mask: {mask_path}")
-                failed_count += 1
-                continue
-            
-            # Convert mask to grayscale numpy array
-            if mask_pil.mode != 'L':
-                mask_pil = mask_pil.convert('L')
-            mask = np.array(mask_pil)
-            
-            # Resize mask to match image dimensions if needed
-            img_width, img_height = original_image.size
-            if mask.shape[:2] != (img_height, img_width):
-                mask = cv2.resize(mask, (img_width, img_height), interpolation=cv2.INTER_NEAREST)
-            
-            # Dilate the mask to enlarge it slightly
-            mask = dilate_mask(mask)
-            
-            # Apply mask with white background
-            result_image = apply_mask_with_white_background(original_image, mask)
-            
-            # Parse caliper boxes
-            caliper_boxes_str = row.get('caliper_boxes', '')
-            caliper_boxes = parse_caliper_boxes(caliper_boxes_str)
-            
-            # If no caliper boxes, save the full masked image
-            if not caliper_boxes:
-                output_filename = f"{base_name}.png"
-                output_path = os.path.join(output_dir, output_filename).replace('//', '/')
-                result_pil = Image.fromarray(result_image, mode='L')
-                save_data(result_pil, output_path)
-                total_lesions_created += 1
+    # Use ThreadPoolExecutor for concurrent processing
+    if max_workers is None:
+        max_workers = min(os.cpu_count(), len(worker_args))
+    
+    print(f"Using {max_workers} worker threads")
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all tasks
+        futures = {executor.submit(process_single_mask, args): args[0] for args in worker_args}
+        
+        # Process completed tasks with progress bar
+        with tqdm(total=len(futures), desc="Processing masked images") as pbar:
+            for future in as_completed(futures):
+                result = future.result()
+                idx = result['idx']
                 
-                # No expanded boxes to store
-                image_data.loc[idx, 'caliper_boxes_expand'] = ""
-            else:
-                # Process each caliper box separately
-                expanded_boxes = []
+                if result['success']:
+                    # Update the DataFrame with results
+                    image_data.loc[idx, 'lesion_images'] = result['lesion_images']
+                    image_data.loc[idx, 'caliper_boxes_expand'] = result['caliper_boxes_expand']
+                    processed_count += 1
+                    total_lesions_created += result['lesions_created']
+                else:
+                    # Handle failed processing
+                    print(result['error'])
+                    failed_count += 1
+                    # Set empty values for failed processing
+                    image_data.loc[idx, 'lesion_images'] = ""
+                    image_data.loc[idx, 'caliper_boxes_expand'] = ""
                 
-                for box_idx, caliper_box in enumerate(caliper_boxes):
-                    # Crop the result with 40% expansion for this specific box
-                    cropped_image, expanded_box = crop_to_caliper_box(result_image, caliper_box, expand_factor=1.4)
-                    expanded_boxes.append(expanded_box)
-                    
-                    # Generate output filename with index if multiple boxes
-                    output_filename = f"{base_name}_{box_idx}.png"
-                    
-                    output_path = os.path.join(output_dir, output_filename).replace('//', '/')
-                    
-                    # Convert numpy array back to PIL for saving
-                    result_pil = Image.fromarray(cropped_image, mode='L')  # 'L' for grayscale
-                    save_data(result_pil, output_path)
-                    total_lesions_created += 1
-                
-                # Update the dataframe with all expanded box coordinates
-                expanded_boxes_str = format_caliper_boxes(expanded_boxes)
-                image_data.loc[idx, 'caliper_boxes_expand'] = expanded_boxes_str
-            
-            processed_count += 1
-            
-        except Exception as e:
-            print(f"Error processing {row['ImageName']}: {str(e)}")
-            failed_count += 1
+                pbar.update(1)
     
     print(f"Successfully processed: {processed_count} images | Failed: {failed_count} | Total lesions created: {total_lesions_created}")
     

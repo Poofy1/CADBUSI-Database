@@ -257,24 +257,35 @@ def format_data(breast_data, image_data):
         if col + '_image_data' in data.columns:
             data.drop(col + '_image_data', axis=1, inplace=True)
 
-    # Keep only the specified columns (ADD AGE_AT_EVENT HERE)
-    columns_to_keep = ['Patient_ID', 'Accession_Number', 'Study_Laterality', 'ImageName', 'Has_Malignant', 'Has_Benign', 'valid', 'AGE_AT_EVENT']
+    # Keep only the specified columns (including lesion_images)
+    columns_to_keep = ['Patient_ID', 'Accession_Number', 'Study_Laterality', 'ImageName', 'Has_Malignant', 'Has_Benign', 'valid', 'AGE_AT_EVENT', 'lesion_images']
     data = data[columns_to_keep]
     
-    # Group by Accession_Number and Breast, and aggregate (ADD AGE_AT_EVENT TO AGGREGATION)
+    # Group by Accession_Number and Breast, and aggregate
     data = data.groupby(['Accession_Number', 'Study_Laterality']).agg({
         'Patient_ID': 'first',
         'ImageName': lambda x: list(x),
         'Has_Malignant': 'first',
         'Has_Benign': 'first',
         'valid': 'first',
-        'AGE_AT_EVENT': 'first',  # ADD THIS LINE
+        'AGE_AT_EVENT': 'first',
+        'lesion_images': lambda x: "; ".join([img for img in x if pd.notna(img) and img != ""]),  # Combine all lesion images
     }).reset_index()
     
-    # Remove the Patient_ID column
-    data.drop('Patient_ID', axis=1, inplace=True)
+    # Parse lesion images string into a list
+    def parse_lesion_images(lesion_str):
+        if pd.isna(lesion_str) or lesion_str == "":
+            return []
+        # Split by semicolon and clean up
+        lesion_list = [img.strip() for img in lesion_str.split(";") if img.strip()]
+        return lesion_list
+    
+    data['LesionImages'] = data['lesion_images'].apply(parse_lesion_images)
+    
+    # Remove the temporary lesion_images column and Patient_ID
+    data.drop(['lesion_images', 'Patient_ID'], axis=1, inplace=True)
 
-    # Rename columns (ADD AGE_AT_EVENT -> age RENAME)
+    # Rename columns
     data.rename(columns={'ImageName': 'Images', 'valid': 'Valid', 'AGE_AT_EVENT': 'age'}, inplace=True)
     
     # Add a new column 'ID' that counts up from 0
