@@ -37,7 +37,7 @@ def parse_caliper_boxes(caliper_boxes_str):
     
     return boxes
 
-def dilate_mask(mask, expansion_factor=1.4, iterations=1):
+def dilate_mask(mask, expansion_factor=1.6, iterations=1):
     mask_area = np.sum(mask > 127)
     if mask_area > 0:
         estimated_radius = np.sqrt(mask_area / np.pi)
@@ -94,23 +94,19 @@ def apply_mask_with_white_background(image, mask):
     
     return result_image.astype(np.uint8)
 
-def crop_to_caliper_box(image, caliper_boxes, expand_factor=1.2):
+def crop_to_caliper_box(image, caliper_box, expand_factor=1.2):
     """
-    Crop image to the first caliper box coordinates, expanded by a factor.
+    Crop image to a single caliper box coordinates, expanded by a factor.
     
     Args:
         image: numpy array (grayscale image)
-        caliper_boxes: List of [x1, y1, x2, y2] coordinates
+        caliper_box: Single [x1, y1, x2, y2] coordinates
         expand_factor: Factor to expand the crop (1.2 = 20% larger)
     
     Returns:
-        tuple: (cropped_image, expanded_boxes) where expanded_boxes contains the new coordinates
+        tuple: (cropped_image, expanded_box) where expanded_box contains the new coordinates
     """
-    if not caliper_boxes:
-        return image, []
-    
-    # Use the first caliper box
-    x1, y1, x2, y2 = caliper_boxes[0]
+    x1, y1, x2, y2 = caliper_box
     
     # Get image dimensions
     img_height, img_width = image.shape
@@ -140,13 +136,13 @@ def crop_to_caliper_box(image, caliper_boxes, expand_factor=1.2):
     # Convert to integers
     new_x1, new_y1, new_x2, new_y2 = int(new_x1), int(new_y1), int(new_x2), int(new_y2)
     
-    # Create expanded box list
+    # Create expanded box
     expanded_box = [new_x1, new_y1, new_x2, new_y2]
     
     # Crop the image
     cropped_image = image[new_y1:new_y2, new_x1:new_x2]
     
-    return cropped_image, [expanded_box]
+    return cropped_image, expanded_box
 
 def format_caliper_boxes(boxes):
     """
@@ -191,6 +187,7 @@ def Mask_Lesions(image_data, input_dir, output_dir):
 
     processed_count = 0
     failed_count = 0
+    total_lesions_created = 0
     
     # Process each image with a mask
     for idx, row in tqdm(masked_images.iterrows(), total=len(masked_images), desc="Processing masked images"):
@@ -226,30 +223,47 @@ def Mask_Lesions(image_data, input_dir, output_dir):
                 mask = cv2.resize(mask, (img_width, img_height), interpolation=cv2.INTER_NEAREST)
             
             # Dilate the mask to enlarge it slightly
-            mask = dilate_mask(mask, kernel_size=5, iterations=1)
+            mask = dilate_mask(mask)
             
             # Apply mask with white background
             result_image = apply_mask_with_white_background(original_image, mask)
             
-            # Parse caliper boxes and crop the result with 20% expansion
+            # Parse caliper boxes
             caliper_boxes_str = row.get('caliper_boxes', '')
             caliper_boxes = parse_caliper_boxes(caliper_boxes_str)
             
-            expanded_boxes = []
-            if caliper_boxes:
-                result_image, expanded_boxes = crop_to_caliper_box(result_image, caliper_boxes, expand_factor=1.4)
-            
-            # Update the dataframe with expanded box coordinates
-            expanded_boxes_str = format_caliper_boxes(expanded_boxes)
-            image_data.loc[idx, 'caliper_boxes_expand'] = expanded_boxes_str
-            
-            # Save images
-            output_filename = f"{base_name}.png"
-            output_path = os.path.join(output_dir, output_filename).replace('//', '/')
-            
-            # Convert numpy array back to PIL for saving
-            result_pil = Image.fromarray(result_image, mode='L')  # 'L' for grayscale
-            save_data(result_pil, output_path)
+            # If no caliper boxes, save the full masked image
+            if not caliper_boxes:
+                output_filename = f"{base_name}.png"
+                output_path = os.path.join(output_dir, output_filename).replace('//', '/')
+                result_pil = Image.fromarray(result_image, mode='L')
+                save_data(result_pil, output_path)
+                total_lesions_created += 1
+                
+                # No expanded boxes to store
+                image_data.loc[idx, 'caliper_boxes_expand'] = ""
+            else:
+                # Process each caliper box separately
+                expanded_boxes = []
+                
+                for box_idx, caliper_box in enumerate(caliper_boxes):
+                    # Crop the result with 40% expansion for this specific box
+                    cropped_image, expanded_box = crop_to_caliper_box(result_image, caliper_box, expand_factor=1.4)
+                    expanded_boxes.append(expanded_box)
+                    
+                    # Generate output filename with index if multiple boxes
+                    output_filename = f"{base_name}_{box_idx}.png"
+                    
+                    output_path = os.path.join(output_dir, output_filename).replace('//', '/')
+                    
+                    # Convert numpy array back to PIL for saving
+                    result_pil = Image.fromarray(cropped_image, mode='L')  # 'L' for grayscale
+                    save_data(result_pil, output_path)
+                    total_lesions_created += 1
+                
+                # Update the dataframe with all expanded box coordinates
+                expanded_boxes_str = format_caliper_boxes(expanded_boxes)
+                image_data.loc[idx, 'caliper_boxes_expand'] = expanded_boxes_str
             
             processed_count += 1
             
@@ -257,6 +271,6 @@ def Mask_Lesions(image_data, input_dir, output_dir):
             print(f"Error processing {row['ImageName']}: {str(e)}")
             failed_count += 1
     
-    print(f"Successfully processed: {processed_count} lesions | Failed: {failed_count}")
+    print(f"Successfully processed: {processed_count} images | Failed: {failed_count} | Total lesions created: {total_lesions_created}")
     
     return image_data
