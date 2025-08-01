@@ -105,17 +105,17 @@ IMPORTANT: After `python main.py --deploy` finishes execution, that does not mea
 
 To process the downloaded DICOM files into a complete database:
 
-`python main.py --database [source-bucket-location] [optional: --skip-inpaint]`
+`python main.py --database [optional: --skip-inpaint]`
 
 This will:
 1. Generate encryption keys for safely anonymizing patient IDs
-2. Deidentify DICOM files from the source bucket
+2. Deidentify DICOM files from `CONFIG['storage']['download_path']`
 3. Process image files in the specified output directory in the destination bucket
 4. `[optional: --skip-inpaint]` will skip the caliper removal process
 
 Example:
 
-`python main.py --database "2025-04-01_221610" `
+`python main.py --database`
 
 ### Export Database
 

@@ -41,7 +41,7 @@ def parse_arguments():
     parser.add_argument('--cleanup', action='store_true', help='Clean up resources')
     
     # Anonymize arguments
-    parser.add_argument('--database', type=str, help='Directory name for anonymized DICOM output')
+    parser.add_argument('--database', action='store_true', help='Process database')
     parser.add_argument('--skip-inpaint', action='store_true', help='Skip the inpainting step')
     
     # Export arguments
@@ -85,14 +85,13 @@ def main():
         create_final_dataset(rad_df, path_df, output_path)
     
     elif args.deploy or args.cleanup or args.rerun:
-        manual_target = None
-        dicom_download_remote_start(dicom_query_file, args.deploy, args.cleanup, manual_target=manual_target)
+        dicom_download_remote_start(dicom_query_file, args.deploy, args.cleanup)
         
     elif args.database:
         anon_file = f'{env}/raw_data/anon_data.csv'
-        BUCKET_PATH = f'{CONFIG["storage"]["download_path"]}/{args.database}'
+        BUCKET_PATH = f'{CONFIG["storage"]["download_path"]}/'
         
-        print(f"Starting database processing for {args.database}...")
+        print(f"Starting database processing for {BUCKET_PATH}...")
 
         # Step 1: Encrypt IDs
         print("Step 1/5: Encrypting IDs...")

@@ -423,7 +423,7 @@ def get_existing_cloud_run_url():
         return None
 
 
-def dicom_download_remote_start(csv_file=None, deploy=False, cleanup=False, manual_target=None):
+def dicom_download_remote_start(csv_file=None, deploy=False, cleanup=False):
     global CLOUD_RUN_URL
     global PUBLISHER
     global TOPIC_PATH
@@ -439,14 +439,7 @@ def dicom_download_remote_start(csv_file=None, deploy=False, cleanup=False, manu
     TOPIC_PATH = PUBLISHER.topic_path(CONFIG['env']['project_id'], CONFIG['env']['topic_name'])
     
     # Generate a timestamp-based path if not provided
-    bucket_path = None
-    if manual_target is None:
-        current_time = datetime.datetime.now()
-        timestamp = current_time.strftime("%Y-%m-%d_%H%M%S")
-        bucket_path = f"{CONFIG['storage']['download_path']}/{timestamp}"
-        print(f"Using timestamped bucket path: {bucket_path}")
-    else:
-        bucket_path = f"{CONFIG['storage']['download_path']}/{manual_target}"
+    bucket_path = f"{CONFIG['storage']['download_path']}/"
     
     # Handle cleanup first - this can be run without other flags
     if cleanup:
@@ -483,13 +476,8 @@ def dicom_download_remote_start(csv_file=None, deploy=False, cleanup=False, manu
         # Make sure service is warmed up before sending messages
         wake_up_service()
         
-        
-        
         # Now process the CSV file
-        if manual_target:
-            process_csv_file(csv_file, bucket_name=CONFIG['storage']['bucket_name'], bucket_path=bucket_path)
-        else:
-            process_csv_file(csv_file)
+        process_csv_file(csv_file, bucket_name=CONFIG['storage']['bucket_name'], bucket_path=bucket_path)
         
         # Wait a bit to allow processing to complete
         print("Waiting 20 seconds for message processing to complete...")
