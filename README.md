@@ -57,13 +57,19 @@ CONFIG = {
     "BUCKET": "your-bucket-name",
     "WINDIR": "D:/DATA/YOUR_PROJECT/",
     "DATABASE_DIR": "Databases/database_YYYY_MM_DD/", # Final location of the database.
+
     "LABELBOX_API_KEY": "your-labelbox-api-key",
     "PROJECT_ID": "your-labelbox-project-id",
     "LABELBOX_LABELS": "labelbox_data/",
     "TARGET_CASES": "/failed_cases.csv", # Directory of worst performing cases from training. Prepares these cases for instance labeling on Label Box.
-    "EXPORT_DIR": "exports/", # Output directory of all processed export data.
-    "VAL_SPLIT": 0.2, # Validation split ratio for splitting up training data.
+    "VIDEO_SAMPLING": 0, # every nth frame, 0 turns off videos
     "DEBUG_DATA_RANGE": [], # Process a reduced set of dicom files (Ex: [0, 1000]).
+
+    # Export Settings
+    "EXPORT_DIR": "exports/",
+    "VAL_SPLIT": 0.2,
+    "TEST_SPLIT": 0.1,
+    "FOCUS_TYPE": "breast", # 'breast' exports cropped breast image. 'lesion' exports cropped/masked lesions.
 }
 ```
 ## Usage
