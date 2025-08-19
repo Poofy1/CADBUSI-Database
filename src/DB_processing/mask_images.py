@@ -101,7 +101,6 @@ def crop_to_caliper_box(image, caliper_box, expand_factor=1.2):
     
     Args:
         image: numpy array (grayscale image)
-        caliper_box: Single [x1, y1, x2, y2] coordinates
         expand_factor: Factor to expand the crop (1.2 = 20% larger)
     
     Returns:
@@ -137,36 +136,10 @@ def crop_to_caliper_box(image, caliper_box, expand_factor=1.2):
     # Convert to integers
     new_x1, new_y1, new_x2, new_y2 = int(new_x1), int(new_y1), int(new_x2), int(new_y2)
     
-    # Create expanded box
-    expanded_box = [new_x1, new_y1, new_x2, new_y2]
-    
     # Crop the image
     cropped_image = image[new_y1:new_y2, new_x1:new_x2]
     
-    return cropped_image, expanded_box
-
-def format_caliper_boxes(boxes):
-    """
-    Format caliper boxes back to string format.
-    
-    Args:
-        boxes: List of [x1, y1, x2, y2] coordinates
-    
-    Returns:
-        String in format "[x1, y1, x2, y2]" or "[x1, y1, x2, y2]; [x1, y1, x2, y2]"
-    """
-    if not boxes:
-        return ""
-    
-    if len(boxes) == 1:
-        bbox = boxes[0]
-        return f"[{bbox[0]}, {bbox[1]}, {bbox[2]}, {bbox[3]}]"
-    else:
-        # Multiple boxes - join with semicolon
-        bbox_strings = []
-        for bbox in boxes:
-            bbox_strings.append(f"[{bbox[0]}, {bbox[1]}, {bbox[2]}, {bbox[3]}]")
-        return "; ".join(bbox_strings)
+    return cropped_image
 
 def process_single_mask(args):
     """
@@ -202,7 +175,8 @@ def process_single_mask(args):
                 'success': False,
                 'error': f"Could not load mask: {mask_path}",
                 'lesion_images': "",
-                'caliper_boxes_expand': "",
+                'image_w': "",
+                'image_h': "",
                 'lesions_created': 0
             }
         
@@ -226,8 +200,9 @@ def process_single_mask(args):
         caliper_boxes_str = row.get('caliper_boxes', '')
         caliper_boxes = parse_caliper_boxes(caliper_boxes_str)
         
-        # Track created lesion image names
+        # Track created lesion image names and dimensions
         created_lesion_files = []
+        image_dimensions = []
         lesions_created = 0
         
         # If no caliper boxes, save the full masked image
@@ -239,15 +214,19 @@ def process_single_mask(args):
             lesions_created += 1
             created_lesion_files.append(output_filename)
             
-            caliper_boxes_expand = ""
+            # Get dimensions of the full image
+            img_h, img_w = result_image.shape
+            image_dimensions.append((img_w, img_h))
+            
         else:
             # Process each caliper box separately
-            expanded_boxes = []
-            
             for box_idx, caliper_box in enumerate(caliper_boxes):
                 # Crop the result with 40% expansion for this specific box
                 cropped_image, expanded_box = crop_to_caliper_box(result_image, caliper_box, expand_factor=1.4)
-                expanded_boxes.append(expanded_box)
+                
+                # Get dimensions of the cropped image
+                crop_h, crop_w = cropped_image.shape
+                image_dimensions.append((crop_w, crop_h))
                 
                 # Generate output filename with index if multiple boxes
                 output_filename = f"{base_name}_{box_idx}.png"
@@ -259,19 +238,28 @@ def process_single_mask(args):
                 result_pil = Image.fromarray(cropped_image, mode='L')  # 'L' for grayscale
                 save_data(result_pil, output_path)
                 lesions_created += 1
-            
-            # Format the expanded box coordinates
-            caliper_boxes_expand = format_caliper_boxes(expanded_boxes)
         
-        # Format the created lesion image filenames
-        lesion_files_str = "; ".join(created_lesion_files)
+        
+        # Extract width and height strings
+        if len(image_dimensions) == 1:
+            # Single image - store width and height as separate values
+            image_w_str = str(image_dimensions[0][0])
+            image_h_str = str(image_dimensions[0][1])
+        else:
+            # Multiple images - store as semicolon-separated lists
+            widths = [str(dim[0]) for dim in image_dimensions]
+            heights = [str(dim[1]) for dim in image_dimensions]
+            image_w_str = "; ".join(widths)
+            image_h_str = "; ".join(heights)
+        
         
         return {
             'idx': idx,
             'success': True,
             'error': None,
-            'lesion_images': lesion_files_str,
-            'caliper_boxes_expand': caliper_boxes_expand,
+            'lesion_images': ", ".join(created_lesion_files),
+            'image_w': image_w_str,
+            'image_h': image_h_str,
             'lesions_created': lesions_created
         }
         
@@ -281,41 +269,40 @@ def process_single_mask(args):
             'success': False,
             'error': f"Error processing {row['ImageName']}: {str(e)}",
             'lesion_images': "",
-            'caliper_boxes_expand': "",
+            'image_w': "",
+            'image_h': "",
             'lesions_created': 0
         }
 
 def Mask_Lesions(image_data, input_dir, output_dir, max_workers=None):
     """
-    Multithreaded version of Mask_Lesions for faster processing.
+    Multithreaded version of Mask_Lesions that creates separate rows for each lesion image.
     
     Args:
         image_data: DataFrame containing image data
         input_dir: Input directory path
         output_dir: Output directory path  
         max_workers: Maximum number of worker threads (None = use all CPU cores)
+    
+    Returns:
+        DataFrame with separate rows for each lesion image
     """
     image_dir = f"{input_dir}/images/"
     mask_dir = f"{input_dir}/lesion_masks/"
-    lesion_output_dir = f"{output_dir}/lesions/"
+    lesion_output_dir = f"{output_dir}/images/"
 
     # Create output directory
     os.makedirs(lesion_output_dir, exist_ok=True)
 
     # Filter for rows where has_caliper_mask = True
     masked_images = image_data[image_data['has_caliper_mask'] == True]
+    non_masked_images = image_data[image_data['has_caliper_mask'] != True]
     
     if len(masked_images) == 0:
         print("No images found with has_caliper_mask = True")
         return image_data
     
     print(f"Found {len(masked_images)} images with masks")
-
-    # Initialize the new columns if they don't exist
-    if 'caliper_boxes_expand' not in image_data.columns:
-        image_data['caliper_boxes_expand'] = ""
-    if 'lesion_images' not in image_data.columns:
-        image_data['lesion_images'] = ""
 
     # Prepare arguments for each worker
     worker_args = []
@@ -326,6 +313,9 @@ def Mask_Lesions(image_data, input_dir, output_dir, max_workers=None):
     processed_count = 0
     failed_count = 0
     total_lesions_created = 0
+    
+    # Store results for creating new rows
+    processing_results = {}
     
     # Use ThreadPoolExecutor for concurrent processing
     if max_workers is None:
@@ -342,23 +332,85 @@ def Mask_Lesions(image_data, input_dir, output_dir, max_workers=None):
             for future in as_completed(futures):
                 result = future.result()
                 idx = result['idx']
+                processing_results[idx] = result
                 
                 if result['success']:
-                    # Update the DataFrame with results
-                    image_data.loc[idx, 'lesion_images'] = result['lesion_images']
-                    image_data.loc[idx, 'caliper_boxes_expand'] = result['caliper_boxes_expand']
                     processed_count += 1
                     total_lesions_created += result['lesions_created']
                 else:
-                    # Handle failed processing
                     print(result['error'])
                     failed_count += 1
-                    # Set empty values for failed processing
-                    image_data.loc[idx, 'lesion_images'] = ""
-                    image_data.loc[idx, 'caliper_boxes_expand'] = ""
                 
                 pbar.update(1)
     
-    print(f"Successfully processed: {processed_count} images | Failed: {failed_count} | Total lesions created: {total_lesions_created}")
+    # Create new rows for each lesion image
+    new_lesion_rows = []
     
-    return image_data
+    for idx, row in masked_images.iterrows():
+        if idx in processing_results and processing_results[idx]['success']:
+            result = processing_results[idx]
+            
+            # Parse lesion images (comma-separated)
+            lesion_images_str = result['lesion_images']
+            if lesion_images_str:
+                lesion_images = [img.strip() for img in lesion_images_str.split(',') if img.strip()]
+                
+                # Parse dimensions
+                image_w_str = result['image_w']
+                image_h_str = result['image_h']
+                
+                if '; ' in image_w_str:
+                    # Multiple dimensions
+                    widths = [w.strip() for w in image_w_str.split(';')]
+                    heights = [h.strip() for h in image_h_str.split(';')]
+                else:
+                    # Single dimension or empty
+                    widths = [image_w_str] * len(lesion_images)
+                    heights = [image_h_str] * len(lesion_images)
+                
+                # Create a new row for each lesion image
+                for i, lesion_img in enumerate(lesion_images):
+                    new_row = row.copy()
+                    new_row['ImageName'] = lesion_img
+                    
+                    # Set individual dimensions
+                    if i < len(widths):
+                        new_row['image_w'] = widths[i]
+                        new_row['image_h'] = heights[i]
+                        
+                        # Also update crop_w and crop_h to match the actual lesion dimensions
+                        try:
+                            new_row['crop_w'] = int(widths[i]) if widths[i] else 0
+                            new_row['crop_h'] = int(heights[i]) if heights[i] else 0
+                        except (ValueError, TypeError):
+                            new_row['crop_w'] = 0
+                            new_row['crop_h'] = 0
+                    else:
+                        new_row['image_w'] = ""
+                        new_row['image_h'] = ""
+                        new_row['crop_w'] = 0
+                        new_row['crop_h'] = 0
+                    
+                    new_lesion_rows.append(new_row)
+        # If processing failed, we skip this original row (it won't be in the final result)
+    
+    # Return only the new lesion rows, not the non-masked images
+    if new_lesion_rows:
+        lesion_df = pd.DataFrame(new_lesion_rows)
+        # Ensure columns match
+        for col in image_data.columns:
+            if col not in lesion_df.columns:
+                lesion_df[col] = ""
+        
+        # Reorder columns to match original
+        lesion_df = lesion_df[image_data.columns]
+        
+        result_df = lesion_df  # Return only the lesion rows
+    else:
+        # No lesion images created, return empty DataFrame with same structure
+        result_df = pd.DataFrame(columns=image_data.columns)
+
+    print(f"Successfully processed: {processed_count} images | Failed: {failed_count} | Total lesions created: {total_lesions_created}")
+    print(f"Original rows with masks: {len(masked_images)} | New lesion rows created: {len(new_lesion_rows)}")
+
+    return result_df

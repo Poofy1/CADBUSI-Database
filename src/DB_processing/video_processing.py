@@ -189,6 +189,9 @@ def ProcessVideoData(database_path):
     video_df.update(db_to_process, overwrite=True)
 
     # Find crop ratio
-    video_df['crop_aspect_ratio'] = (video_df['crop_w'] / video_df['crop_h']).round(2)
+    video_df['crop_aspect_ratio'] = (
+        pd.to_numeric(video_df['crop_w'], errors='coerce') /
+        pd.to_numeric(video_df['crop_h'], errors='coerce')
+    ).replace([np.inf, -np.inf, np.nan], 0).round(2)
 
     save_data(video_df, video_data_file)

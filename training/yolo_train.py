@@ -10,7 +10,7 @@ if torch.cuda.is_available():
    print("CUDA version:", torch.version.cuda)
 print("PyTorch version:", torch.__version__)
 
-def train_yolo_model(data_yaml_path, checkpoint_path=None, run_name="run"):
+def train_yolo_model(data_yaml_path, checkpoint_path=None, run_name="run", project_dir=None):
    """
    Train YOLO optimized for B&W ultrasound images
    
@@ -18,6 +18,7 @@ def train_yolo_model(data_yaml_path, checkpoint_path=None, run_name="run"):
        data_yaml_path: Path to data.yaml file
        checkpoint_path: Path to checkpoint file. If None or doesn't exist, starts fresh
        run_name: Name of this run
+       project_dir: Directory where to save the training outputs
    """
    
    device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -41,6 +42,7 @@ def train_yolo_model(data_yaml_path, checkpoint_path=None, run_name="run"):
        batch=16,
        device=device,
        patience=5,
+       project=project_dir,    # Specify where to save outputs
        name=run_name,
        resume=resume,
        save_period=10,
@@ -49,7 +51,8 @@ def train_yolo_model(data_yaml_path, checkpoint_path=None, run_name="run"):
        hsv_h=0.0,        # No hue changes (B&W images)
        hsv_s=0.0,        # No saturation changes (B&W images)  
        hsv_v=0.3,        # Brightness/contrast changes (important for ultrasound)
-       degrees=10.0,     # Small rotations (probe angle variations)
+       #degrees=10.0,    # Small rotations (probe angle variations)
+       degrees=0.0,      # Use this for ultrasound cropping
        translate=0.1,    # Translations (probe positioning)
        scale=0.3,        # Scaling (zoom variations)
        shear=0.0,        # No shearing
@@ -83,14 +86,20 @@ def train_yolo_model(data_yaml_path, checkpoint_path=None, run_name="run"):
 
 # Usage examples
 if __name__ == "__main__":
-   data_yaml_path = "C:/Users/Tristan/Desktop/Yolo5/data.yaml"
+   data_yaml_path = "C:/Users/Tristan/Desktop/Yolo_ultrasound1/data.yaml"
+   project_directory = "C:/Users/Tristan/Desktop/Yolo_ultrasound1"
    
    # Start fresh training
-   # model = train_yolo_model(data_yaml_path, run_name="caliper_15pct")
-   
-   # Continue from checkpoint
    model = train_yolo_model(
        data_yaml_path, 
-       checkpoint_path="C:/Users/Tristan/Desktop/Yolo5/train/weights/best.pt",
-       run_name="caliper_30pct"
+       run_name="train1",
+       project_dir=project_directory
    )
+   
+   # Continue from checkpoint
+   """model = train_yolo_model(
+       data_yaml_path, 
+       checkpoint_path="C:/Users/Tristan/Desktop/Yolo_ultrasound1/caliper_15pct/weights/best.pt",
+       run_name="caliper_30pct",
+       project_dir=project_directory
+   )"""
