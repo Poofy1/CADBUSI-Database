@@ -5,7 +5,7 @@ from tqdm import tqdm
 import numpy as np
 import pandas as pd
 from PIL import Image
-from src.ML_processing.training.train_twin_N2N import N2N_Original_Used_UNet
+from training.train_twin_N2N import N2N_Original_Used_UNet
 from storage_adapter import *
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"

@@ -38,23 +38,57 @@ def parse_caliper_boxes(caliper_boxes_str):
     
     return boxes
 
-def dilate_mask(mask, expansion_factor=1.6, iterations=1):
-    mask_area = np.sum(mask > 127)
-    if mask_area > 0:
-        estimated_radius = np.sqrt(mask_area / np.pi)
-        # For 40% area expansion: (1 + K/R)² = 1.4
-        # So K/R = sqrt(1.4) - 1 ≈ 0.183
-        kernel_size = max(3, int(estimated_radius * (np.sqrt(expansion_factor) - 1)))
-    else:
-        kernel_size = 3
+def dilate_mask(mask, expansion_factor=1.7, max_iterations=70):
+    """
+    Dilate mask iteratively until it reaches the target area expansion.
+    Uses adaptive kernel sizes and iteration counts for faster convergence.
     
-    if kernel_size % 2 == 0:
-        kernel_size += 1
+    Args:
+        mask: numpy array (binary mask)
+        expansion_factor: float (1.7 = 70% larger)
+        max_iterations: int (safety limit to prevent infinite loops)
     
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
-    dilated_mask = cv2.dilate(mask, kernel, iterations=iterations)
+    Returns:
+        numpy array: Dilated mask with target area
+    """
+    original_area = np.sum(mask > 127)
+    if original_area == 0:
+        return mask.copy()
     
-    return dilated_mask
+    target_area = original_area * expansion_factor
+    current_mask = mask.copy()
+    
+    for iteration in range(max_iterations):
+        current_area = np.sum(current_mask > 127)
+        
+        # Check if we've reached the target
+        if current_area >= target_area:
+            return current_mask
+        
+        # Calculate how much more area we need
+        area_ratio_needed = target_area / current_area
+        
+        # Choose kernel size and iterations based on how much expansion is still needed
+        if area_ratio_needed > 2.0:
+            kernel_size = 7
+            iterations = 3  # Big steps when very far from target
+        elif area_ratio_needed > 1.5:
+            kernel_size = 5
+            iterations = 2  # Medium steps
+        elif area_ratio_needed > 1.2:
+            kernel_size = 3
+            iterations = 2  # Smaller steps but still 2 iterations
+        else:
+            kernel_size = 3
+            iterations = 1  # Fine control when close to target
+        
+        # Create kernel and dilate
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+        current_mask = cv2.dilate(current_mask, kernel, iterations=iterations)
+    
+    # If we haven't reached target after max iterations, return what we have
+    #print(f"Warning: Reached max iterations ({max_iterations}) without achieving target area expansion")
+    return current_mask
 
 def apply_mask_with_white_background(image, mask):
     """
@@ -139,19 +173,83 @@ def crop_to_caliper_box(image, caliper_box, expand_factor=1.2):
     # Crop the image
     cropped_image = image[new_y1:new_y2, new_x1:new_x2]
     
-    return cropped_image
+    return cropped_image, (new_x1, new_y1, new_x2, new_y2)
+
+def save_debug_images(original_image, original_mask, dilated_mask, caliper_boxes, base_name, debug_dir, expand_factor=1.4):
+    """
+    Save debug visualization images.
+    
+    Args:
+        original_image: PIL Image (original grayscale image)
+        original_mask: numpy array (original mask)
+        dilated_mask: numpy array (dilated/expanded mask)
+        caliper_boxes: list of caliper box coordinates
+        base_name: string (base filename without extension)
+        debug_dir: string (debug output directory)
+        expand_factor: float (expansion factor used for cropping)
+    """
+    # Convert PIL to numpy for processing
+    img_np = np.array(original_image)
+    img_height, img_width = img_np.shape
+    
+    # Create colored version for overlays (convert grayscale to RGB)
+    img_rgb = cv2.cvtColor(img_np, cv2.COLOR_GRAY2RGB)
+    
+    # Ensure masks are proper binary (0 or 255) and same size as image
+    original_mask_binary = (original_mask > 127).astype(np.uint8) * 255
+    dilated_mask_binary = (dilated_mask > 127).astype(np.uint8) * 255
+    
+    # Make sure masks match image dimensions
+    if original_mask_binary.shape != (img_height, img_width):
+        original_mask_binary = cv2.resize(original_mask_binary, (img_width, img_height), interpolation=cv2.INTER_NEAREST)
+    if dilated_mask_binary.shape != (img_height, img_width):
+        dilated_mask_binary = cv2.resize(dilated_mask_binary, (img_width, img_height), interpolation=cv2.INTER_NEAREST)
+    
+    alpha = 0.4  # Slightly higher opacity for better visibility
+    
+    # 1. Original lesion mask overlay (red)
+    mask_overlay = img_rgb.copy().astype(np.float32)
+    red_mask = original_mask_binary.astype(np.float32) / 255.0  # Normalize to 0-1
+    
+    # Apply red overlay where mask exists
+    mask_overlay[:, :, 0] = mask_overlay[:, :, 0] * (1 - alpha * red_mask) + 255 * alpha * red_mask
+    mask_overlay = np.clip(mask_overlay, 0, 255).astype(np.uint8)
+    
+    # 2. Expanded lesion mask overlay (blue)
+    expanded_mask_overlay = img_rgb.copy().astype(np.float32)
+    blue_mask = dilated_mask_binary.astype(np.float32) / 255.0  # Normalize to 0-1
+    
+    # Apply blue overlay where expanded mask exists
+    expanded_mask_overlay[:, :, 2] = expanded_mask_overlay[:, :, 2] * (1 - alpha * blue_mask) + 255 * alpha * blue_mask
+    expanded_mask_overlay = np.clip(expanded_mask_overlay, 0, 255).astype(np.uint8)
+    
+    # 3. Combined comparison showing both masks
+    combined_overlay = img_rgb.copy().astype(np.float32)
+    
+    # Apply red for original mask
+    combined_overlay[:, :, 0] = combined_overlay[:, :, 0] * (1 - alpha * red_mask) + 255 * alpha * red_mask
+    
+    # Apply blue for expanded mask  
+    combined_overlay[:, :, 2] = combined_overlay[:, :, 2] * (1 - alpha * blue_mask) + 255 * alpha * blue_mask
+    
+    # Areas with both masks will appear purple (red + blue)
+    combined_overlay = np.clip(combined_overlay, 0, 255).astype(np.uint8)
+    
+    combined_overlay_path = os.path.join(debug_dir, f"{base_name}_mask_comparison.png")
+    combined_overlay_pil = Image.fromarray(combined_overlay, mode='RGB')
+    save_data(combined_overlay_pil, combined_overlay_path)
 
 def process_single_mask(args):
     """
     Process a single image mask. This function will be called by each thread.
     
     Args:
-        args: Tuple containing (idx, row, image_dir, mask_dir, output_dir)
+        args: Tuple containing (idx, row, image_dir, mask_dir, output_dir, debug_enabled, debug_dir)
     
     Returns:
         Dict containing results for this image processing
     """
-    idx, row, image_dir, mask_dir, output_dir = args
+    idx, row, image_dir, mask_dir, output_dir, debug_enabled, debug_dir = args
     
     try:
         image_name = row['ImageName']
@@ -183,22 +281,26 @@ def process_single_mask(args):
         # Convert mask to grayscale numpy array
         if mask_pil.mode != 'L':
             mask_pil = mask_pil.convert('L')
-        mask = np.array(mask_pil)
+        original_mask = np.array(mask_pil)
         
         # Resize mask to match image dimensions if needed
         img_width, img_height = original_image.size
-        if mask.shape[:2] != (img_height, img_width):
-            mask = cv2.resize(mask, (img_width, img_height), interpolation=cv2.INTER_NEAREST)
-        
-        # Dilate the mask to enlarge it slightly
-        mask = dilate_mask(mask)
-        
-        # Apply mask with white background
-        result_image = apply_mask_with_white_background(original_image, mask)
+        if original_mask.shape[:2] != (img_height, img_width):
+            original_mask = cv2.resize(original_mask, (img_width, img_height), interpolation=cv2.INTER_NEAREST)
         
         # Parse caliper boxes
         caliper_boxes_str = row.get('caliper_boxes', '')
         caliper_boxes = parse_caliper_boxes(caliper_boxes_str)
+        
+        # Dilate the mask to enlarge it slightly
+        dilated_mask = dilate_mask(original_mask)
+        
+        # Save debug images if enabled
+        if debug_enabled:
+            save_debug_images(original_image, original_mask, dilated_mask, caliper_boxes, base_name, debug_dir, expand_factor=1.4)
+        
+        # Apply mask with white background
+        result_image = apply_mask_with_white_background(original_image, dilated_mask)
         
         # Track created lesion image names and dimensions
         created_lesion_files = []
@@ -274,7 +376,7 @@ def process_single_mask(args):
             'lesions_created': 0
         }
 
-def Mask_Lesions(image_data, input_dir, output_dir, max_workers=None):
+def Mask_Lesions(image_data, input_dir, output_dir, max_workers=None, debug=False):
     """
     Multithreaded version of Mask_Lesions that creates separate rows for each lesion image.
     
@@ -283,6 +385,7 @@ def Mask_Lesions(image_data, input_dir, output_dir, max_workers=None):
         input_dir: Input directory path
         output_dir: Output directory path  
         max_workers: Maximum number of worker threads (None = use all CPU cores)
+        debug: Boolean flag to enable debug image saving
     
     Returns:
         DataFrame with separate rows for each lesion image
@@ -293,6 +396,13 @@ def Mask_Lesions(image_data, input_dir, output_dir, max_workers=None):
 
     # Create output directory
     os.makedirs(lesion_output_dir, exist_ok=True)
+    
+    # Create debug directory if debug is enabled
+    debug_dir = None
+    if debug:
+        debug_dir = f"{output_dir}/debug/"
+        os.makedirs(debug_dir, exist_ok=True)
+        print(f"Debug mode enabled. Debug images will be saved to: {debug_dir}")
 
     # Filter for rows where has_caliper_mask = True
     masked_images = image_data[image_data['has_caliper_mask'] == True]
@@ -307,7 +417,7 @@ def Mask_Lesions(image_data, input_dir, output_dir, max_workers=None):
     # Prepare arguments for each worker
     worker_args = []
     for idx, row in masked_images.iterrows():
-        worker_args.append((idx, row, image_dir, mask_dir, lesion_output_dir))
+        worker_args.append((idx, row, image_dir, mask_dir, lesion_output_dir, debug, debug_dir))
 
     # Initialize counters
     processed_count = 0
@@ -412,5 +522,8 @@ def Mask_Lesions(image_data, input_dir, output_dir, max_workers=None):
 
     print(f"Successfully processed: {processed_count} images | Failed: {failed_count} | Total lesions created: {total_lesions_created}")
     print(f"Original rows with masks: {len(masked_images)} | New lesion rows created: {len(new_lesion_rows)}")
+    
+    if debug:
+        print(f"Debug images saved to: {debug_dir}")
 
     return result_df
