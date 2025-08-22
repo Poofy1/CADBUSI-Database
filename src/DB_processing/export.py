@@ -453,7 +453,7 @@ def ExportAuditReport(image_df, breast_df, video_df, video_images_df):
     # Process each split
     for split_num in [0, 1, 2]:  # 0->train, 1->val, 2->test
         # Filter data by split
-        split_data = breast_df[breast_df['valid'] == split_num]
+        split_data = breast_df[breast_df['Valid'] == split_num]
         
         # Count for each combination
         for laterality in ['RIGHT', 'LEFT']:
@@ -475,7 +475,7 @@ def ExportAuditReport(image_df, breast_df, video_df, video_images_df):
     # -- Machine model distribution counts by split --
     if 'ManufacturerModelName' in image_df.columns:
         # Merge dataframes to get valid split information with the machine models
-        model_df = image_df.merge(breast_df[['Patient_ID', 'Accession_Number', 'valid']], 
+        model_df = image_df.merge(breast_df[['Patient_ID', 'Accession_Number', 'Valid']], 
                               on=['Patient_ID', 'Accession_Number'], how='left')
         
         # Get the unique machine models
@@ -492,9 +492,9 @@ def ExportAuditReport(image_df, breast_df, video_df, video_images_df):
             safe_model = str(model).replace(' ', '_').replace('-', '_').replace('.', '_').replace("'", "")
             
             # Count each model in each split
-            train_count = len(model_df[(model_df['valid'] == 0) & (model_df['ManufacturerModelName'] == model)])
-            val_count = len(model_df[(model_df['valid'] == 1) & (model_df['ManufacturerModelName'] == model)])
-            test_count = len(model_df[(model_df['valid'] == 2) & (model_df['ManufacturerModelName'] == model)])
+            train_count = len(model_df[(model_df['Valid'] == 0) & (model_df['ManufacturerModelName'] == model)])
+            val_count = len(model_df[(model_df['Valid'] == 1) & (model_df['ManufacturerModelName'] == model)])
+            test_count = len(model_df[(model_df['Valid'] == 2) & (model_df['ManufacturerModelName'] == model)])
             
             # Only add to dictionaries if count > 0
             if train_count > 0:
@@ -548,7 +548,7 @@ def ExportAuditReport(image_df, breast_df, video_df, video_images_df):
         # Count densities by split
         for split_num, density_dict in [(0, train_densities), (1, val_densities), (2, test_densities)]:
             # Filter by split
-            split_data = breast_df[breast_df['valid'] == split_num]
+            split_data = breast_df[breast_df['Valid'] == split_num]
             
             # Count occurrences of each density category
             density_counts = split_data['density_category'].value_counts().to_dict()
@@ -579,7 +579,7 @@ def ExportAuditReport(image_df, breast_df, video_df, video_images_df):
     # Process each split
     for split_num in [0, 1, 2]:  # 0->train, 1->val, 2->test
         # Filter data by split
-        split_data = breast_df[breast_df['valid'] == split_num]
+        split_data = breast_df[breast_df['Valid'] == split_num]
         
         # Count each BI-RADS value
         for birad in birad_values:
@@ -594,7 +594,7 @@ def ExportAuditReport(image_df, breast_df, video_df, video_images_df):
         
     # -- Images per split --
     # First, merge image_df with breast_df to get split information for each image
-    merged_df = image_df.merge(breast_df[['Patient_ID', 'Accession_Number', 'Study_Laterality', 'valid']], 
+    merged_df = image_df.merge(breast_df[['Patient_ID', 'Accession_Number', 'Study_Laterality', 'Valid']], 
                             on=['Patient_ID', 'Accession_Number'], how='left')
 
     # Create mapping for numeric codes to split names
@@ -605,7 +605,7 @@ def ExportAuditReport(image_df, breast_df, video_df, video_images_df):
     }
 
     # Count images by valid value (0, 1, 2)
-    valid_counts = merged_df.groupby('valid').size()
+    valid_counts = merged_df.groupby('Valid').size()
 
     # Map the counts to the correct split names and log them
     for valid_code, split_name in split_mapping.items():

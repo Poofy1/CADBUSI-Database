@@ -406,7 +406,6 @@ def Mask_Lesions(image_data, input_dir, output_dir, max_workers=None, debug=Fals
 
     # Filter for rows where has_caliper_mask = True
     masked_images = image_data[image_data['has_caliper_mask'] == True]
-    non_masked_images = image_data[image_data['has_caliper_mask'] != True]
     
     if len(masked_images) == 0:
         print("No images found with has_caliper_mask = True")
