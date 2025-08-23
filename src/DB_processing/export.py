@@ -854,7 +854,7 @@ def Export_Database(CONFIG, reparse_images = True, test_subset = None):
         video_paths = video_df.groupby(['Accession_Number', 'laterality'])['ImagesPath'].agg(list).to_dict()
         train_data['VideoPaths'] = train_data.apply(lambda row: video_paths.get((row['Accession_Number'], row['Study_Laterality']), []), axis=1)
         
-        if reparse_images:  
+        if reparse_images and focus_type == 'breast':  
             video_images_df = generate_video_images_csv(video_df, output_dir)
             save_data(video_images_df, os.path.join(output_dir, 'VideoImages.csv'))
         else:
