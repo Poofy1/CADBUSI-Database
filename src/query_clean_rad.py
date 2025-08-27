@@ -184,7 +184,46 @@ def extract_density(text):
     else:
         # If no next section header is found, return all text after "DENSITY:"
         return after_density
+    
+    
+def extract_findings_and_fallback(row):
+    # First try RADIOLOGY_REPORT if available
+    if 'RADIOLOGY_REPORT' in row and not pd.isna(row['RADIOLOGY_REPORT']):
+        text = row['RADIOLOGY_REPORT']
+        result = extract_findings(text)
+        if result is not None:  # If FINDINGS was found in RADIOLOGY_REPORT
+            return result
+    
+    # If no result from RADIOLOGY_REPORT, try RADIOLOGY_NARRATIVE
+    if 'RADIOLOGY_NARRATIVE' in row and not pd.isna(row['RADIOLOGY_NARRATIVE']):
+        text = row['RADIOLOGY_NARRATIVE']
+        result = extract_findings(text)
+        if result is not None:  # If FINDINGS was found in RADIOLOGY_NARRATIVE
+            return result
+    
+    return None
 
+def extract_findings(text):
+    if pd.isna(text):
+        return None
+    
+    # Check if "FINDINGS:" exists in the text
+    if "FINDINGS:" not in text:
+        return None
+    
+    # Split by "FINDINGS:" and get the content after it
+    after_findings = text.split("FINDINGS:")[1].strip()
+    
+    # Look specifically for "IMPRESSION:"
+    if "IMPRESSION:" in after_findings:
+        # Get position of "IMPRESSION:"
+        end_pos = after_findings.find("IMPRESSION:")
+        # Extract text from after "FINDINGS:" until "IMPRESSION:"
+        findings_text = after_findings[:end_pos].strip()
+        return findings_text
+    else:
+        # If "IMPRESSION:" is not found, return all text after "FINDINGS:"
+        return after_findings
 
 def extract_rad_pathology_txt(text):
     if pd.isna(text):
@@ -473,6 +512,9 @@ def filter_rad_data(radiology_df, output_path):
     
     # Extract impression text
     radiology_df['rad_impression'] = radiology_df['RADIOLOGY_REPORT'].apply(extract_rad_impression)
+
+    # Extract findings text
+    radiology_df['FINDINGS'] = radiology_df.apply(extract_findings_and_fallback, axis=1)
 
     # Check for biopsy in DESCRIPTION column
     results = radiology_df.apply(check_for_biopsy, axis=1)
