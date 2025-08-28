@@ -107,7 +107,7 @@ def split_lesions(pathology_df):
                     valid_parts_found = True
                     part_count += 1
                     part_row = row.to_dict()
-                    part_row['final_diag'] = f"{part_letter}. {part_text}"
+                    part_row['lesion_diag'] = f"{part_letter}. {part_text}"  # New column instead of overwriting final_diag
                     
                     # Determine laterality for this part
                     if "LEFT" in part_text:
@@ -124,6 +124,7 @@ def split_lesions(pathology_df):
         # If no valid parts were found, keep the original row with laterality
         if not valid_parts_found:
             original_row = row.to_dict()
+            original_row['lesion_diag'] = None  # No individual lesion for unsplit cases
             
             # Check for laterality in the full text
             if "LEFT" in text:
@@ -146,7 +147,7 @@ def extract_final_diagnosis(text):
         return None
     
     # Use regex to find "FINAL DIAGNOSIS:" or "FINAL DIAGNOSIS"
-    start_match = re.search(r'FINAL DIAGNOSIS:?', text, re.IGNORECASE)
+    start_match = re.search(r'FINAL DIAGNOSIS:?', text)
     if not start_match:
         return None
     
@@ -155,6 +156,11 @@ def extract_final_diagnosis(text):
     
     # Get the content after the match
     after_diagnosis = text[start_pos:].strip()
+    
+    # Check if the text (after skipping whitespace) starts with A. or A)
+    if not re.match(r'^\s*A[\.\)]', after_diagnosis):
+        # If it doesn't start with A. or A), prepend "A. "
+        after_diagnosis = "A. " + after_diagnosis.lstrip()
     
     # Look for either pattern: 
     # 1. Uppercase words (4+ letters) followed by colon
@@ -281,12 +287,33 @@ def categorize_pathology(text):
     return "UNKNOWN"
 
 
-
+def extract_synoptic_report(text):
+    """Extract synoptic report content from specimen note text."""
+    if pd.isna(text):
+        return None
+    
+    # Use regex to find "SYNOPTIC REPORT" (must be capitalized), optionally followed by ":"
+    start_match = re.search(r'SYNOPTIC REPORT:?', text)
+    if not start_match:
+        return None
+    
+    # Get the position right after the match
+    start_pos = start_match.end()
+    
+    # Get the content after the match
+    after_synoptic = text[start_pos:].strip()
+    
+    return after_synoptic
+    
+    
 def filter_path_data(pathology_df, output_path):
     print("Parsing Pathology Data")
     
     # Extract final diagnosis from SPECIMEN_NOTE
     pathology_df['final_diag'] = pathology_df['SPECIMEN_NOTE'].apply(extract_final_diagnosis)
+    
+    # Extract synoptic report from SPECIMEN_NOTE
+    pathology_df['SYNOPTIC_REPORT'] = pathology_df['SPECIMEN_NOTE'].apply(extract_synoptic_report)
     
     # Split cases into separate rows via lesions
     expanded_df = split_lesions(pathology_df)
@@ -297,7 +324,7 @@ def filter_path_data(pathology_df, output_path):
     expanded_df['Pathology_Laterality'] = expanded_df.apply(determine_laterality, axis=1)
     
     # Apply diagnosis classification
-    expanded_df['path_interpretation'] = expanded_df['final_diag'].apply(categorize_pathology)
+    expanded_df['path_interpretation'] = expanded_df['lesion_diag'].apply(categorize_pathology)
     
     # Audit laterality counts
     lat_left_count = len(expanded_df[expanded_df['Pathology_Laterality'] == 'LEFT'])
@@ -325,8 +352,10 @@ def filter_path_data(pathology_df, output_path):
         'SPECIMEN_ACCESSION_NUMBER',
         'Pathology_Laterality',
         'final_diag',
+        'lesion_diag',
         'path_interpretation',
         'Modality',
+        'SYNOPTIC_REPORT',  # Added the new column here
         'DIAGNOSIS_NAME', 
         'SPECIMEN_COMMENT',
         'SPECIMEN_PART_TYPE_NAME',
