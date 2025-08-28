@@ -359,7 +359,6 @@ def filter_path_data(pathology_df, output_path):
         'DIAGNOSIS_NAME', 
         'SPECIMEN_COMMENT',
         'SPECIMEN_PART_TYPE_NAME',
-        'SPECIMEN_ACCESSION_DTM',
         'SPECIMEN_RESULT_DTM',
         'SPECIMEN_RECEIVED_DTM',
     ]
