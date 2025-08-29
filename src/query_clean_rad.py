@@ -357,16 +357,16 @@ def remove_outside_records(radiology_df):
 
 def add_previous_worst_mg_column(radiology_df):
     """
-    Add a column 'previous_worst_MG' that contains the worst BI-RADS value from previous
-    mammography exams with matching laterality for each US record.
-    Optimized version that processes data much faster.
+    Add columns 'previous_worst_MG' and 'previous_worst_MG_accession' that contain 
+    the worst BI-RADS value and corresponding accession number from previous
+    worst mammography exams. Tracks LEFT and RIGHT separately, with BILATERAL updating/using both.
     
     Args:
         radiology_df: DataFrame containing radiology data with columns:
-                     PATIENT_ID, MODALITY, BI-RADS, Study_Laterality, RADIOLOGY_DTM
+                     PATIENT_ID, MODALITY, BI-RADS, Study_Laterality, RADIOLOGY_DTM, ACCESSION_NUMBER
                      
     Returns:
-        DataFrame with added 'previous_worst_MG' column
+        DataFrame with added 'previous_worst_MG' and 'previous_worst_MG_accession' columns
     """
     
     # Define valid BI-RADS values in order from best to worst
@@ -379,55 +379,109 @@ def add_previous_worst_mg_column(radiology_df):
         birads_str = str(birads_value).upper().strip()
         return birads_str in valid_birads_order
     
-    def get_worse_birads(current_worst, new_birads):
-        """Return the worse of two BI-RADS values."""
-        if current_worst is None:
-            return new_birads
+    def get_worse_birads_with_accession(current_worst_tuple, new_birads, new_accession):
+        """
+        Return the worse of two BI-RADS values along with corresponding accession.
         
-        current_idx = valid_birads_order.index(str(current_worst).upper().strip())
+        Args:
+            current_worst_tuple: (birads_value, accession_number) or None
+            new_birads: new BI-RADS value to compare
+            new_accession: accession number for the new BI-RADS
+            
+        Returns:
+            tuple: (worse_birads, corresponding_accession)
+        """
+        if current_worst_tuple is None:
+            return (str(new_birads).upper().strip(), new_accession)
+        
+        current_birads, current_accession = current_worst_tuple
+        current_idx = valid_birads_order.index(str(current_birads).upper().strip())
         new_idx = valid_birads_order.index(str(new_birads).upper().strip())
         
-        return str(new_birads).upper().strip() if new_idx > current_idx else current_worst
+        if new_idx > current_idx:
+            return (str(new_birads).upper().strip(), new_accession)
+        else:
+            return current_worst_tuple
     
     print("Processing previous worst MG...")
     
     # Convert RADIOLOGY_DTM to datetime if it isn't already
     radiology_df['RADIOLOGY_DTM'] = pd.to_datetime(radiology_df['RADIOLOGY_DTM'], errors='coerce')
     
-    # Initialize the new column
+    # Initialize the new columns
     radiology_df['previous_worst_MG'] = None
+    radiology_df['previous_worst_MG_accession'] = None
     
-    # Sort by patient, laterality, and date for efficient processing
-    df_sorted = radiology_df.sort_values(['PATIENT_ID', 'Study_Laterality', 'RADIOLOGY_DTM']).copy()
+    # Sort by patient and date for efficient processing
+    df_sorted = radiology_df.sort_values(['PATIENT_ID', 'RADIOLOGY_DTM']).copy()
     
-    # Group by patient and laterality for efficient processing
-    grouped = df_sorted.groupby(['PATIENT_ID', 'Study_Laterality'])
-    
-    total_groups = len(grouped)
+    # Group by patient only
+    grouped = df_sorted.groupby(['PATIENT_ID'])
     us_records_processed = 0
     
-    print(f"Processing {total_groups} patient-laterality groups...")
-    
-    # Process each patient-laterality group
-    for (patient_id, laterality), group in grouped:
+    # Process each patient
+    for patient_id, group in grouped:
         
-        # Skip if laterality is missing
-        if pd.isna(laterality):
-            continue
-            
-        # Track the worst MG BI-RADS seen so far for this patient-laterality combination
-        current_worst_mg = None
+        # Track the worst MG BI-RADS and accession for each side separately
+        # Each is a tuple: (birads_value, accession_number)
+        worst_left_mg_tuple = None
+        worst_right_mg_tuple = None
         
         # Iterate through records in chronological order
         for idx, row in group.iterrows():
             if row['MODALITY'] == 'MG' and is_valid_birads(row['BI-RADS']):
-                # Update the worst MG BI-RADS seen so far
-                current_worst_mg = get_worse_birads(current_worst_mg, row['BI-RADS'])
+                birads_value = str(row['BI-RADS']).upper().strip()
+                accession = row['ACCESSION_NUMBER']
+                laterality = str(row['Study_Laterality']).upper().strip()
+                
+                # Update worst values based on laterality
+                if laterality == 'LEFT':
+                    worst_left_mg_tuple = get_worse_birads_with_accession(
+                        worst_left_mg_tuple, birads_value, accession)
+                elif laterality == 'RIGHT':
+                    worst_right_mg_tuple = get_worse_birads_with_accession(
+                        worst_right_mg_tuple, birads_value, accession)
+                elif laterality == 'BILATERAL':
+                    # BILATERAL MG updates both sides with same values
+                    worst_left_mg_tuple = get_worse_birads_with_accession(
+                        worst_left_mg_tuple, birads_value, accession)
+                    worst_right_mg_tuple = get_worse_birads_with_accession(
+                        worst_right_mg_tuple, birads_value, accession)
                 
             elif row['MODALITY'] == 'US':
-                # Assign the current worst MG to this US record
-                if current_worst_mg is not None:
-                    radiology_df.loc[idx, 'previous_worst_MG'] = current_worst_mg
+                laterality = str(row['Study_Laterality']).upper().strip()
+                previous_worst_tuple = None
+                
+                # Determine previous worst based on US laterality
+                if laterality == 'LEFT' and worst_left_mg_tuple is not None:
+                    previous_worst_tuple = worst_left_mg_tuple
+                elif laterality == 'RIGHT' and worst_right_mg_tuple is not None:
+                    previous_worst_tuple = worst_right_mg_tuple
+                elif laterality == 'BILATERAL':
+                    # BILATERAL US takes the worst of both sides
+                    if worst_left_mg_tuple is not None and worst_right_mg_tuple is not None:
+                        # Compare the two sides and take the worse one
+                        left_birads, left_accession = worst_left_mg_tuple
+                        right_birads, right_accession = worst_right_mg_tuple
+                        
+                        left_idx = valid_birads_order.index(left_birads)
+                        right_idx = valid_birads_order.index(right_birads)
+                        
+                        if right_idx > left_idx:
+                            previous_worst_tuple = worst_right_mg_tuple
+                        else:
+                            previous_worst_tuple = worst_left_mg_tuple
+                    elif worst_left_mg_tuple is not None:
+                        previous_worst_tuple = worst_left_mg_tuple
+                    elif worst_right_mg_tuple is not None:
+                        previous_worst_tuple = worst_right_mg_tuple
+                
+                # Assign both BI-RADS and accession if we found a previous worst
+                if previous_worst_tuple is not None:
+                    birads_value, accession = previous_worst_tuple
+                    radiology_df.loc[idx, 'previous_worst_MG'] = birads_value
+                    radiology_df.loc[idx, 'previous_worst_MG_accession'] = accession
+                    
                 us_records_processed += 1
     
     # Count results
