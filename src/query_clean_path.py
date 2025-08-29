@@ -355,7 +355,7 @@ def filter_path_data(pathology_df, output_path):
         'lesion_diag',
         'path_interpretation',
         'Modality',
-        'SYNOPTIC_REPORT',  # Added the new column here
+        'SYNOPTIC_REPORT',
         'DIAGNOSIS_NAME', 
         'SPECIMEN_COMMENT',
         'SPECIMEN_PART_TYPE_NAME',

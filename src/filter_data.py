@@ -399,8 +399,8 @@ def audit_interpretations(final_df):
 def fill_pathology_accession_numbers(final_df):
     """
     Fill in accession numbers for rows with lesion_diag entries.
-    For each patient with is_us_biopsy = T, find lesion_diag rows after the biopsy
-    (but within 6 months) and assign the accession number from the most recent 
+    For each patient with is_us_biopsy = T, find lesion_diag rows from 1 day before 
+    the biopsy up to 6 months after and assign the accession number from the most recent 
     previous MODALITY = US row before that specific biopsy.
     Only assigns if lateralities match:
     - Study_Laterality BILATERAL matches any Pathology_Laterality
@@ -434,16 +434,17 @@ def fill_pathology_accession_numbers(final_df):
             if pd.isna(biopsy_date):
                 continue
                 
-            # Define 6-month window after biopsy (180 days)
+            # Define window: 1 day before to 6 months after biopsy
+            one_day_before = biopsy_date - pd.Timedelta(days=1)
             six_months_later = biopsy_date + pd.Timedelta(days=180)
             
-            # Find lesion_diag records after this biopsy but within 6 months
-            post_biopsy_diag = lesion_diag_records[
-                (lesion_diag_records['DATE'] > biopsy_date) &
+            # Find lesion_diag records from 1 day before biopsy to 6 months after
+            related_diag = lesion_diag_records[
+                (lesion_diag_records['DATE'] >= one_day_before) &
                 (lesion_diag_records['DATE'] <= six_months_later)
             ]
             
-            if post_biopsy_diag.empty:
+            if related_diag.empty:
                 continue
                 
             # Find the most recent previous MODALITY = US row before this specific biopsy
@@ -464,7 +465,7 @@ def fill_pathology_accession_numbers(final_df):
             study_laterality = most_recent_us['Study_Laterality']
             
             # Check laterality matching for each pathology record
-            for idx, diag_row in post_biopsy_diag.iterrows():
+            for idx, diag_row in related_diag.iterrows():
                 pathology_laterality = diag_row['Pathology_Laterality']
                 
                 # Determine if lateralities match
@@ -488,7 +489,7 @@ def fill_pathology_accession_numbers(final_df):
     # Log how many were filled
     filled_count = len(updates)
     append_audit("query_clean.pathology_accession_filled", filled_count)
-    print(f"Filled {filled_count} pathology accession numbers (within 6 months of biopsy, with matching laterality)")
+    print(f"Filled {filled_count} pathology accession numbers (1 day before to 6 months after biopsy, with matching laterality)")
     
     return final_df
 
@@ -515,7 +516,7 @@ def prepare_dataframes(rad_df, path_df):
 def combine_dataframes(rad_df, path_df):
     """Combine radiology and pathology dataframes, keeping pathology on separate rows."""
     # Select only needed columns from path_df to reduce memory usage
-    needed_columns = ['PATIENT_ID', 'DATE', 'SPECIMEN_RESULT_DTM', 'Pathology_Laterality', 'final_diag', 'lesion_diag', 'path_interpretation']
+    needed_columns = ['PATIENT_ID', 'DATE', 'SPECIMEN_RESULT_DTM', 'Pathology_Laterality', 'final_diag', 'lesion_diag', 'SYNOPTIC_REPORT', 'path_interpretation']
     path_needed = path_df[needed_columns] if all(col in path_df.columns for col in needed_columns) else path_df
     
     # Create a copy of path_needed with the same columns as rad_df, plus any additional columns we need
@@ -530,13 +531,13 @@ def combine_dataframes(rad_df, path_df):
     
     return final_df
 
-def create_pathology_subset_csv(final_df, output_path):
+def create_pathology_subset_csv(final_df):
     """
     Create a separate CSV containing only rows that have all pathology-related fields
     """
     
     # Define the required columns
-    required_columns = ['PATIENT_ID', 'ACCESSION_NUMBER', 'DATE', 'final_diag', 'lesion_diag', 'Pathology_Laterality', 'path_interpretation']
+    required_columns = ['PATIENT_ID', 'ACCESSION_NUMBER', 'DATE', 'final_diag', 'lesion_diag', 'SYNOPTIC_REPORT', 'Pathology_Laterality', 'path_interpretation']
     
     # Select only the required columns
     pathology_subset = final_df[required_columns].copy()
@@ -547,12 +548,6 @@ def create_pathology_subset_csv(final_df, output_path):
     # Also remove rows with empty strings
     for col in required_columns:
         pathology_subset = pathology_subset[pathology_subset[col] != '']
-    
-    print(f"Found {len(pathology_subset)} rows with complete pathology data")
-    
-    # Save to CSV with only the 5 columns
-    pathology_csv_path = f'{output_path}/pathology_complete_records.csv'
-    pathology_subset.to_csv(pathology_csv_path, index=False)
 
     return pathology_subset
     
@@ -662,8 +657,8 @@ def create_final_dataset(rad_df, path_df, output_path):
     # Determine final interpretation
     final_df = determine_final_interpretation(final_df)
     
-    # CREATE THE PATHOLOGY SUBSET CSV - ADD THIS LINE
-    pathology_subset = create_pathology_subset_csv(final_df, output_path)
+    # CREATE THE PATHOLOGY SUBSET CSV
+    pathology_subset = create_pathology_subset_csv(final_df)
     pathology_subset.to_csv(f'{output_path}/lesion_pathology.csv', index=False)
     
     # Save to CSV
