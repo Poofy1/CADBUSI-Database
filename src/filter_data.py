@@ -405,6 +405,9 @@ def fill_pathology_accession_numbers(final_df):
     Only assigns if lateralities match:
     - Study_Laterality BILATERAL matches any Pathology_Laterality
     - Study_Laterality LEFT/RIGHT must match exactly with Pathology_Laterality
+    
+    Additionally, copy SYNOPTIC_REPORT and final_diag data from pathology rows to other rows 
+    with the same ACCESSION_NUMBER.
     """
     updates = {}
     
@@ -482,14 +485,56 @@ def fill_pathology_accession_numbers(final_df):
                 if laterality_matches:
                     updates[idx] = most_recent_accession
     
-    # Apply all updates at once
+    # Apply all accession number updates at once
     for idx, accession_number in updates.items():
         final_df.at[idx, 'ACCESSION_NUMBER'] = accession_number
     
+    # NEW: Copy SYNOPTIC_REPORT and final_diag data to rows with matching ACCESSION_NUMBER
+    pathology_updates = {}
+    
+    # Find all rows that have SYNOPTIC_REPORT data
+    rows_with_synoptic = final_df[
+        pd.notna(final_df['SYNOPTIC_REPORT']) & 
+        (final_df['SYNOPTIC_REPORT'] != '') &
+        pd.notna(final_df['ACCESSION_NUMBER']) &
+        (final_df['ACCESSION_NUMBER'] != '')
+    ]
+    
+    # Group by ACCESSION_NUMBER to get the SYNOPTIC_REPORT and final_diag for each accession
+    for accession_number in tqdm(rows_with_synoptic['ACCESSION_NUMBER'].unique(), 
+                                 desc="Copying SYNOPTIC_REPORT and final_diag data"):
+        source_row = rows_with_synoptic[
+            rows_with_synoptic['ACCESSION_NUMBER'] == accession_number
+        ].iloc[0]  # Take the first one if multiple exist
+        
+        synoptic_data = source_row['SYNOPTIC_REPORT']
+        final_diag_data = source_row['final_diag']
+        
+        # Find all rows with the same ACCESSION_NUMBER that don't have SYNOPTIC_REPORT
+        matching_rows = final_df[
+            (final_df['ACCESSION_NUMBER'] == accession_number) &
+            (pd.isna(final_df['SYNOPTIC_REPORT']) | (final_df['SYNOPTIC_REPORT'] == ''))
+        ]
+        
+        # Update these rows with both SYNOPTIC_REPORT and final_diag
+        for idx in matching_rows.index:
+            pathology_updates[idx] = {
+                'SYNOPTIC_REPORT': synoptic_data,
+                'final_diag': final_diag_data
+            }
+    
+    # Apply pathology data updates
+    for idx, data_dict in pathology_updates.items():
+        final_df.at[idx, 'SYNOPTIC_REPORT'] = data_dict['SYNOPTIC_REPORT']
+        final_df.at[idx, 'final_diag'] = data_dict['final_diag']
+    
     # Log how many were filled
     filled_count = len(updates)
+    pathology_filled_count = len(pathology_updates)
     append_audit("query_clean.pathology_accession_filled", filled_count)
+    append_audit("query_clean.pathology_data_copied", pathology_filled_count)
     print(f"Filled {filled_count} pathology accession numbers (1 day before to 6 months after biopsy, with matching laterality)")
+    print(f"Copied SYNOPTIC_REPORT and final_diag to {pathology_filled_count} rows with matching accession numbers")
     
     return final_df
 
