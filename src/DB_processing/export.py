@@ -639,7 +639,7 @@ def Export_Database(CONFIG, reparse_images = True, test_subset = None):
     date = datetime.datetime.now().strftime("%m_%d_%Y_%H_%M_%S")
     output_dir = f'{output_dir}/export_{date}/'
     
-    print("Exporting Data:")
+    print(f"Exporting dataset to {output_dir}")
     make_dirs(output_dir)
     
     # Save the config to the export location

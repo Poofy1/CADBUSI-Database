@@ -79,7 +79,6 @@ def split_lesions(pathology_df):
     Split pathology cases into separate rows by lettered parts,
     with laterality determination for each part.
     """
-    print("Splitting cases by lettered parts with laterality...")
     expanded_rows = []
     part_count = 0
     
@@ -309,6 +308,12 @@ def extract_synoptic_report(text):
 def filter_path_data(pathology_df, output_path):
     print("Parsing Pathology Data")
     
+    rows_before = len(pathology_df)
+    pathology_df = pathology_df.drop_duplicates(keep='first')
+    rows_after = len(pathology_df)
+    duplicates_removed_early = rows_before - rows_after
+    print(f"Removed {duplicates_removed_early} exact duplicate rows before processing.")
+    
     # Extract final diagnosis from SPECIMEN_NOTE
     pathology_df['final_diag'] = pathology_df['SPECIMEN_NOTE'].apply(extract_final_diagnosis)
     
@@ -370,7 +375,7 @@ def filter_path_data(pathology_df, output_path):
     rows_before = len(output_df)
     output_df = output_df.drop_duplicates(keep='first')
     rows_after = len(output_df)
-    duplicates_removed = rows_before - rows_after
+    duplicates_removed = (rows_before - rows_after) + duplicates_removed_early
     
     print(f"Removed {duplicates_removed} exact duplicate rows.")
     append_audit("query_clean_path.path_duplicated_removed", duplicates_removed)

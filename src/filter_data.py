@@ -263,8 +263,8 @@ def check_from_next_diagnosis(final_df, days=240):
     (still requiring at least one 'is_us_biopsy' = 'T').
     """
     # Define the target BI-RADS values for malignant and benign cases
-    target_birads_malignant = ['4', '4A', '4B', '4C', '5', '6']
-    target_birads_benign = ['1', '2', '3', '4', '4A', '4B']
+    target_birads_malignant = set(['4', '4A', '4B', '4C', '5', '6'])
+    target_birads_benign = set(['1', '2', '3', '4', '4A', '4B'])
     updates = {}
     
     for patient_id in tqdm(final_df['PATIENT_ID'].unique(), desc="Checking diagnosis from next record"):
@@ -409,135 +409,135 @@ def fill_pathology_accession_numbers(final_df):
     Additionally, copy SYNOPTIC_REPORT and final_diag data from pathology rows to other rows 
     with the same ACCESSION_NUMBER.
     """
-    updates = {}
+    # Pre-filter all relevant records once (major speedup)
+    biopsy_mask = final_df['is_us_biopsy'] == 'T'
+    biopsy_records = final_df[biopsy_mask & pd.notna(final_df['DATE'])][
+        ['PATIENT_ID', 'DATE']
+    ].reset_index()
     
-    for patient_id in tqdm(final_df['PATIENT_ID'].unique(), desc="Filling pathology accession numbers"):
-        patient_records = final_df[final_df['PATIENT_ID'] == patient_id].copy().sort_values('DATE')
-        
-        # Find biopsy records
-        biopsy_records = patient_records[patient_records['is_us_biopsy'] == 'T']
-        
-        if biopsy_records.empty:
-            continue
+    lesion_diag_mask = (
+        pd.notna(final_df['lesion_diag']) & 
+        (pd.isna(final_df['ACCESSION_NUMBER']) | (final_df['ACCESSION_NUMBER'] == '')) &
+        pd.notna(final_df['Pathology_Laterality']) &
+        pd.notna(final_df['DATE'])
+    )
+    lesion_diag_records = final_df[lesion_diag_mask][
+        ['PATIENT_ID', 'DATE', 'Pathology_Laterality']
+    ].reset_index()
+    
+    us_records_mask = (
+        (final_df['MODALITY'] == 'US') &
+        pd.notna(final_df['ACCESSION_NUMBER']) &
+        (final_df['ACCESSION_NUMBER'] != '') &
+        pd.notna(final_df['Study_Laterality']) &
+        pd.notna(final_df['DATE'])
+    )
+    us_records = final_df[us_records_mask][
+        ['PATIENT_ID', 'DATE', 'ACCESSION_NUMBER', 'Study_Laterality']
+    ].reset_index()
+    
+    if biopsy_records.empty or lesion_diag_records.empty or us_records.empty:
+        return final_df
+    
+    # Vectorized matching using merge operations
+    accession_updates = {}
+    
+    # Cross join biopsies with lesion_diag records by patient
+    biopsy_lesion_matches = pd.merge(
+        biopsy_records, 
+        lesion_diag_records, 
+        on='PATIENT_ID', 
+        suffixes=('_biopsy', '_lesion')
+    )
+    
+    # Filter by date window vectorized
+    one_day_before = biopsy_lesion_matches['DATE_biopsy'] - pd.Timedelta(days=1)
+    six_months_later = biopsy_lesion_matches['DATE_biopsy'] + pd.Timedelta(days=180)
+    
+    date_filtered = biopsy_lesion_matches[
+        (biopsy_lesion_matches['DATE_lesion'] >= one_day_before) &
+        (biopsy_lesion_matches['DATE_lesion'] <= six_months_later)
+    ]
+    
+    if not date_filtered.empty:
+        # For each valid biopsy-lesion pair, find the most recent US record
+        for _, row in tqdm(date_filtered.iterrows(), 
+                          desc="Filling pathology accession numbers",
+                          total=len(date_filtered)):
+            patient_id = row['PATIENT_ID']
+            biopsy_date = row['DATE_biopsy']
+            lesion_idx = row['index_lesion']
+            pathology_laterality = row['Pathology_Laterality']
             
-        # Find lesion_diag records without accession numbers
-        lesion_diag_records = patient_records[
-            pd.notna(patient_records['lesion_diag']) & 
-            (pd.isna(patient_records['ACCESSION_NUMBER']) | (patient_records['ACCESSION_NUMBER'] == '')) &
-            pd.notna(patient_records['Pathology_Laterality'])  # Must have pathology laterality
-        ]
-        
-        if lesion_diag_records.empty:
-            continue
-            
-        # Process each biopsy separately (there may be multiple biopsies per patient)
-        for _, biopsy in biopsy_records.iterrows():
-            biopsy_date = biopsy['DATE']
-            
-            if pd.isna(biopsy_date):
-                continue
-                
-            # Define window: 1 day before to 6 months after biopsy
-            one_day_before = biopsy_date - pd.Timedelta(days=1)
-            six_months_later = biopsy_date + pd.Timedelta(days=180)
-            
-            # Find lesion_diag records from 1 day before biopsy to 6 months after
-            related_diag = lesion_diag_records[
-                (lesion_diag_records['DATE'] >= one_day_before) &
-                (lesion_diag_records['DATE'] <= six_months_later)
+            # Find US records for this patient before biopsy date
+            patient_us = us_records[
+                (us_records['PATIENT_ID'] == patient_id) &
+                (us_records['DATE'] < biopsy_date)
             ]
             
-            if related_diag.empty:
-                continue
+            if not patient_us.empty:
+                # Get most recent (already sorted by date due to original sort)
+                most_recent_us = patient_us.loc[patient_us['DATE'].idxmax()]
+                study_laterality = most_recent_us['Study_Laterality']
                 
-            # Find the most recent previous MODALITY = US row before this specific biopsy
-            us_records_before_biopsy = patient_records[
-                (patient_records['DATE'] < biopsy_date) & 
-                (patient_records['MODALITY'] == 'US') &
-                pd.notna(patient_records['ACCESSION_NUMBER']) &
-                (patient_records['ACCESSION_NUMBER'] != '') &
-                pd.notna(patient_records['Study_Laterality'])  # Must have study laterality
-            ]
-            
-            if us_records_before_biopsy.empty:
-                continue
-                
-            # Get the most recent US study (last in sorted order)
-            most_recent_us = us_records_before_biopsy.iloc[-1]
-            most_recent_accession = most_recent_us['ACCESSION_NUMBER']
-            study_laterality = most_recent_us['Study_Laterality']
-            
-            # Check laterality matching for each pathology record
-            for idx, diag_row in related_diag.iterrows():
-                pathology_laterality = diag_row['Pathology_Laterality']
-                
-                # Determine if lateralities match
-                laterality_matches = False
-                
-                if study_laterality == 'BILATERAL':
-                    # BILATERAL matches any pathology laterality
-                    laterality_matches = True
-                elif study_laterality in ['LEFT', 'RIGHT']:
-                    # Exact match required for LEFT/RIGHT
-                    laterality_matches = (study_laterality == pathology_laterality)
-                
-                # Only assign accession number if lateralities match
-                if laterality_matches:
-                    updates[idx] = most_recent_accession
+                # Check laterality matching (vectorized)
+                if (study_laterality == 'BILATERAL' or 
+                    study_laterality == pathology_laterality):
+                    accession_updates[lesion_idx] = most_recent_us['ACCESSION_NUMBER']
     
-    # Apply all accession number updates at once
-    for idx, accession_number in updates.items():
-        final_df.at[idx, 'ACCESSION_NUMBER'] = accession_number
+    # Batch update accession numbers (much faster than individual .at[] calls)
+    if accession_updates:
+        indices = list(accession_updates.keys())
+        values = list(accession_updates.values())
+        final_df.loc[indices, 'ACCESSION_NUMBER'] = values
     
-    # NEW: Copy SYNOPTIC_REPORT and final_diag data to rows with matching ACCESSION_NUMBER
-    pathology_updates = {}
-    
-    # Find all rows that have SYNOPTIC_REPORT data
-    rows_with_synoptic = final_df[
+    # Optimized SYNOPTIC_REPORT copying using groupby
+    synoptic_mask = (
         pd.notna(final_df['SYNOPTIC_REPORT']) & 
         (final_df['SYNOPTIC_REPORT'] != '') &
         pd.notna(final_df['ACCESSION_NUMBER']) &
         (final_df['ACCESSION_NUMBER'] != '')
-    ]
+    )
     
-    # Group by ACCESSION_NUMBER to get the SYNOPTIC_REPORT and final_diag for each accession
-    for accession_number in tqdm(rows_with_synoptic['ACCESSION_NUMBER'].unique(), 
-                                 desc="Copying SYNOPTIC_REPORT and final_diag data"):
-        source_row = rows_with_synoptic[
-            rows_with_synoptic['ACCESSION_NUMBER'] == accession_number
-        ].iloc[0]  # Take the first one if multiple exist
+    if synoptic_mask.any():
+        # Get first SYNOPTIC_REPORT and final_diag for each accession number
+        source_data = final_df[synoptic_mask].groupby('ACCESSION_NUMBER')[
+            ['SYNOPTIC_REPORT', 'final_diag']
+        ].first()
         
-        synoptic_data = source_row['SYNOPTIC_REPORT']
-        final_diag_data = source_row['final_diag']
-        
-        # Find all rows with the same ACCESSION_NUMBER that don't have SYNOPTIC_REPORT
-        matching_rows = final_df[
-            (final_df['ACCESSION_NUMBER'] == accession_number) &
+        # Find rows that need updates
+        needs_update_mask = (
+            pd.notna(final_df['ACCESSION_NUMBER']) &
+            (final_df['ACCESSION_NUMBER'] != '') &
             (pd.isna(final_df['SYNOPTIC_REPORT']) | (final_df['SYNOPTIC_REPORT'] == ''))
-        ]
+        )
         
-        # Update these rows with both SYNOPTIC_REPORT and final_diag
-        for idx in matching_rows.index:
-            pathology_updates[idx] = {
-                'SYNOPTIC_REPORT': synoptic_data,
-                'final_diag': final_diag_data
-            }
+        if needs_update_mask.any():
+            update_rows = final_df[needs_update_mask]
+            
+            # Vectorized merge to get the data
+            merged_data = update_rows[['ACCESSION_NUMBER']].merge(
+                source_data, 
+                left_on='ACCESSION_NUMBER', 
+                right_index=True, 
+                how='left'
+            )
+            
+            # Batch update using .loc
+            valid_updates = pd.notna(merged_data['SYNOPTIC_REPORT'])
+            if valid_updates.any():
+                update_indices = update_rows[valid_updates].index
+                final_df.loc[update_indices, 'SYNOPTIC_REPORT'] = merged_data.loc[valid_updates, 'SYNOPTIC_REPORT'].values
+                final_df.loc[update_indices, 'final_diag'] = merged_data.loc[valid_updates, 'final_diag'].values
     
-    # Apply pathology data updates
-    for idx, data_dict in pathology_updates.items():
-        final_df.at[idx, 'SYNOPTIC_REPORT'] = data_dict['SYNOPTIC_REPORT']
-        final_df.at[idx, 'final_diag'] = data_dict['final_diag']
+    # Logging
+    filled_count = len(accession_updates)
+    pathology_filled_count = (needs_update_mask & pd.notna(merged_data['SYNOPTIC_REPORT'])).sum() if 'merged_data' in locals() else 0
     
-    # Log how many were filled
-    filled_count = len(updates)
-    pathology_filled_count = len(pathology_updates)
     append_audit("query_clean.pathology_accession_filled", filled_count)
     append_audit("query_clean.pathology_data_copied", pathology_filled_count)
-    print(f"Filled {filled_count} pathology accession numbers (1 day before to 6 months after biopsy, with matching laterality)")
-    print(f"Copied SYNOPTIC_REPORT and final_diag to {pathology_filled_count} rows with matching accession numbers")
-    
-    return final_df
 
+    return final_df
 
 
 def prepare_dataframes(rad_df, path_df):
@@ -602,93 +602,76 @@ def audit_pathology_dates(df):
     Only considers cases where the DATE vs DATE difference is within 2 weeks.
     
     Also audits day distance from biopsy to the most recent row before that biopsy.
-    
-    Args:
-        df: The combined dataframe with biopsy and pathology records
     """
-    print("Auditing pathology dates from biopsies using SPECIMEN_RESULT_DTM")
-    
     # Ensure DATE column is in datetime format
     df['DATE'] = pd.to_datetime(df['DATE'], errors='coerce')
-    
-    # Ensure SPECIMEN_RESULT_DTM is in datetime format
     df['SPECIMEN_RESULT_DTM'] = pd.to_datetime(df['SPECIMEN_RESULT_DTM'], errors='coerce')
     
-    # Create empty lists to store days difference data
     days_differences = []
     exam_to_biopsy_differences = []
     
-    # Get unique patients
-    unique_patients = df['PATIENT_ID'].unique()
+    # Get total number of patients for progress bar
+    unique_patients = df['PATIENT_ID'].nunique()
     
-    for patient_id in unique_patients:
-        # Get all records for this patient, sorted by DATE
-        patient_records = df[df['PATIENT_ID'] == patient_id].copy()
-        patient_records = patient_records.sort_values('DATE')
+    # Use groupby with tqdm progress bar
+    for patient_id, patient_group in tqdm(df.groupby('PATIENT_ID'), 
+                                         total=unique_patients, 
+                                         desc="Auditing pathology dates"):
+        # Sort this patient's records (matches original)
+        patient_records = patient_group.sort_values('DATE')
         
-        # Find biopsy records
+        # Find biopsy and pathology records (matches original logic exactly)
         biopsy_records = patient_records[patient_records['is_biopsy'] == 'T']
-        
-        # Find pathology records (where path_interpretation is not null)
         pathology_records = patient_records[pd.notna(patient_records['path_interpretation'])]
         
         # Audit 1: Biopsy to pathology differences (existing logic)
         if not biopsy_records.empty and not pathology_records.empty:
-            # For each biopsy, find pathology records within 2 weeks
-            for _, biopsy in biopsy_records.iterrows():
+            for biopsy_idx, biopsy in biopsy_records.iterrows():
                 biopsy_date = biopsy['DATE']
                 
                 if pd.isna(biopsy_date):
                     continue
+                
+                # Vectorize the inner loop for pathology records
+                valid_pathology = pathology_records[
+                    pd.notna(pathology_records['DATE']) & 
+                    pd.notna(pathology_records['SPECIMEN_RESULT_DTM'])
+                ]
+                
+                if not valid_pathology.empty:
+                    date_diffs = (valid_pathology['DATE'] - biopsy_date).dt.days
+                    # Keep original logic: skip if within 2 weeks
+                    outside_window = ~((date_diffs >= 0) & (date_diffs <= 14))
                     
-                # Look for pathology records with dates within 2 weeks of biopsy
-                for _, pathology in pathology_records.iterrows():
-                    pathology_date = pathology['DATE']
-                    result_date = pathology['SPECIMEN_RESULT_DTM']
-                    
-                    if pd.isna(pathology_date) or pd.isna(result_date):
-                        continue
-                    
-                    # Only process if DATE difference is within 2 weeks (14 days)
-                    date_diff = (pathology_date - biopsy_date).days
-                    if 0 <= date_diff <= 14:
-                        continue
-                    
-                    # Calculate the difference between biopsy DATE and pathology SPECIMEN_RESULT_DTM
-                    result_diff = (result_date - biopsy_date).days
-                    days_differences.append(result_diff)
+                    if outside_window.any():
+                        result_diffs = (valid_pathology.loc[outside_window, 'SPECIMEN_RESULT_DTM'] - biopsy_date).dt.days
+                        days_differences.extend(result_diffs.tolist())
         
         # Audit 2: Most recent exam to biopsy differences (new logic)
         if not biopsy_records.empty:
-            # For each biopsy, find the most recent row before it
-            for _, biopsy in biopsy_records.iterrows():
+            for biopsy_idx, biopsy in biopsy_records.iterrows():
                 biopsy_date = biopsy['DATE']
                 
                 if pd.isna(biopsy_date):
                     continue
                 
-                # Find all records before this biopsy date
                 previous_records = patient_records[
                     (patient_records['DATE'] < biopsy_date) & 
                     (pd.notna(patient_records['DATE']))
                 ]
                 
                 if not previous_records.empty:
-                    # Get the most recent record before the biopsy
-                    most_recent_exam = previous_records.iloc[-1]  # Last one since sorted by DATE
+                    most_recent_exam = previous_records.iloc[-1]
                     most_recent_date = most_recent_exam['DATE']
-                    
-                    # Calculate days difference
                     exam_diff = (biopsy_date - most_recent_date).days
                     exam_to_biopsy_differences.append(exam_diff)
     
-    # Record both audits
     append_audit("query_clean.pathology_date_from_biopsy", days_differences)
     append_audit("query_clean.exam_date_from_biospy", exam_to_biopsy_differences)
-                
+    
 def create_final_dataset(rad_df, path_df, output_path):
     """Main function to create the final dataset with pathology records on separate rows."""
-    print("Creating Final Dataset")
+    print("\nLinking data:")
     
     # Prepare dataframes
     rad_df, path_df = prepare_dataframes(rad_df, path_df)
@@ -752,9 +735,7 @@ def create_final_dataset(rad_df, path_df, output_path):
     final_df_us.to_csv(f'{env}/raw_data/endpoint_data.csv', index=False)
 
     # Print statistics
-    print(f"Removed {duplicate_count} rows with duplicate ACCESSION_NUMBER")
-    print(f"Dataset passed with {len(final_df_us)} results")
-    
+    print(f"Data ready with {len(final_df_us)} accessions")
     append_audit("query_clean.final_case_count", len(final_df_us))
     
     return final_df

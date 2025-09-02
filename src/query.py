@@ -299,12 +299,11 @@ def run_breast_imaging_query(limit=None):
     rad_path = os.path.join(env, "raw_data", "raw_radiology.csv")
     rad_df.to_csv(rad_path, index=False)
     append_audit("query.raw_rad_record_count", len(rad_df))
-    print(f"Radiology data saved")
     
     # Extract unique patient IDs from the radiology data
     patient_ids = rad_df['PATIENT_ID'].unique().tolist()
     append_audit("query.raw_rad_unique_patients", len(patient_ids))
-    print(f"Extracted {len(patient_ids)} unique patient IDs for pathology and lab queries")
+    print(f"Extracted {len(patient_ids)} unique patient IDs for pathology query")
     
     # Step 2: Get pathology data for these patients
     print("\n=== PATHOLOGY DATA QUERY ===")
@@ -314,7 +313,6 @@ def run_breast_imaging_query(limit=None):
     path_path = os.path.join(env, "raw_data", "raw_pathology.csv")
     path_df.to_csv(path_path, index=False)
     append_audit("query.raw_path_record_count", len(path_df))
-    print(f"Pathology data saved")
     
     
     
