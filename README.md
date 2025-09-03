@@ -1,14 +1,6 @@
 # CADBUSI-Database
 
-Custom database manager that is designed to process breast ultrasound data from the Mayo Clinic and store it in a structured format, making it easy to anonymize, manipulate, label, analyze, and prepare for machine learning training.
-
-## Requirements
-- Python 3.8
-- 6GB Nvidia GPU (Recommended)
-- At least 4 TB of hard drive space (Recommended)
-- Custom storage package: [storage-adapter](https://github.com/Poofy1/storage-adapter.git) (automatically installed via requirements.txt)
-
-
+Custom database manager that is designed to process breast ultrasound data from Mayo Clinic and store it in a structured format, making it easy to anonymize, manipulate, label, analyze, and prepare for ML research.
 
 ## Setup
 
