@@ -226,25 +226,6 @@ def PerformSplit(CONFIG, df):
     append_audit("export.test_patients", num_test_patients)
     
     return df
-    
-
-def Fix_CM_Data(df):
-    df['nipple_dist'] = df['nipple_dist'].str.replace('cm', '').str.replace(' ', '')
-
-    # Handle range values
-    df['nipple_dist'] = df['nipple_dist'].apply(lambda x: round(np.mean([int(i) for i in x.split('-')])) if isinstance(x, str) and '-' in x else x)
-
-    # Convert to numeric and handle errors
-    df['nipple_dist'] = pd.to_numeric(df['nipple_dist'], errors='coerce')
-
-    df.loc[df['nipple_dist'] > 25, 'nipple_dist'] = np.nan
-
-    # Replace 0 with NaN
-    df.loc[df['nipple_dist'] == 0, 'nipple_dist'] = np.nan
-    
-    return df
-
-
 
 def format_data(breast_data, image_data):
     # Join breast_data and image_data on Accession_Number and Breast/laterality
@@ -372,6 +353,45 @@ def generate_video_images_csv(video_df, root_dir):
     video_images_df = pd.DataFrame(video_image_data)
     video_images_df['images'] = video_images_df['images'].apply(str)  # Convert lists to string
     return video_images_df
+
+def map_breast_data_to_instances(instance_data, image_df, breast_df, column_mapping):
+    """
+    Maps data from breast_df to instance_data through image_df using a generic merge approach.
+    
+    Args:
+        instance_data: DataFrame to add columns to
+        image_df: DataFrame containing image data with linking keys
+        breast_df: DataFrame containing breast data to map from
+        column_mapping: dict where key is the column name in breast_df and value is the desired column name in instance_data
+    
+    Returns:
+        Modified instance_data DataFrame
+    """
+    # Get the columns that actually exist in breast_df
+    available_columns = [col for col in column_mapping.keys() if col in breast_df.columns]
+    
+    if not available_columns:
+        return instance_data  # No columns to map
+    
+    # Prepare the merge columns
+    merge_columns = ['Patient_ID', 'Accession_Number', 'Study_Laterality'] + available_columns
+    
+    # Perform the merge
+    merged_data = image_df[['ImageName', 'Patient_ID', 'Accession_Number', 'laterality']].merge(
+        breast_df[merge_columns],
+        left_on=['Patient_ID', 'Accession_Number', 'laterality'],
+        right_on=['Patient_ID', 'Accession_Number', 'Study_Laterality'],
+        how='left'
+    )
+    
+    # Create mappings and add to instance_data
+    for breast_col, instance_col in column_mapping.items():
+        if breast_col in available_columns:
+            image_to_value_map = dict(zip(merged_data['ImageName'], merged_data[breast_col]))
+            instance_data[instance_col] = instance_data['ImageName'].map(image_to_value_map)
+    
+    return instance_data
+
 
 def ExportAuditReport(image_df, breast_df, video_df, video_images_df):
     # -- Basic counts --
@@ -638,16 +658,14 @@ def Export_Database(CONFIG, reparse_images = True, test_subset = None):
     
     date = datetime.datetime.now().strftime("%m_%d_%Y_%H_%M_%S")
     output_dir = f'{output_dir}/export_{date}/'
-    
     print(f"Exporting dataset to {output_dir}")
     make_dirs(output_dir)
     
     # Save the config to the export location
     export_config_path = os.path.join(output_dir, 'export_config.json')
     export_config_path = os.path.normpath(export_config_path)
-    # Convert CONFIG to a JSON string
-    config_json_str = json.dumps(CONFIG, indent=4)
-    save_data(config_json_str, export_config_path)
+    save_data(json.dumps(CONFIG, indent=4), os.path.normpath(os.path.join(output_dir, 'export_config.json'))) # Convert CONFIG to a JSON string
+
     
     #Dirs
     image_csv_file = os.path.join(parsed_database, 'ImageData.csv')
@@ -680,27 +698,18 @@ def Export_Database(CONFIG, reparse_images = True, test_subset = None):
     # Always create instance_data from image_df - never None
     instance_data = image_df[['DicomHash', 'ImageName']].copy()
     
-    # Add Age to instance_data by mapping from breast_df through image_df
-    if 'AGE_AT_EVENT' in breast_df.columns:
-        # FIX: Ensure laterality case matches between dataframes
-        image_df['laterality'] = image_df['laterality'].str.upper()
-        
-        # FIX: Ensure Patient_ID data types match (optional but good practice)
-        image_df['Patient_ID'] = image_df['Patient_ID'].astype(int)
-        
-        # Fast merge-based approach instead of nested loops
-        age_merge = image_df[['ImageName', 'Patient_ID', 'Accession_Number', 'laterality']].merge(
-            breast_df[['Patient_ID', 'Accession_Number', 'Study_Laterality', 'AGE_AT_EVENT']],
-            left_on=['Patient_ID', 'Accession_Number', 'laterality'],
-            right_on=['Patient_ID', 'Accession_Number', 'Study_Laterality'],
-            how='left'
-        )
-        
-        # Create mapping dictionary from merge result
-        image_to_age_map = dict(zip(age_merge['ImageName'], age_merge['AGE_AT_EVENT']))
-        
-        # Map the ages to instance_data
-        instance_data['Age'] = instance_data['ImageName'].map(image_to_age_map)
+    
+    image_df['laterality'] = image_df['laterality'].str.upper()
+    image_df['Patient_ID'] = image_df['Patient_ID'].astype(int)
+
+    # Map all the breast data columns at once
+    column_mappings = {
+        'SYNOPTIC_REPORT': 'SYNOPTIC_REPORT',
+        'FINDINGS': 'FINDINGS', 
+        'AGE_AT_EVENT': 'Age'
+    }
+
+    instance_data = map_breast_data_to_instances(instance_data, image_df, breast_df, column_mappings)
     
     # Always add PhysicalDeltaX to instance_data for all instances
     if 'PhysicalDeltaX' in image_df.columns:
@@ -837,11 +846,6 @@ def Export_Database(CONFIG, reparse_images = True, test_subset = None):
     append_audit("export.breasts_no_data_removed", removed_breast_count)
     append_audit("export.final_breasts", remaining_breast_count)
         
-    # Fix cm data
-    image_df = Fix_CM_Data(image_df)
-    video_df = Fix_CM_Data(video_df)
-    
-
     # Val split for case data
     breast_df = PerformSplit(CONFIG, breast_df)
     

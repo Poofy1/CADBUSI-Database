@@ -92,7 +92,7 @@ def find_cm_substring(input_str):
         input_str:  string
         
     Returns:
-        list of matched substrings
+        processed numeric value or np.nan
     """
     # Regular expression to match s
     pattern = r'\d+(-\d+)?\s*cm'
@@ -107,9 +107,26 @@ def find_cm_substring(input_str):
     list_of_matches = [m.group() for m in matches]
     
     if len(list_of_matches)==0:
-        return 'unknown'
+        return np.nan
     else:
-        return list_of_matches[0]
+        # Apply the Fix_CM_Data logic here
+        value = list_of_matches[0]
+        
+        # Remove 'cm' and spaces
+        value = value.replace('cm', '').replace(' ', '')
+        
+        # Handle range values (take average)
+        if '-' in value:
+            range_values = [int(i) for i in value.split('-')]
+            value = round(np.mean(range_values))
+        else:
+            value = int(value)
+        
+        # Handle invalid values
+        if value > 25 or value == 0:
+            return np.nan
+        
+        return value
     
 def extract_descript_features( input_str, labels_dict ):
     
