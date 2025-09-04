@@ -272,7 +272,7 @@ def process_single_image(args):
         adjusted_boxes = adjust_boxes_for_crop(boxes, crop_x, crop_y)
         
         # Create and save visualization
-        debug = False
+        debug = True
         if debug:
             vis_img = create_visualization(cropped_img, adjusted_boxes, image_name, is_caliper=use_caliper)
             vis_img.save(vis_path)
@@ -464,7 +464,7 @@ if __name__ == "__main__":
         csv_path=csv_path,
         source_images_dir=source_images_dir,
         caliper_csv_path=caliper_csv_path,
-        output_dir="C:/Users/Tristan/Desktop/Yolo5/",
+        output_dir="C:/Users/Tristan/Desktop/Yolo6/",
         train_ratio=0.8,  # 80% train, 20% validation
         caliper_percentage=0.15,  # 15% of images will use caliper versions
         num_workers=None  # Set to None to use all available CPUs - 1

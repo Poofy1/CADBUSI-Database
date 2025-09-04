@@ -543,7 +543,7 @@ def main():
     """Main function to run inference"""
     
     # ========== CONFIGURATION ==========
-    IMAGE_DIR = "D:/DATA/CASBUSI/training_sets/Yolo5/images/train"
+    IMAGE_DIR = "C:/Users/Tristan/Desktop/testing"
     OUTPUT_DIR = "C:/Users/Tristan/Desktop/test_images_output"
     BASE_DIR = "D:/DATA/CASBUSI/training_sets/Yolo5/train2/"
     DATA_YAML_PATH = "D:/DATA/CASBUSI/training_sets/Yolo5/train2/args.yaml"

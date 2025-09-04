@@ -45,118 +45,23 @@ class Config_BUSI:
     modelname = "SAM"
 
 
-def get_target_data(csv_file_path, paired_only=False, limit=None):
-    """
-    Find all target images (has_calipers = False) and their corresponding caliper images if they exist.
-    
-    Logic:
-    1. Get all images with has_calipers = False as target images
-    2. For each target image, look for a corresponding caliper image that:
-       - has_calipers = True
-       - distance <= 5 and distance > 0  
-       - closest_fn matches the target image name
-    
-    Ignores pairs where either image has PhotometricInterpretation = 'RGB'
-    
-    Args:
-        csv_file_path: Path to the CSV file
-        paired_only: If True, only return target images that have corresponding caliper images
-        limit: If specified, only process this many target images (for debugging)
-    
-    Returns:
-        List of dictionaries with keys:
-        - 'clean_image': target image name (has_calipers = False)
-        - 'caliper_image': corresponding caliper image name (or None if no match)
-        - 'type': 'target_pair'
-    """
-    limit_msg = f" (processing max {limit} for debugging)" if limit else ""
-    print(f"Finding target images and their corresponding caliper images{limit_msg}...")
-    
+def get_target_data(csv_file_path, limit=None):
     # Load the CSV file
     data = read_csv(csv_file_path)
     
-    # Create a dictionary for quick lookup of all images by ImageName
-    all_images_dict = {}
-    for index, row in data.iterrows():
-        all_images_dict[row['ImageName']] = {
-            'index': index,
-            'data': row
-        }
+    # Filter out RGB images using vectorized operations
+    filtered_data = data[data['PhotometricInterpretation'] != 'RGB']
     
-    # Get all target images (has_calipers = False)
-    target_images = data[data['has_calipers'] == False]
+    # Apply limit if specified
+    if limit:
+        filtered_data = filtered_data.head(limit)
+        print(f"Reached debug limit of {limit} images, stopping...")
     
-    # Get all potential caliper images that could match targets
-    caliper_candidates = data[
-        (data['distance'] <= 5) & (data['distance'] > 0) & 
-        (data['has_calipers'] == True) & 
-        (data['closest_fn'].notna())
-    ]
+    # Get image names as list
+    images = filtered_data['ImageName'].tolist()
+    print(f"Found {len(images)}")
     
-    # Create a dictionary for quick lookup of caliper images by their closest_fn
-    caliper_lookup = {}
-    for index, caliper_row in caliper_candidates.iterrows():
-        closest_fn = caliper_row['closest_fn']
-        if closest_fn not in caliper_lookup:
-            caliper_lookup[closest_fn] = []
-        caliper_lookup[closest_fn].append({
-            'index': index,
-            'data': caliper_row
-        })
-    
-    pairs = []
-    matched_targets = 0
-    processed_count = 0
-    
-    for index, target_row in target_images.iterrows():
-        # Check limit for debugging
-        if limit and processed_count >= limit:
-            print(f"Reached debug limit of {limit} target images, stopping...")
-            break
-            
-        # Skip if target image has PhotometricInterpretation = 'RGB'
-        if target_row.get('PhotometricInterpretation') == 'RGB':
-            continue
-            
-        target_image_name = target_row['ImageName']
-        caliper_image = None
-        
-        # Look for a corresponding caliper image
-        if target_image_name in caliper_lookup:
-            # If multiple caliper images point to this target, take the first valid one
-            for caliper_info in caliper_lookup[target_image_name]:
-                caliper_data = caliper_info['data']
-                
-                # Skip if caliper image has PhotometricInterpretation = 'RGB'
-                if caliper_data.get('PhotometricInterpretation') == 'RGB':
-                    continue
-                
-                caliper_image = caliper_data['ImageName']
-                matched_targets += 1
-                break
-        
-        # If paired_only is True, skip entries without caliper pairs
-        if paired_only and caliper_image is None:
-            processed_count += 1  # Still count this as processed
-            continue
-        
-        # Create the pair dictionary
-        pair = {
-            'type': 'target_pair',
-            'clean_image': target_image_name,  # The target image (has_calipers = False)
-            'caliper_image': caliper_image     # The corresponding caliper image (or None)
-        }
-        
-        pairs.append(pair)
-        processed_count += 1
-    
-    limit_suffix = f" (debug limit: {limit})" if limit else ""
-    print(f"Found {len(pairs)} target images" + (" with caliper pairs" if paired_only else "") + limit_suffix)
-    if not paired_only:
-        print(f"Found {matched_targets} target images with corresponding caliper images")
-        print(f"Found {len(pairs) - matched_targets} target images without caliper pairs")
-    
-    return pairs
+    return images
 
 def clamp_coordinates(x1, y1, x2, y2, max_width, max_height, min_x=0, min_y=0):
     """Clamp coordinates to valid image bounds."""
@@ -280,8 +185,7 @@ def prepare_box_prompts(boxes, image_size, model_input_size):
         
         # Ensure coordinates are within model input bounds
         scaled_x1, scaled_y1, scaled_x2, scaled_y2 = clamp_coordinates(scaled_x1, scaled_y1, scaled_x2, scaled_y2, 
-                                                                        model_input_size - 1, model_input_size - 1
-                                                                        )
+                                                                        model_input_size - 1, model_input_size - 1)
         
         scaled_boxes.append([scaled_x1, scaled_y1, scaled_x2, scaled_y2])
     
@@ -330,47 +234,24 @@ def detect_calipers_yolo(image, yolo_model, confidence_threshold=0.5):
     for result in results:
         if result.boxes is not None:
             boxes = result.boxes.xyxy.cpu().numpy()  # Get boxes in xyxy format
-            confidences = result.boxes.conf.cpu().numpy()
-            
-            for box, conf in zip(boxes, confidences):
-                if conf >= confidence_threshold:
-                    x1, y1, x2, y2 = box
-                    caliper_boxes.append([int(x1), int(y1), int(x2), int(y2)])
+            for box in boxes:
+                x1, y1, x2, y2 = box
+                caliper_boxes.append([int(x1), int(y1), int(x2), int(y2)])
     
     return caliper_boxes
 
-def get_image_crop_coordinates(image_width, image_height, crop_margin=50):
-    """
-    Calculate crop coordinates for the image with some margin
-    For now, return the full image coordinates, but you can modify this
-    based on your specific cropping requirements
-    """
-    crop_x = max(0, crop_margin)
-    crop_y = max(0, crop_margin)
-    crop_x2 = min(image_width, image_width - crop_margin)
-    crop_y2 = min(image_height, image_height - crop_margin)
+def load_image(image_name, image_data_row, image_dir):
     
-    return crop_x, crop_y, crop_x2, crop_y2
-
-def load_image(caliper_path, clean_path, image_data_row, image_dir):
-    
-    # Determine which image to load and process
-    is_caliper = False
-    if caliper_path is not None:
-        # Case 1: Both caliper and clean images exist - load caliper for YOLO detection
-        target_path = caliper_path
-        is_caliper = True
-    else:
-        # Case 2: Only clean image exists - load clean image for YOLO detection
-        target_path = clean_path
-    
-    # Load the target image
-    target_path = os.path.normpath(target_path)
+    # Load the target image (always just the single image now)
+    target_path = os.path.normpath(image_name)
     target_image_path = os.path.join(image_dir, target_path)
     target_image = read_image(target_image_path, use_pil=True)
         
     if target_image.mode != 'RGB':
         target_image = target_image.convert('RGB')
+    
+    # Determine if this image has calipers based on the data
+    is_caliper = image_data_row.get('has_calipers', False)
         
     # Extract crop parameters from the data row
     crop_x = image_data_row.get('crop_x', None)
@@ -403,15 +284,13 @@ def load_image(caliper_path, clean_path, image_data_row, image_dir):
         
     return target_image, is_caliper, (crop_x, crop_y, crop_x2, crop_y2), (img_width, img_height)
             
-def process_single_image_pair(pair, image_dir, image_data_row, model, yolo_model, transform, device, encoder_input_size, save_debug_images=True, use_samus_model=True):
+def process_single_image_pair(image_name, image_dir, image_data_row, model, yolo_model, transform, device, encoder_input_size, save_debug_images=True, use_samus_model=True):
     """
     Process a single image pair to detect calipers using YOLO and optionally compute bounding boxes with SAMUS.
     
     Args:
         use_samus_model (bool): If True, runs SAMUS segmentation model. If False, only returns YOLO bounding boxes.
     """
-    caliper_path = pair['caliper_image']
-    clean_path = pair['clean_image']
     
     result = {
         'has_caliper_mask': False,
@@ -424,11 +303,11 @@ def process_single_image_pair(pair, image_dir, image_data_row, model, yolo_model
     is_caliper = False
     
     try:
-        target_image, is_caliper, crops, dim = load_image(caliper_path, clean_path, image_data_row, image_dir)
+        target_image, is_caliper, crops, dim = load_image(image_name, image_data_row, image_dir)
         crop_x, crop_y, crop_x2, crop_y2 = crops
         img_width, img_height = dim
 
-        # Detect calipers using YOLO on the CROPPED caliper image
+        # Detect boxes using YOLO on the CROPPED image
         cropped_caliper_boxes = detect_calipers_yolo(target_image, yolo_model, confidence_threshold=0.3)
 
         if len(cropped_caliper_boxes) == 0:
@@ -492,7 +371,7 @@ def process_single_image_pair(pair, image_dir, image_data_row, model, yolo_model
                     # Save the binary lesion mask (now full-sized)
                     parent_dir = os.path.dirname(os.path.normpath(image_dir))
                     lesion_mask_dir = os.path.join(parent_dir, "lesion_masks")
-                    mask_save_path = os.path.join(lesion_mask_dir, clean_path)
+                    mask_save_path = os.path.join(lesion_mask_dir, image_name)
                     
                     # Convert binary mask to 0-255 range and save (using full-sized mask)
                     mask_to_save = full_mask.astype(np.uint8)
@@ -500,7 +379,7 @@ def process_single_image_pair(pair, image_dir, image_data_row, model, yolo_model
                     result['has_caliper_mask'] = True
         
     except Exception as e:
-        print(f"Error processing pair {clean_path} -> {clean_path}: {str(e)}")
+        print(f"Error processing {image_name}: {str(e)}")
     
     # Save debug images for ALL images when requested
     if save_debug_images and target_image is not None:
@@ -552,7 +431,7 @@ def process_single_image_pair(pair, image_dir, image_data_row, model, yolo_model
             os.makedirs(full_save_dir, exist_ok=True)
             
             # Use the clean image name as the base for filename
-            base_name = clean_path.replace('.png', '').replace('.jpg', '').replace('.jpeg', '')
+            base_name = image_name.replace('.png', '').replace('.jpg', '').replace('.jpeg', '')
             debug_filename = f"{base_name}.png"
             debug_save_path = os.path.join(full_save_dir, debug_filename)
             
@@ -562,15 +441,15 @@ def process_single_image_pair(pair, image_dir, image_data_row, model, yolo_model
             print(f"Debug image saved: {debug_save_path})")
             
         except Exception as debug_e:
-            print(f"Error saving debug image for {clean_path}: {str(debug_e)}")
+            print(f"Error saving debug image for {image_name}: {str(debug_e)}")
     
     return result
 
-def process_image_pairs_multithreading(pairs, image_dir, image_data_df, model, yolo_model, transform, 
+def process_image_pairs_multithreading(image_names, image_dir, image_data_df, model, yolo_model, transform, 
                                      device, encoder_input_size, save_debug_images=False, 
                                      num_threads=6):
     """
-    Process multiple image pairs using multithreading with tqdm progress bar
+    Process multiple images using multithreading with tqdm progress bar
     """
     
     # Pre-compute lookup dictionary ONCE
@@ -578,36 +457,35 @@ def process_image_pairs_multithreading(pairs, image_dir, image_data_df, model, y
     for idx, row in image_data_df.iterrows():
         image_name_to_row[row['ImageName']] = row
     
-    def worker(pair_with_index):
-        pair_index, pair = pair_with_index
+    def worker(image_with_index):
+        image_index, image_name = image_with_index
         # O(1) dictionary lookup
-        image_name = pair['clean_image']
         image_data_row = image_name_to_row[image_name]
         
         result = process_single_image_pair(
-            pair, image_dir, image_data_row, 
+            image_name, image_dir, image_data_row, 
             model, yolo_model, transform, device, encoder_input_size, save_debug_images
         )
-        return pair_index, result  # Return both index and result
+        return image_index, result  # Return both index and result
     
-    results = [None] * len(pairs)  # Pre-allocate results array
+    results = [None] * len(image_names)  # Pre-allocate results array
     with ThreadPoolExecutor(max_workers=num_threads) as executor:
         # Submit all tasks with their indices
         futures = {
-            executor.submit(worker, (i, pair)): i 
-            for i, pair in enumerate(pairs)
+            executor.submit(worker, (i, image_name)): i 
+            for i, image_name in enumerate(image_names)
         }
         
         # Collect results with tqdm progress bar
-        with tqdm(total=len(pairs), desc="Processing image pairs") as pbar:
+        with tqdm(total=len(image_names), desc="Processing images") as pbar:
             for future in as_completed(futures):
                 try:
-                    pair_index, result = future.result()
-                    results[pair_index] = result  # ✅ Store in correct position
+                    image_index, result = future.result()
+                    results[image_index] = result
                 except Exception as e:
-                    pair_index = futures[future]
-                    print(f"Error processing {pairs[pair_index]['clean_image']}: {e}")
-                    results[pair_index] = None
+                    image_index = futures[future]
+                    print(f"Error processing {image_names[image_index]}: {e}")
+                    results[image_index] = None
                 
                 pbar.update(1)
     
@@ -692,37 +570,35 @@ def Locate_Lesions(csv_file_path, image_dir, save_debug_images=False):
     ])
     
     # Get image pairs for mask-based detection
-    pairs = get_target_data(csv_file_path)
-    
-    if not pairs:
-        print("No image pairs found for mask-based detection.")
+    image_names = get_target_data(csv_file_path)
+
+    if not image_names:
+        print("No images found for mask-based detection.")
         return None
-    
+
     # Create a mapping from ImageName to row index for faster lookup
     image_name_to_idx = {row['ImageName']: idx for idx, row in image_data.iterrows()}
-    
-    # Prepare valid pairs with their corresponding rows
-    valid_pairs = []
-    pair_to_clean_idx = {}  # Map to track which dataframe row each result corresponds to
-    
-    for pair in pairs:
-        clean_image_name = pair['clean_image']
-        
-        if clean_image_name in image_name_to_idx:
-            clean_idx = image_name_to_idx[clean_image_name]
-            valid_pairs.append(pair)
-            pair_to_clean_idx[len(valid_pairs) - 1] = clean_idx  # Map result index to dataframe index
+
+    # Prepare valid image names with their corresponding rows
+    valid_images = []
+    image_to_clean_idx = {}  # Map to track which dataframe row each result corresponds to
+
+    for image_name in image_names:
+        if image_name in image_name_to_idx:
+            clean_idx = image_name_to_idx[image_name]
+            valid_images.append(image_name)
+            image_to_clean_idx[len(valid_images) - 1] = clean_idx  # Map result index to dataframe index
         else:
-            print(f"Warning: Clean image '{clean_image_name}' not found in CSV data")
-    
-    if not valid_pairs:
-        print("No valid image pairs found.")
+            print(f"Warning: Image '{image_name}' not found in CSV data")
+
+    if not valid_images:
+        print("No valid images found.")
         return image_data
-    
-    print(f"Processing {len(valid_pairs)} image pairs...")
-    
+
+    print(f"Processing {len(valid_images)} images...")
+
     results = process_image_pairs_multithreading(
-        pairs=valid_pairs,
+        image_names=valid_images,
         image_dir=image_dir,
         image_data_df=image_data,
         model=model,
@@ -732,12 +608,12 @@ def Locate_Lesions(csv_file_path, image_dir, save_debug_images=False):
         encoder_input_size=encoder_input_size,
         save_debug_images=save_debug_images,
     )
-    
+
     # Update the dataframe with results
     processed_count = 0
     for i, result in enumerate(results):
         if result is not None:
-            clean_idx = pair_to_clean_idx[i]
+            clean_idx = image_to_clean_idx[i]
             
             # Store both pieces of information
             image_data.at[clean_idx, "caliper_boxes"] = result['caliper_boxes']
@@ -745,10 +621,10 @@ def Locate_Lesions(csv_file_path, image_dir, save_debug_images=False):
             
             processed_count += 1
         else:
-            print(f"Warning: Failed to process pair {i}")
-    
+            print(f"Warning: Failed to process image {i}")
+
     # Save updated CSV
     save_data(image_data, csv_file_path)
-    
-    print(f"Processed {processed_count} image pairs with YOLO-based caliper detection")
+
+    print(f"Processed {processed_count} images with YOLO-based caliper detection")
     return image_data
