@@ -1,12 +1,35 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-import os 
+import os, sys
+from tqdm import tqdm
+from storage_adapter import *
 env = os.path.dirname(os.path.abspath(__file__))
 
+# Parent directory (one level up)
+parent_dir = os.path.dirname(env)
+
+# Add parent directory to Python path so it can find config
+sys.path.append(parent_dir)
+
+from config import CONFIG
+
+
+storage_client = StorageClient.get_instance(
+    windir=CONFIG["WINDIR"],
+    bucket_name=CONFIG["BUCKET"]
+)
+
+bucket = CONFIG["BUCKET"]
+database = "Databases/database_2025_8_11_main"
+image_dir = f"{database}/images"
+
+breast_data = f"{database}/BreastData.csv"
+image_data = f"{database}/ImageData.csv"
+
 # Load the CSV files
-breast_data = pd.read_csv(r"C:\Users\Tristan\Desktop\Databases_database_2025_8_11_main_BreastData.csv")
-image_data = pd.read_csv(r"C:\Users\Tristan\Desktop\Databases_database_2025_8_11_main_ImageData.csv")
+breast_data = read_csv(breast_data)
+image_data = read_csv(image_data)
 
 # Convert Accession_Number to string in both datasets
 breast_data['Accession_Number'] = breast_data['Accession_Number'].astype(str)
@@ -185,7 +208,7 @@ for i, interpretation in enumerate(interpretations):
 plt.tight_layout()
 
 # Save the first graph
-plt.savefig(f'{env}\lesion_count_distribution.png', 
+plt.savefig(f'{env}/lesion_count_distribution.png', 
             dpi=300, bbox_inches='tight', facecolor='white')
 plt.show()
 
@@ -212,6 +235,65 @@ for bar, pct, count in zip(bars, birads_df['Percentage'], birads_df['Zero_Lesion
 plt.tight_layout()
 
 # Save the second graph
-plt.savefig(f'{env}\malignant_zero_lesions_by_birads.png', 
+plt.savefig(f'{env}/malignant_zero_lesions_by_birads.png', 
             dpi=300, bbox_inches='tight', facecolor='white')
 plt.show()
+
+
+
+
+
+
+# Create directory for failed YOLO images
+failed_images_dir = os.path.join(env, 'failed_yolo_images')
+os.makedirs(failed_images_dir, exist_ok=True)
+
+print("\n" + "="*80)
+print("EXTRACTING IMAGES FOR MALIGNANT CASES WITH 0 LESIONS")
+print("="*80)
+
+# Get accession numbers for malignant cases with 0 lesions
+failed_accessions = set(malignant_zero_lesions['Accession_Number'].tolist())
+print(f"Found {len(failed_accessions)} malignant cases with 0 lesions")
+
+# Filter image_data to get images for these accession numbers
+failed_images = image_data[image_data['Accession_Number'].isin(failed_accessions)]
+print(f"Total images to extract: {len(failed_images)}")
+
+# Extract and save images
+success_count = 0
+error_count = 0
+
+# Use tqdm for progress bar
+for idx, row in tqdm(failed_images.iterrows(), total=len(failed_images), desc="Extracting images"):
+    try:
+        image_filename = row['ImageName']
+        
+        # Construct the full image path in storage
+        image_path = f"{image_dir}/{image_filename}"
+        
+        # Read the image using storage adapter
+        image = read_image(image_path)
+        
+        if image is not None:
+            # Create a descriptive filename for saving
+            save_path = os.path.join(failed_images_dir, image_filename)
+            
+            # Save image using OpenCV (since read_image returns opencv format)
+            import cv2
+            cv2.imwrite(save_path, image)
+            
+            success_count += 1
+                
+        else:
+            print(f"Failed to read image: {image_path}")
+            error_count += 1
+            
+    except Exception as e:
+        print(f"Error processing image for {image_filename}: {str(e)}")
+        error_count += 1
+
+print(f"\nExtraction complete!")
+print(f"Successfully extracted: {success_count} images")
+print(f"Errors encountered: {error_count} images")
+print(f"Images saved to: {failed_images_dir}")

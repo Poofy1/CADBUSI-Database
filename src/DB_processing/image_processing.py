@@ -417,8 +417,14 @@ def analyze_images(database_path):
     db_to_process['bounding_box'] = db_to_process['ImageName'].map(pd.Series(image_masks_dict))
     
     
-    db_to_process[['crop_x', 'crop_y', 'crop_w', 'crop_h']] = pd.DataFrame(db_to_process['bounding_box'].tolist(), index=db_to_process.index)
-
+    # Fill NaN values with (None, None, None, None) before expanding
+    db_to_process['bounding_box'] = db_to_process['bounding_box'].apply(
+        lambda x: (None, None, None, None) if pd.isna(x) else x
+    )
+    db_to_process[['crop_x', 'crop_y', 'crop_w', 'crop_h']] = pd.DataFrame(
+        db_to_process['bounding_box'].tolist(), index=db_to_process.index
+    )
+    
     # Construct a temporary DataFrame with the feature extraction
     temp_df = db_to_process['description'].apply(lambda x: extract_descript_features(x, labels_dict=description_labels_dict)).apply(pd.Series)
     for column in temp_df.columns:
