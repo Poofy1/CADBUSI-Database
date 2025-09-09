@@ -57,7 +57,6 @@ def main():
     args = parse_arguments()
     
     dicom_query_file = f'{env}/raw_data/endpoint_data.csv'
-    key_output = f'{env}/encryption_key.pkl'
     output_path = os.path.join(env, "raw_data")
     
     # Handle query command
@@ -88,7 +87,10 @@ def main():
         dicom_download_remote_start(dicom_query_file, args.deploy, args.cleanup)
         
     elif args.database:
+        lesion_pathology = f'{env}/raw_data/lesion_pathology.csv'
+        lesion_anon_file = f'{env}/raw_data/lesion_anon_data.csv'
         anon_file = f'{env}/raw_data/anon_data.csv'
+        key_output = f'{env}/encryption_key.pkl'
         BUCKET_PATH = f'{CONFIG["storage"]["download_path"]}/'
         
         print(f"Starting database processing for {BUCKET_PATH}...")
@@ -96,10 +98,11 @@ def main():
         # Step 1: Encrypt IDs
         print("Step 1/5: Encrypting IDs...")
         key = encrypt_ids(dicom_query_file, anon_file, key_output)
+        key = encrypt_ids(lesion_pathology, lesion_anon_file, key_output)
         
         # Step 2: Parse DICOM files
         print("Step 2/5: Parsing and anonymizing DICOM files...")
-        Parse_Dicom_Files(CONFIG, anon_file, BUCKET_PATH, encryption_key=key)
+        Parse_Dicom_Files(CONFIG, anon_file, lesion_anon_file, BUCKET_PATH, encryption_key=key)
         
         # Step 3: Run OCR
         print("Step 3/5: Processing image data...")

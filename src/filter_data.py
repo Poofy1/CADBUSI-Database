@@ -1,6 +1,7 @@
 import os
 import pandas as pd
 from tqdm import tqdm
+import re
 from src.DB_processing.tools import append_audit
 # Get the current script directory and go back one directory
 env = os.path.dirname(os.path.abspath(__file__))
@@ -396,6 +397,114 @@ def audit_interpretations(final_df):
 
 
 
+
+def extract_cancer_type(text):
+    if pd.isna(text):
+        return "UNKNOWN"
+    
+    # Convert to uppercase for consistent matching
+    text = str(text).upper()
+    
+    # Define specific cancer type patterns (ordered by specificity)
+    cancer_patterns = [
+        # Specific carcinoma types
+        (r"INVASIVE\s+(?:GRADE\s+\d+.*?)?DUCTAL\s+CARCINOMA", "INVASIVE DUCTAL CARCINOMA"),
+        (r"INVASIVE\s+LOBULAR\s+CARCINOMA", "INVASIVE LOBULAR CARCINOMA"),
+        (r"DUCTAL\s+CARCINOMA\s+IN\s+SITU", "DUCTAL CARCINOMA IN SITU"),
+        (r"LOBULAR\s+CARCINOMA\s+IN\s+SITU", "LOBULAR CARCINOMA IN SITU"),
+        (r"INVASIVE\s+MAMMARY\s+CARCINOMA", "INVASIVE MAMMARY CARCINOMA"),
+        (r"\bDCIS\b", "DUCTAL CARCINOMA IN SITU"),
+        (r"\bLCIS\b", "LOBULAR CARCINOMA IN SITU"),
+        
+        # Other specific cancer types
+        (r"CARCINOSARCOMA", "CARCINOSARCOMA"),
+        (r"ADENOCARCINOMA", "ADENOCARCINOMA"),
+        (r"SQUAMOUS\s+CELL\s+CARCINOMA", "SQUAMOUS CELL CARCINOMA"),
+        (r"INFLAMMATORY\s+CARCINOMA", "INFLAMMATORY CARCINOMA"),
+        (r"MUCINOUS\s+CARCINOMA", "MUCINOUS CARCINOMA"),
+        (r"TUBULAR\s+CARCINOMA", "TUBULAR CARCINOMA"),
+        (r"MEDULLARY\s+CARCINOMA", "MEDULLARY CARCINOMA"),
+        (r"PAPILLARY\s+CARCINOMA", "PAPILLARY CARCINOMA"),
+        
+        # Metastatic findings
+        (r"METASTATIC\s+CARCINOMA", "METASTATIC CARCINOMA"),
+        (r"METASTATIC\s+ADENOCARCINOMA", "METASTATIC ADENOCARCINOMA"),
+        (r"MICROMETASTASIS", "MICROMETASTASIS"),
+        (r"ISOLATED\s+TUMOR\s+CELLS?", "ISOLATED TUMOR CELLS"),
+        
+        # High-risk lesions 
+        (r"MULTIFOCAL\s+ATYPICAL\s+DUCTAL\s+HYPERPLASIA", "MULTIFOCAL ATYPICAL DUCTAL HYPERPLASIA"),
+        (r"ATYPICAL\s+DUCTAL\s+HYPERPLASIA", "ATYPICAL DUCTAL HYPERPLASIA"),
+        (r"ATYPICAL\s+LOBULAR\s+HYPERPLASIA", "ATYPICAL LOBULAR HYPERPLASIA"),
+        (r"\bADH\b", "ATYPICAL DUCTAL HYPERPLASIA"),
+        (r"\bALH\b", "ATYPICAL LOBULAR HYPERPLASIA"),
+        
+        # General carcinoma (catch-all)
+        (r"INVASIVE\s+CARCINOMA", "INVASIVE CARCINOMA"),
+        (r"\bCARCINOMA\b", "CARCINOMA"),
+        
+        # Other malignancies
+        (r"SARCOMA", "SARCOMA"),
+        (r"LYMPHOMA", "LYMPHOMA"),
+        (r"MELANOMA", "MELANOMA"),
+    ]
+    
+    # Check each pattern
+    for pattern, cancer_type in cancer_patterns:
+        matches = list(re.finditer(pattern, text))
+        for match in matches:
+            # Get context around the match (100 characters before)
+            start_pos = max(0, match.start() - 100)
+            context_before = text[start_pos:match.start()]
+            
+            # Check if this is a negated finding
+            negation_patterns = [
+                r"NEGATIVE\s+FOR",
+                r"NO\s+EVIDENCE\s+OF",
+                r"FREE\s+OF",
+                r"ABSENCE\s+OF",
+                r"NO\s+",
+                r"WITHOUT",
+                r"RULED\s+OUT",
+                r"EXCLUDE[SD]?",
+            ]
+            
+            is_negated = False
+            for neg_pattern in negation_patterns:
+                if re.search(neg_pattern, context_before):
+                    is_negated = True
+                    break
+            
+            # If not negated, we found a positive cancer finding
+            if not is_negated:
+                return cancer_type
+    
+    # Check for benign/negative findings (combined)
+    benign_patterns = [
+        # Explicit negative findings
+        r"NEGATIVE\s+FOR\s+(MALIGNAN[CT]|CARCINOMA|INVASIVE|DCIS|TUMOR|METASTATIC|METASTASIS)",
+        r"NO\s+EVIDENCE\s+OF\s+(MALIGNAN[CT]|CARCINOMA|INVASIVE|DCIS|TUMOR|NEOPLASM|ATYPIA)",
+        r"ABSENCE\s+OF\s+(MALIGNAN[CT]|CARCINOMA|INVASIVE|DCIS|TUMOR|NEOPLASM)",
+        
+        # Benign findings
+        r"\bBENIGN\b",
+        r"FIBROCYSTIC",
+        r"FIBROADENOMA", 
+        r"NORMAL\s+BREAST\s+TISSUE",
+        r"SCLEROSING\s+ADENOSIS",
+        r"USUAL\s+DUCTAL\s+HYPERPLASIA",
+        r"\bPASH\b",
+        r"NEGATIVE\s+MARGIN",
+        r"NO\s+SIGNIFICANT\s+HISTOPATHOLOGY",
+    ]
+    
+    for pattern in benign_patterns:
+        if re.search(pattern, text):
+            return "BENIGN"
+    
+    return "UNKNOWN"
+
+
 def fill_pathology_accession_numbers(final_df):
     """
     Fill in accession numbers for rows with lesion_diag entries.
@@ -582,7 +691,7 @@ def create_pathology_subset_csv(final_df):
     """
     
     # Define the required columns
-    required_columns = ['PATIENT_ID', 'ACCESSION_NUMBER', 'DATE', 'final_diag', 'lesion_diag', 'SYNOPTIC_REPORT', 'Pathology_Laterality', 'path_interpretation']
+    required_columns = ['PATIENT_ID', 'ACCESSION_NUMBER', 'DATE', 'lesion_diag', 'SYNOPTIC_REPORT', 'Pathology_Laterality', 'path_interpretation']
     
     # Select only the required columns
     pathology_subset = final_df[required_columns].copy()
@@ -685,9 +794,9 @@ def create_final_dataset(rad_df, path_df, output_path):
     # Determine final interpretation
     final_df = determine_final_interpretation(final_df)
     
-    # CREATE THE PATHOLOGY SUBSET CSV
+    # CREATE THE LESION PATHOLOGY SUBSET CSV
     pathology_subset = create_pathology_subset_csv(final_df)
-    pathology_subset.to_csv(f'{output_path}/lesion_pathology.csv', index=False)
+    
     
     # Save to CSV
     final_df.to_csv(f'{output_path}/combined_dataset_debug.csv', index=False)
@@ -731,8 +840,13 @@ def create_final_dataset(rad_df, path_df, output_path):
         lambda url: url.split('/')[-1] if pd.notna(url) else None
     )
     
+    # Clean lesion pathology
+    pathology_subset = pathology_subset[pathology_subset['ACCESSION_NUMBER'].isin(final_df_us['ACCESSION_NUMBER'])]
+    pathology_subset['cancer_type'] = pathology_subset['lesion_diag'].apply(extract_cancer_type)
+    
     # Save the US-only filtered dataset
     final_df_us.to_csv(f'{env}/raw_data/endpoint_data.csv', index=False)
+    pathology_subset.to_csv(f'{output_path}/lesion_pathology.csv', index=False)
 
     # Print statistics
     print(f"Data ready with {len(final_df_us)} accessions")

@@ -628,7 +628,7 @@ def parse_anon_file(anon_location, database_path, image_df, ):
     
 
 # Main Method
-def Parse_Dicom_Files(CONFIG, anon_location, raw_storage_database, encryption_key):
+def Parse_Dicom_Files(CONFIG, anon_location, lesion_anon_file, raw_storage_database, encryption_key):
     database_path = CONFIG["DATABASE_DIR"]
     data_range = CONFIG["DEBUG_DATA_RANGE"]
     
@@ -669,5 +669,9 @@ def Parse_Dicom_Files(CONFIG, anon_location, raw_storage_database, encryption_ke
     append_audit("dicom_parsing.missing_ID_removed", removed_rows)
     
     parse_anon_file(anon_location, database_path, image_df)
+    
+    # Save lesion data
+    lesion_csv = pd.read_csv(lesion_anon_file)
+    save_data(lesion_csv, f'{database_path}/LesionData.csv')
     
     
