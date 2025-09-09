@@ -21,7 +21,7 @@ storage_client = StorageClient.get_instance(
 )
 
 bucket = CONFIG["BUCKET"]
-database = "Databases/database_2025_8_11_main"
+database = "Databases/database_2025_9_8_test"
 image_dir = f"{database}/images"
 
 breast_data = f"{database}/BreastData.csv"
@@ -64,12 +64,8 @@ lesion_counts['lesion_count_capped'] = lesion_counts['total_lesion_count'].apply
     lambda x: '>20' if x > 20 else str(x)
 )
 
-# Use LEFT JOIN to keep all breast data records
-merged_data = pd.merge(breast_data, lesion_counts, on='Accession_Number', how='left')
-
-# Fill missing lesion counts with 0 (cases that don't have image data)
-merged_data['total_lesion_count'] = merged_data['total_lesion_count'].fillna(0)
-merged_data['lesion_count_capped'] = merged_data['lesion_count_capped'].fillna('0')
+# Use INNER JOIN to keep only records that exist in both datasets
+merged_data = pd.merge(breast_data, lesion_counts, on='Accession_Number', how='inner')
 
 # Prepare data for analysis
 malignant_zero_lesions = merged_data[
@@ -244,6 +240,13 @@ plt.show()
 
 
 
+
+
+
+
+
+'''
+
 # Create directory for failed YOLO images
 failed_images_dir = os.path.join(env, 'failed_yolo_images')
 os.makedirs(failed_images_dir, exist_ok=True)
@@ -296,4 +299,4 @@ for idx, row in tqdm(failed_images.iterrows(), total=len(failed_images), desc="E
 print(f"\nExtraction complete!")
 print(f"Successfully extracted: {success_count} images")
 print(f"Errors encountered: {error_count} images")
-print(f"Images saved to: {failed_images_dir}")
+print(f"Images saved to: {failed_images_dir}")'''

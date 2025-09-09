@@ -492,14 +492,6 @@ def parse_files(CONFIG, dcm_files_list, database_path, batch_size=100):
     print("Parsing DCM Data")
     video_n_frames = CONFIG["VIDEO_SAMPLING"]
     
-    # Load current index
-    index_file = os.path.join(database_path, "IndexCounter.txt")
-    current_index = 0
-    if file_exists(index_file):
-        content = read_txt(index_file)
-        if content:
-            current_index = int(content)
-    
     print(f'New Dicom Files: {len(dcm_files_list)}')
     
     # Check if there are no new files to process
@@ -511,13 +503,12 @@ def parse_files(CONFIG, dcm_files_list, database_path, batch_size=100):
     for i in range(0, len(dcm_files_list), batch_size):
         batch = []
         for j, dcm in enumerate(dcm_files_list[i:i+batch_size]):
-            batch.append((dcm, i+j+current_index, database_path, video_n_frames))
+            batch.append((dcm, i+j, database_path, video_n_frames))
         batches.append(batch)
     
     # Process batches in parallel using ProcessPoolExecutor
     data_list = []
     failure_counter = 0
-    
     
     # Use more workers for CPU-bound tasks
     num_workers = min(32, multiprocessing.cpu_count())
@@ -535,10 +526,6 @@ def parse_files(CONFIG, dcm_files_list, database_path, batch_size=100):
             except Exception as exc:
                 print(f'Batch processing exception: {exc}')
                 failure_counter += len(futures[future])
-    
-    # Save index
-    new_index = str(current_index + len(data_list))
-    save_data(new_index, index_file)
     
     if failure_counter > 0:
         print(f'Skipped {failure_counter} DICOMS from missing data or irrelevant data')
@@ -582,8 +569,20 @@ def parse_anon_file(anon_location, database_path, image_df, ):
     image_df[['Patient_ID', 'Accession_Number']] = image_df[['Patient_ID', 'Accession_Number']].astype(str)
     breast_csv[['Patient_ID', 'Accession_Number']] = breast_csv[['Patient_ID', 'Accession_Number']].astype(str)
     
-    #image_df.to_csv(f"{env}/image_df.csv", index=False) # DEBUG
-    #anon_df.to_csv(f"{env}/anon_df.csv", index=False) # DEBUG
+    # ADD THIS: Filter to only keep rows where Accession_Number exists in both datasets
+    image_accession_numbers = set(image_df['Accession_Number'].unique())
+    breast_accession_numbers = set(breast_csv['Accession_Number'].unique())
+    
+    # Keep only matching accession numbers
+    matching_accession_numbers = image_accession_numbers.intersection(breast_accession_numbers)
+    
+    image_df = image_df[image_df['Accession_Number'].isin(matching_accession_numbers)]
+    breast_csv = breast_csv[breast_csv['Accession_Number'].isin(matching_accession_numbers)]
+    
+    total_breast_accessions = len(breast_accession_numbers)
+    non_matching_breast_accessions = len(breast_accession_numbers - matching_accession_numbers)
+    percentage_without_images = (non_matching_breast_accessions / total_breast_accessions) * 100 if total_breast_accessions > 0 else 0
+    print(f"{percentage_without_images:.1f}% of breast accessions did not have images")
     
     # Populate Has_Malignant and Has_Benign based on final_interpretation
     breast_csv['Has_Malignant'] = breast_csv['final_interpretation'] == 'MALIGNANT'
@@ -641,14 +640,6 @@ def Parse_Dicom_Files(CONFIG, anon_location, raw_storage_database, encryption_ke
     make_dirs(database_path)
     make_dirs(f'{database_path}/images/')
     make_dirs(f'{database_path}/videos/')
-    
-    # Load the list of already parsed files
-    parsed_files_list = []
-    parsed_files_list_file = f"{database_path}/ParsedFiles.txt"
-    if file_exists(parsed_files_list_file):
-        content = read_txt(parsed_files_list_file)
-        if content:
-            parsed_files_list = content.splitlines()
 
     # Get every Dicom File
     dcm_files_list = get_files_by_extension(raw_storage_database, '.dcm')
@@ -660,20 +651,6 @@ def Parse_Dicom_Files(CONFIG, anon_location, raw_storage_database, encryption_ke
         dcm_files_list = dcm_files_list[data_range[0]:data_range[1]]
         print(f'Applied Data Range: {len(dcm_files_list)}')
         append_audit("dicom_parsing.data_range", [data_range[0], data_range[1]])
-        
-        
-    # Filter out already processed files
-    files_before_filter = len(dcm_files_list)
-    parsed_files_set = set(parsed_files_list)
-    dcm_files_list = [file for file in dcm_files_list if file not in parsed_files_set]
-    files_skipped = files_before_filter - len(dcm_files_list)
-    append_audit("dicom_parsing.skipped_already_processed", files_skipped)
-
-    
-    # Update the list of parsed files and save it
-    parsed_files_list.extend(dcm_files_list)
-    content = '\n'.join(parsed_files_list)  # Convert list to string with newlines
-    save_data(content, parsed_files_list_file)
     
     # Get DCM Data
     image_df = parse_files(CONFIG, dcm_files_list, database_path)
@@ -690,7 +667,6 @@ def Parse_Dicom_Files(CONFIG, anon_location, raw_storage_database, encryption_ke
     removed_rows = original_row_count - new_row_count
     print(f"Removed {removed_rows} rows with empty values.")
     append_audit("dicom_parsing.missing_ID_removed", removed_rows)
-    
     
     parse_anon_file(anon_location, database_path, image_df)
     
