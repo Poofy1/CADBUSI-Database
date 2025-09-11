@@ -409,17 +409,15 @@ def extract_cancer_type(text):
     cancer_patterns = [
         # Specific carcinoma types
         (r"INVASIVE\s+(?:GRADE\s+\d+.*?)?DUCTAL\s+CARCINOMA", "INVASIVE DUCTAL CARCINOMA"),
-        (r"INVASIVE\s+LOBULAR\s+CARCINOMA", "INVASIVE LOBULAR CARCINOMA"),
         (r"DUCTAL\s+CARCINOMA\s+IN\s+SITU", "DUCTAL CARCINOMA IN SITU"),
         (r"LOBULAR\s+CARCINOMA\s+IN\s+SITU", "LOBULAR CARCINOMA IN SITU"),
         (r"INVASIVE\s+MAMMARY\s+CARCINOMA", "INVASIVE MAMMARY CARCINOMA"),
         (r"\bDCIS\b", "DUCTAL CARCINOMA IN SITU"),
         (r"\bLCIS\b", "LOBULAR CARCINOMA IN SITU"),
+        (r"ADENOID\s+CYSTIC\s+CARCINOMA", "ADENOID CYSTIC CARCINOMA"),
         
         # Other specific cancer types
-        (r"CARCINOSARCOMA", "CARCINOSARCOMA"),
         (r"ADENOCARCINOMA", "ADENOCARCINOMA"),
-        (r"SQUAMOUS\s+CELL\s+CARCINOMA", "SQUAMOUS CELL CARCINOMA"),
         (r"INFLAMMATORY\s+CARCINOMA", "INFLAMMATORY CARCINOMA"),
         (r"MUCINOUS\s+CARCINOMA", "MUCINOUS CARCINOMA"),
         (r"TUBULAR\s+CARCINOMA", "TUBULAR CARCINOMA"),
@@ -440,13 +438,16 @@ def extract_cancer_type(text):
         (r"\bALH\b", "ATYPICAL LOBULAR HYPERPLASIA"),
         
         # General carcinoma (catch-all)
-        (r"INVASIVE\s+CARCINOMA", "INVASIVE CARCINOMA"),
+        (r"(?:INVASIVE|INFILTRATIVE)\s+LOBULAR\s+CARCINOMA", "INVASIVE LOBULAR CARCINOMA"),
+        (r"(?:INVASIVE|INFILTRATIVE)\s+CARCINOMA", "INVASIVE CARCINOMA"),
         (r"\bCARCINOMA\b", "CARCINOMA"),
         
         # Other malignancies
-        (r"SARCOMA", "SARCOMA"),
-        (r"LYMPHOMA", "LYMPHOMA"),
-        (r"MELANOMA", "MELANOMA"),
+        (r"SARCOMA", "OTHER"),
+        (r"LYMPHOMA", "OTHER"),
+        (r"CARCINOSARCOMA", "OTHER"),
+        (r"MELANOMA", "OTHER"),
+        (r"SQUAMOUS\s+CELL\s+CARCINOMA", "OTHER"),
     ]
     
     # Check each pattern

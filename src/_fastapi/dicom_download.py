@@ -14,8 +14,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import CONFIG
 
 # Cloud Build configuration
-CONTENT_DIR = os.path.dirname(os.path.abspath(__file__))  # Directory of this script
-FASTAPI_DIR = os.path.join(CONTENT_DIR, "_fastapi")  # Assuming _fastapi directory exists
+FASTAPI_DIR = os.path.dirname(os.path.abspath(__file__))  # Directory of this script
 TARGET_TAG = f"us-central1-docker.pkg.dev/{CONFIG['env']['project_id']}/{CONFIG['cloud_run']['ar']}/{CONFIG['cloud_run']['ar_name']}:{CONFIG['cloud_run']['version']}"
 
 # The URL will be obtained after deployment
