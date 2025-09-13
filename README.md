@@ -146,6 +146,7 @@ This will:
 - The labeled data will be held in the specified `LABELBOX_LABELS` folder with this internal layout:
     - `/labelbox_data/InstanceLabels.csv`: Recorded instance labels from Label Box. This data is universal across databases as it includes the dicom `FileName` for each instance.
     - If there exists a boolean column named `Reject Image`, this will be used to ignore the specified image when exporting the database. This column will be excluded on export. 
+    - Labeled instance data will referenced and stored using the dicom data hash ID `'DicomHash'`, generated from the unanonymized raw dicom file.
 
 ### Exports
 - Exporting will create a new folder in the specified directory `EXPORT_DIR`, with todays date on it so that it does not overwrite previous exports.
