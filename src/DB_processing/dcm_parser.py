@@ -625,7 +625,26 @@ def parse_anon_file(anon_location, database_path, image_df, ):
     append_audit("dicom_parsing.video_success", len(video_df))
     append_audit("dicom_parsing.breast_success", len(breast_csv))
     
+def deduplicate_dcm_files(dcm_files_list):
+    """Remove duplicate files based on DicomHash (filename without extension)"""
+    seen_hashes = set()
+    unique_files = []
+    duplicate_count = 0
     
+    for dcm_file in dcm_files_list:
+        # Generate the same hash that would be created during processing
+        dicom_hash = os.path.splitext(os.path.basename(dcm_file))[0]
+        
+        if dicom_hash not in seen_hashes:
+            seen_hashes.add(dicom_hash)
+            unique_files.append(dcm_file)
+        else:
+            duplicate_count += 1
+    
+    if duplicate_count > 0:
+        print(f'Removed {duplicate_count} duplicate DICOM files')
+    
+    return unique_files
 
 # Main Method
 def Parse_Dicom_Files(CONFIG, anon_location, lesion_anon_file, raw_storage_database, encryption_key):
@@ -652,6 +671,10 @@ def Parse_Dicom_Files(CONFIG, anon_location, lesion_anon_file, raw_storage_datab
         print(f'Applied Data Range: {len(dcm_files_list)}')
         append_audit("dicom_parsing.data_range", [data_range[0], data_range[1]])
     
+    # Remove duplicates from current file list
+    dcm_files_list = deduplicate_dcm_files(dcm_files_list)
+    print(f'Unique DICOM files to process: {len(dcm_files_list)}')
+
     # Get DCM Data
     image_df = parse_files(CONFIG, dcm_files_list, database_path)
     image_df = image_df.rename(columns={'PatientID': 'Patient_ID'})
