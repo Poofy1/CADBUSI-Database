@@ -316,6 +316,11 @@ def prepare_yolo_dataset(csv_path, source_images_dir, caliper_csv_path, output_d
     print("\nLoading main CSV file...")
     df = pd.read_csv(csv_path)
     
+    # Filter to only include breast area
+    print(f"Total images before area filtering: {len(df)}")
+    df = df[df['area'] == 'breast'].copy()
+    print(f"Images after filtering for area='breast': {len(df)}")
+
     # Filter rows with valid caliper_boxes
     df['parsed_boxes'] = df['caliper_boxes'].apply(parse_caliper_boxes)
     df_valid = df[df['parsed_boxes'].apply(len) > 0].copy()
@@ -464,8 +469,8 @@ if __name__ == "__main__":
         csv_path=csv_path,
         source_images_dir=source_images_dir,
         caliper_csv_path=caliper_csv_path,
-        output_dir="C:/Users/Tristan/Desktop/Yolo6/",
+        output_dir="C:/Users/Tristan/Desktop/Yolo7/",
         train_ratio=0.8,  # 80% train, 20% validation
-        caliper_percentage=0.15,  # 15% of images will use caliper versions
+        caliper_percentage=0.10,  # 10% of images will use caliper versions
         num_workers=None  # Set to None to use all available CPUs - 1
     )

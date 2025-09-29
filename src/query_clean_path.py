@@ -7,71 +7,24 @@ from src.DB_processing.tools import append_audit
 env = os.path.dirname(os.path.abspath(__file__))
 env = os.path.dirname(env)  # Go back one directory
 
-def determine_laterality(row):
-    """Determine laterality from pathology report, with improved handling of multi-part reports."""
+def determine_lesion_laterality(lesion_text):
+    """Simple laterality determination for individual lesion diagnosis."""
+    if pd.isna(lesion_text):
+        return "UNKNOWN"
     
-    def check_text_for_laterality(text):
-        if pd.isna(text):
-            return None
-        
-        text = text.upper()
-        
-        # Track mentions of each side in multi-part reports
-        right_mentions = 0
-        left_mentions = 0
-        
-        # Split by lettered parts
-        parts = re.split(r'(?:^|\s)([A-Z])[\.\)]\s+', text)
-        
-        # If no parts found, check the whole text
-        if len(parts) <= 1:
-            if "RIGHT" in text and "LEFT" in text:
-                return None
-            elif "RIGHT" in text and "BILATERAL" not in text:
-                return "RIGHT"
-            elif "LEFT" in text and "BILATERAL" not in text:
-                return "LEFT"
-        else:
-            # Process each part separately
-            for i in range(1, len(parts), 2):
-                if i+1 < len(parts):
-                    part_text = parts[i+1]
-                    if "RIGHT" in part_text:
-                        right_mentions += 1
-                    if "LEFT" in part_text:
-                        left_mentions += 1
-            
-            # Determine overall laterality based on part counts
-            if right_mentions > 0 and left_mentions > 0:
-                return None
-            elif right_mentions > 0:
-                return "RIGHT"
-            elif left_mentions > 0:
-                return "LEFT"
-        
-        # If no laterality is found
-        return None
+    text = str(lesion_text).upper()
     
-    # First try final_diag column if it exists
-    if 'final_diag' in row and not pd.isna(row['final_diag']):
-        laterality = check_text_for_laterality(row['final_diag'])
-        if laterality is not None:
-            return laterality
+    has_right = "RIGHT" in text
+    has_left = "LEFT" in text
     
-    # Then try PART_DESCRIPTION column
-    if 'PART_DESCRIPTION' in row and not pd.isna(row['PART_DESCRIPTION']):
-        laterality = check_text_for_laterality(row['PART_DESCRIPTION'])
-        if laterality is not None:
-            return laterality
-    
-    # If not found or previous columns are empty, try SPECIMEN_NOTE
-    if 'SPECIMEN_NOTE' in row and not pd.isna(row['SPECIMEN_NOTE']):
-        laterality = check_text_for_laterality(row['SPECIMEN_NOTE'])
-        if laterality is not None:
-            return laterality
-    
-    # If still not found, return None
-    return None
+    if has_right and has_left:
+        return "UNKNOWN"  # Both sides mentioned
+    elif has_right:
+        return "RIGHT"
+    elif has_left:
+        return "LEFT"
+    else:
+        return "UNKNOWN"  # Neither mentioned
 
 
 def split_lesions(pathology_df):
@@ -326,7 +279,7 @@ def filter_path_data(pathology_df, output_path):
     append_audit("query_clean_path.path_post_lesion_count", len(expanded_df))
     
     # Re-determine laterality after splitting (for rows that didn't have it set during splitting)
-    expanded_df['Pathology_Laterality'] = expanded_df.apply(determine_laterality, axis=1)
+    expanded_df['Pathology_Laterality'] = expanded_df['lesion_diag'].apply(determine_lesion_laterality)
     
     # Apply diagnosis classification
     expanded_df['path_interpretation'] = expanded_df['lesion_diag'].apply(categorize_pathology)

@@ -648,7 +648,7 @@ def ExportAuditReport(image_df, breast_df, video_df, video_images_df):
         
 def Export_Database(CONFIG, reparse_images = True, test_subset = None):
     #Debug Tools
-    use_reject_system = True # True = removes rejects from training
+    use_reject_system = False # True = removes rejects from training
     
     output_dir = CONFIG["EXPORT_DIR"]
     parsed_database = CONFIG["DATABASE_DIR"]

@@ -47,7 +47,7 @@ def process_image(args):
         'ContentHash': content_hash
     }
 
-def create_image_hash_csv(database_path, num_threads=16):
+def create_image_hash_csv(database_path, num_threads=16, limit=None):
     """Create CSV with ImageName, DicomHash, and ContentHash"""
     
     images_dir = os.path.join(database_path, 'images')
@@ -80,6 +80,12 @@ def create_image_hash_csv(database_path, num_threads=16):
     
     print(f"Found {len(png_files)} PNG files")
     
+    # Apply limit if specified
+    if limit is not None and limit > 0:
+        png_files = png_files[:limit]
+        image_paths = image_paths[:limit]
+        print(f"Limited to processing first {len(png_files)} files")
+    
     # Prepare arguments for multiprocessing
     tasks = []
     for i, image_name in enumerate(png_files):
@@ -107,58 +113,137 @@ def create_image_hash_csv(database_path, num_threads=16):
     print(f"Processed {len(results)} images successfully")
     print(f"Output saved to: {output_file}")
     
-def process_hash_comparison():
+def link_hashes():
     # File paths
-    csv1_path = "D:/DATA/CASBUSI/hash_translation4.csv"
-    csv2_path = "C:/Users/Tristan/Desktop/hash_translation.csv"
-    output_path = "C:/Users/Tristan/Desktop/hash_translation5.csv"
+    new_hash_path = "C:/Users/Tristan/Desktop/newHashes.csv"  # hashed new database
+    old_hash_path = "C:/Users/Tristan/Desktop/oldHashes.csv"  # hashed old database
+    old_image_path = "D:/DATA/CASBUSI/database/ImageData.csv"  # old database
+    old_label_path = "D:/DATA/CASBUSI/labelbox_data/InstanceLabels.csv"  # old labels
     
+    print("Loading data files...")
+    
+    # Load all CSV files
     try:
-        # Read the CSV files
-        print("Reading CSV files...")
-        df1 = pd.read_csv(csv1_path)
-        df2 = pd.read_csv(csv2_path)
+        new_hash_df = pd.read_csv(new_hash_path)
+        old_hash_df = pd.read_csv(old_hash_path)
+        old_image_df = pd.read_csv(old_image_path)
+        old_label_df = pd.read_csv(old_label_path)
         
-        print(f"CSV1 loaded: {len(df1)} rows")
-        print(f"CSV2 loaded: {len(df2)} rows")
-        
-        # Create a set of ContentHash values from csv2 for efficient lookup
-        csv2_hashes = set(df2['ContentHash'])
-        print(f"Unique hashes in CSV2: {len(csv2_hashes)}")
-        
-        # Add the new column 'Exists_In_New' based on whether ContentHash exists in csv2
-        df1['Exists_In_New'] = df1['ContentHash'].isin(csv2_hashes)
-        
-        # Calculate the percentage of matching rows
-        matching_count = df1['Exists_In_New'].sum()
-        total_count = len(df1)
-        percentage = (matching_count / total_count) * 100
-        
-        print(f"\nResults:")
-        print(f"Total rows in CSV1: {total_count}")
-        print(f"Matching rows: {matching_count}")
-        print(f"Percentage of CSV1 rows with matching ContentHash in CSV2: {percentage:.2f}%")
-        
-        # Save the result to a new CSV file
-        df1.to_csv(output_path, index=False)
-        print(f"\nOutput saved to: {output_path}")
-        
-        # Display some sample results
-        print(f"\nSample of results:")
-        print(df1[['ImageName', 'ContentHash', 'Exists_In_New']].head(10))
-        
-        return percentage, matching_count, total_count
+        print(f"Loaded {len(new_hash_df)} rows from newHashes.csv")
+        print(f"Loaded {len(old_hash_df)} rows from oldHashes.csv")
+        print(f"Loaded {len(old_image_df)} rows from ImageData.csv")
+        print(f"Loaded {len(old_label_df)} rows from InstanceLabels.csv")
         
     except FileNotFoundError as e:
-        print(f"Error: File not found - {e}")
-    except KeyError as e:
-        print(f"Error: Column not found - {e}")
-        print("Please check that the CSV files have the expected column names.")
+        print(f"Error loading file: {e}")
+        return
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Error reading CSV files: {e}")
+        return
+    
+    # Step 1: Merge old_image_path with old_label_path using FileName
+    print("\nStep 1: Merging ImageData with InstanceLabels on FileName...")
+    
+    output1 = pd.merge(
+        old_label_df,  # Keep all columns from labels
+        old_image_df[['FileName', 'DicomHash']],  # Only take FileName and DicomHash from images
+        on='FileName',
+        how='inner'  # Only keep matching rows
+    )
+    
+    print(f"Output1: {len(output1)} rows after merging on FileName")
+    
+    # Save output1
+    output1_path = "C:/Users/Tristan/Desktop/output1_merged_labels_images.csv"
+    output1.to_csv(output1_path, index=False)
+    print(f"Saved output1 to: {output1_path}")
+    
+    # Step 2: Compare new_hash_path with old_hash_path using ContentHash
+    print("\nStep 2: Merging hash files on ContentHash...")
+    
+    output2 = pd.merge(
+        old_hash_df,  # Keep all old hash data
+        new_hash_df[['ContentHash', 'DicomHash']].rename(columns={'DicomHash': 'RealDicomHash'}),  # Add DicomHash as RealDicomHash
+        on='ContentHash',
+        how='inner'  # Only keep matching rows
+    )
+    
+    print(f"Output2: {len(output2)} rows after merging on ContentHash")
+    
+    # Save output2
+    output2_path = "C:/Users/Tristan/Desktop/output2_merged_hashes.csv"
+    output2.to_csv(output2_path, index=False)
+    print(f"Saved output2 to: {output2_path}")
+    
+    # Step 3: Merge output1 and output2
+    print("\nStep 3: Final merge of output1 and output2...")
+    
+    # Need to determine the merge key between output1 and output2
+    # Assuming we merge on DicomHash from output1 with DicomHash from output2
+    final_output = pd.merge(
+        output1,  # Keep all output1 data
+        output2[['DicomHash', 'RealDicomHash']],  # Only take DicomHash and RealDicomHash from output2
+        on='DicomHash',
+        how='left'  # Keep all output1 rows, add RealDicomHash where available
+    )
+    
+    print(f"Final output: {len(final_output)} rows")
+    print(f"Rows with RealDicomHash: {final_output['RealDicomHash'].notna().sum()}")
+    
+    # Save final output
+    final_output_path = "C:/Users/Tristan/Desktop/final_linked_data.csv"
+    final_output.to_csv(final_output_path, index=False)
+    print(f"Saved final output to: {final_output_path}")
+    
+    # Step 4: Create filtered final output with specific columns
+    print("\nStep 4: Creating filtered final output...")
+    
+    # Select only the specified columns
+    required_columns = [
+        'Reject Image',
+        'Only Normal Tissue',
+        'Cyst Lesion Present',
+        'Benign Lesion Present',
+        'Malignant Lesion Present',
+        'RealDicomHash'
+    ]
+    
+    # Check if all required columns exist
+    missing_columns = [col for col in required_columns if col not in final_output.columns]
+    if missing_columns:
+        print(f"Warning: Missing columns: {missing_columns}")
+        print(f"Available columns: {list(final_output.columns)}")
+        # Use only the columns that exist
+        available_columns = [col for col in required_columns if col in final_output.columns]
+        filtered_output = final_output[available_columns].copy()
+    else:
+        filtered_output = final_output[required_columns].copy()
+    
+    # Rename RealDicomHash to DicomHash
+    if 'RealDicomHash' in filtered_output.columns:
+        filtered_output = filtered_output.rename(columns={'RealDicomHash': 'DicomHash'})
+    
+    print(f"Filtered output: {len(filtered_output)} rows")
+    print(f"Final columns: {list(filtered_output.columns)}")
+    
+    # Save filtered final output
+    filtered_output_path = "C:/Users/Tristan/Desktop/final_filtered_data.csv"
+    filtered_output.to_csv(filtered_output_path, index=False)
+    print(f"Saved filtered final output to: {filtered_output_path}")
+    
+    # Display summary information
+    print("\n=== SUMMARY ===")
+    print(f"Step 1 - Labels + Images: {len(output1)} rows")
+    print(f"Step 2 - Hash matching: {len(output2)} rows")
+    print(f"Step 3 - Final merge: {len(final_output)} rows")
+    print(f"Step 4 - Filtered output: {len(filtered_output)} rows")
+    print(f"Filtered columns: {list(filtered_output.columns)}")
+    
+    return filtered_output
+
 
 if __name__ == "__main__":
     StorageClient.get_instance(CONFIG["WINDIR"], CONFIG["BUCKET"])
     
-    #process_hash_comparison()
-    create_image_hash_csv(database_path=CONFIG["DATABASE_DIR"], num_threads=32)
+    link_hashes()
+    #create_image_hash_csv(database_path=CONFIG["DATABASE_DIR"], num_threads=32)
