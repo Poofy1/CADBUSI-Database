@@ -16,17 +16,13 @@ from src.ML_processing.caliper_model import *
 from src.ML_processing.mask_model import *
 from src.DB_processing.tools import get_reader, reader, append_audit
 
-
-# configuration
-description_kw = ['breast','lt','long','rt','trans','area','palpated','axilla','areolar','radial','marked','supraclavicular','oblique','contrast']
-
 description_labels_dict = {
     'area':{'breast':['breast'],
             'axilla':['axilla', 'axila', 'axlla'],
             'supraclavicular':['superclavicular','supraclavicular'],
             'subclavicular':['subclavicular','subclavcular']},
-    'laterality':{'left':['lt','left', 'eft', 'ft'],
-                  'right':['rt','right', 'ight', 'ght', 'ht']},
+    'laterality':{'left':['lt','left', 'eft', 'ft', 'e f t'],
+                  'right':['rt','right', 'ight', 'ght', 'ht', 'r t ']},
     'orientation':{'long':['long', 'lon', 'ong'],
                     'trans':['trans', 'tran', 'tra', 'ans'],
                     'anti-radial':['anti-rad','anti-radial'],
