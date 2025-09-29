@@ -12,7 +12,7 @@ def determine_lesion_laterality(lesion_text):
     if pd.isna(lesion_text):
         return "UNKNOWN"
     
-    text = str(lesion_text).upper()
+    text = str(lesion_text).upper().replace(" ", "")
     
     has_right = "RIGHT" in text
     has_left = "LEFT" in text
@@ -43,8 +43,8 @@ def split_lesions(pathology_df):
         
         text = str(row['final_diag']).upper()
         
-        # Split by lettered parts
-        parts = re.split(r'(?:^|\s)([A-Z])[\.\)]\s+', text)
+        # Split by lettered parts - only at start or after newline
+        parts = re.split(r'(?:^|\n)([A-Z])[\.\)]\s+', text)
         
         # Process parts (every odd index is a letter, followed by content)
         valid_parts_found = False
@@ -54,38 +54,36 @@ def split_lesions(pathology_df):
                 part_letter = parts[i]
                 part_text = parts[i+1].strip()
                 
+                # Truncate at COMMENT or REPORT (case-insensitive)
+                text_upper = part_text.upper()
+                comment_pos = text_upper.find("COMMENT")
+                report_pos = text_upper.find("REPORT")
+                
+                # Find the earliest position (excluding -1 for not found)
+                truncate_pos = -1
+                if comment_pos != -1 and report_pos != -1:
+                    truncate_pos = min(comment_pos, report_pos)
+                elif comment_pos != -1:
+                    truncate_pos = comment_pos
+                elif report_pos != -1:
+                    truncate_pos = report_pos
+                
+                if truncate_pos != -1:
+                    part_text = part_text[:truncate_pos].strip()
+                
                 # Only include parts that have actual content
                 if part_text:
                     valid_parts_found = True
                     part_count += 1
                     part_row = row.to_dict()
                     part_row['lesion_diag'] = f"{part_letter}. {part_text}"  # New column instead of overwriting final_diag
-                    
-                    # Determine laterality for this part
-                    if "LEFT" in part_text:
-                        part_row['Pathology_Laterality'] = "LEFT"
-                    elif "RIGHT" in part_text:
-                        part_row['Pathology_Laterality'] = "RIGHT"
-                    else:
-                        part_row['Pathology_Laterality'] = "UNSPECIFIED"
-                        
-                    part_row['Pathology_Part'] = part_letter
                     expanded_rows.append(part_row)
             i += 2
         
-        # If no valid parts were found, keep the original row with laterality
+        # If no valid parts were found, keep the original row
         if not valid_parts_found:
             original_row = row.to_dict()
             original_row['lesion_diag'] = None  # No individual lesion for unsplit cases
-            
-            # Check for laterality in the full text
-            if "LEFT" in text:
-                original_row['Pathology_Laterality'] = "LEFT"
-            elif "RIGHT" in text:
-                original_row['Pathology_Laterality'] = "RIGHT"
-            else:
-                original_row['Pathology_Laterality'] = "UNSPECIFIED"
-                
             expanded_rows.append(original_row)
     
     # Create a new dataframe from the expanded rows
