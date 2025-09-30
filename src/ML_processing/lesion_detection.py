@@ -107,49 +107,6 @@ def clean_mask(mask_binary, min_object_area=200):
     return cleaned_mask
 
 
-def calculate_mask_coverage_in_boxes(mask_binary, bounding_boxes):
-    """
-    Calculate the percentage of mask pixels that fall within the given bounding boxes.
-    
-    Args:
-        mask_binary: 2D numpy array with binary mask (0s and 1s)
-        bounding_boxes: List of bounding boxes in format [x1, y1, x2, y2]
-    
-    Returns:
-        float: Percentage of mask pixels that are inside any of the boxes (0-100)
-    """
-    if len(bounding_boxes) == 0:
-        return 0.0
-    
-    # Count total mask pixels
-    total_mask_pixels = np.sum(mask_binary > 0)
-    
-    if total_mask_pixels == 0:
-        return 0.0
-    
-    # Create a combined mask for all bounding boxes
-    mask_height, mask_width = mask_binary.shape
-    combined_box_mask = np.zeros_like(mask_binary, dtype=bool)
-    
-    for bbox in bounding_boxes:
-        x1, y1, x2, y2 = bbox
-        
-        # Ensure coordinates are within bounds
-        x1, y1, x2, y2 = clamp_coordinates(int(x1), int(y1), int(x2), int(y2), mask_width, mask_height)
-                
-        # Add this box to the combined mask
-        if x2 > x1 and y2 > y1:
-            combined_box_mask[y1:y2, x1:x2] = True
-    
-    # Count mask pixels that fall within any box
-    mask_pixels_in_boxes = np.sum((mask_binary > 0) & combined_box_mask)
-    
-    # Calculate percentage
-    coverage_percentage = (mask_pixels_in_boxes / total_mask_pixels) * 100
-    
-    return coverage_percentage
-
-
 def prepare_box_prompts(boxes, image_size, model_input_size):
     """
     Prepare box prompts for the model by scaling coordinates to model input size.
@@ -354,15 +311,6 @@ def process_single_image_pair(image_name, image_dir, image_data_row, model, yolo
 
                     # Clean the mask: fill holes and remove small islands
                     mask_resized = clean_mask(mask_resized)
-
-                    # Calculate mask coverage within bounding boxes (using cropped mask and adjusted boxes)
-                    """
-                    coverage_percentage = calculate_mask_coverage_in_boxes(mask_resized, cropped_caliper_boxes)
-                    if coverage_percentage < 50:
-                        print(f"Skipping image {clean_path}: Only {coverage_percentage:.1f}% of mask is inside boxes")
-                        return result
-                    """ # was unnessesary? 
-                    
 
                     # Place the cropped mask in the correct position within the full mask
                     full_mask = np.zeros((img_height, img_width), dtype=np.uint8)

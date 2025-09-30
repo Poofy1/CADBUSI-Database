@@ -392,7 +392,7 @@ def Mask_Lesions(image_data, input_dir, output_dir, max_workers=None, debug=Fals
     """
     image_dir = f"{input_dir}/images/"
     mask_dir = f"{input_dir}/lesion_masks/"
-    lesion_output_dir = f"{output_dir}/images/"
+    lesion_output_dir = f"{output_dir}/lesions/"
 
     # Create output directory
     os.makedirs(lesion_output_dir, exist_ok=True)
@@ -459,6 +459,9 @@ def Mask_Lesions(image_data, input_dir, output_dir, max_workers=None, debug=Fals
         if idx in processing_results and processing_results[idx]['success']:
             result = processing_results[idx]
             
+            # Store the original image name
+            original_image_name = row['ImageName']
+            
             # Parse lesion images (comma-separated)
             lesion_images_str = result['lesion_images']
             if lesion_images_str:
@@ -480,6 +483,11 @@ def Mask_Lesions(image_data, input_dir, output_dir, max_workers=None, debug=Fals
                 # Create a new row for each lesion image
                 for i, lesion_img in enumerate(lesion_images):
                     new_row = row.copy()
+                    
+                    # Add the original image source
+                    new_row['ImageSource'] = original_image_name
+                    
+                    # Update ImageName to the lesion image
                     new_row['ImageName'] = lesion_img
                     
                     # Set individual dimensions
@@ -503,21 +511,31 @@ def Mask_Lesions(image_data, input_dir, output_dir, max_workers=None, debug=Fals
                     new_lesion_rows.append(new_row)
         # If processing failed, we skip this original row (it won't be in the final result)
     
-    # Return only the new lesion rows, not the non-masked images
+    # Define columns to keep
+    columns_to_keep = [
+        'Patient_ID',
+        'Accession_Number',
+        'PhotometricInterpretation',
+        'DicomHash',
+        'ImageSource',
+        'ImageName',
+        'inpainted_from'
+    ]
+    
+    # Return only the new lesion rows with selected columns
     if new_lesion_rows:
         lesion_df = pd.DataFrame(new_lesion_rows)
-        # Ensure columns match
-        for col in image_data.columns:
+        
+        # Keep only specified columns (add empty string if column doesn't exist)
+        for col in columns_to_keep:
             if col not in lesion_df.columns:
                 lesion_df[col] = ""
         
-        # Reorder columns to match original
-        lesion_df = lesion_df[image_data.columns]
-        
-        result_df = lesion_df  # Return only the lesion rows
+        # Select only the columns we want to keep
+        result_df = lesion_df[columns_to_keep]
     else:
-        # No lesion images created, return empty DataFrame with same structure
-        result_df = pd.DataFrame(columns=image_data.columns)
+        # No lesion images created, return empty DataFrame with selected columns
+        result_df = pd.DataFrame(columns=columns_to_keep)
 
     print(f"Successfully processed: {processed_count} images | Failed: {failed_count} | Total lesions created: {total_lesions_created}")
     print(f"Original rows with masks: {len(masked_images)} | New lesion rows created: {len(new_lesion_rows)}")

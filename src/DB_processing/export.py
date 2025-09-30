@@ -228,11 +228,12 @@ def PerformSplit(CONFIG, df):
     return df
 
 def format_data(breast_data, image_data):
-    # Join breast_data and image_data on Accession_Number and Breast/laterality
-    data = pd.merge(breast_data, image_data, left_on=['Accession_Number', 'Study_Laterality'], 
-                    right_on=['Accession_Number', 'laterality'], suffixes=('', '_image_data'))
+    # Join breast_data and image_data ONLY on Accession_Number (not laterality)
+    data = pd.merge(breast_data, image_data, 
+                    on=['Accession_Number'], 
+                    suffixes=('', '_image_data'))
 
-    # Remove columns from image_data that also exist in breast_data
+    # Remove duplicate columns from image_data
     for col in breast_data.columns:
         if col + '_image_data' in data.columns:
             data.drop(col + '_image_data', axis=1, inplace=True)
@@ -240,7 +241,7 @@ def format_data(breast_data, image_data):
     # Check if lesion_images column exists
     has_lesion_images = 'lesion_images' in data.columns
     
-    # Keep only the specified columns
+    # Keep only the specified columns (removed Study_Laterality from group by)
     columns_to_keep = ['Patient_ID', 'Accession_Number', 'Study_Laterality', 'Has_Malignant', 'Has_Benign', 'Valid', 'AGE_AT_EVENT']
     
     if has_lesion_images:
@@ -250,13 +251,14 @@ def format_data(breast_data, image_data):
     
     data = data[columns_to_keep]
     
-    # Group by Accession_Number and Breast, and aggregate
+    # Group ONLY by Accession_Number (not Study_Laterality)
     agg_dict = {
         'Patient_ID': 'first',
+        'Study_Laterality': 'first',  # Keep the laterality value but don't group by it
         'Has_Malignant': 'first', 
         'Has_Benign': 'first',
         'Valid': 'first',
-        'AGE_AT_EVENT': 'first'  # Add this to prevent issues
+        'AGE_AT_EVENT': 'first'
     }
     
     if has_lesion_images:
@@ -264,10 +266,12 @@ def format_data(breast_data, image_data):
     else:
         agg_dict['ImageName'] = lambda x: list(x)
     
-    # Reset index before groupby to ensure clean indices
+    # Reset index before groupby
     data = data.reset_index(drop=True)
     
-    data = data.groupby(['Accession_Number', 'Study_Laterality']).agg(agg_dict).reset_index()
+    # Group by Accession_Number only - this will keep BILATERAL and aggregate all images
+    data = data.groupby('Accession_Number').agg(agg_dict).reset_index()
+    
     
     # Process lesion images and create Images column
     if has_lesion_images:
@@ -653,7 +657,6 @@ def Export_Database(CONFIG, reparse_images = True, test_subset = None):
     output_dir = CONFIG["EXPORT_DIR"]
     parsed_database = CONFIG["DATABASE_DIR"]
     labelbox_path = CONFIG["LABELBOX_LABELS"]
-    focus_type = CONFIG["FOCUS_TYPE"]
     
     
     date = datetime.datetime.now().strftime("%m_%d_%Y_%H_%M_%S")
@@ -692,13 +695,11 @@ def Export_Database(CONFIG, reparse_images = True, test_subset = None):
         
         print(f"Subset data sizes - Breast: {len(breast_df)}, Image: {len(image_df)}, Video: {len(video_df)}")
     
-    if focus_type == 'lesion':
-        image_df = Mask_Lesions(image_df, parsed_database, output_dir)
+    lesion_df = Mask_Lesions(image_df, parsed_database, output_dir)
         
     # Always create instance_data from image_df - never None
     instance_data = image_df[['DicomHash', 'ImageName']].copy()
-    
-    
+      
     image_df['laterality'] = image_df['laterality'].str.upper()
     image_df['Patient_ID'] = image_df['Patient_ID'].astype(int)
 
@@ -815,10 +816,9 @@ def Export_Database(CONFIG, reparse_images = True, test_subset = None):
         print(f"Filtered instance_data: {initial_instance_count} -> {filtered_instance_count} instances")
 
     if reparse_images:   
-        if focus_type == 'breast':
-            # Crop the images for the relevant studies
-            Crop_Images(image_df, parsed_database, output_dir)
-            Crop_Videos(video_df, parsed_database, output_dir)
+        # Crop the images for the relevant studies
+        Crop_Images(image_df, parsed_database, output_dir)
+        Crop_Videos(video_df, parsed_database, output_dir)
             
     # Convert 'Patient_ID' columns to integers
     labeled_df['Patient_ID'] = labeled_df['Patient_ID'].astype(int).astype(str)
@@ -858,7 +858,7 @@ def Export_Database(CONFIG, reparse_images = True, test_subset = None):
         video_paths = video_df.groupby(['Accession_Number', 'laterality'])['ImagesPath'].agg(list).to_dict()
         train_data['VideoPaths'] = train_data.apply(lambda row: video_paths.get((row['Accession_Number'], row['Study_Laterality']), []), axis=1)
         
-        if reparse_images and focus_type == 'breast':  
+        if reparse_images:  
             video_images_df = generate_video_images_csv(video_df, output_dir)
             save_data(video_images_df, os.path.join(output_dir, 'VideoImages.csv'))
         else:
@@ -875,6 +875,7 @@ def Export_Database(CONFIG, reparse_images = True, test_subset = None):
     save_data(video_df, os.path.join(output_dir, 'VideoData.csv'))
     save_data(image_df, os.path.join(output_dir, 'ImageData.csv'))
     save_data(train_data, os.path.join(output_dir, 'TrainData.csv'))
+    save_data(lesion_df, os.path.join(output_dir, 'LesionData.csv'))
     if instance_data is not None:
         save_data(instance_data, os.path.join(output_dir, 'InstanceData.csv'))
     
