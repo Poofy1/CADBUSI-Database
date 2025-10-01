@@ -365,20 +365,26 @@ def cleanup_resources(delete_cloud_run=False):
         subprocess.run([
             "gcloud", "pubsub", "subscriptions", "delete", CONFIG['env']['subscription_name'],
             f"--project={CONFIG['env']['project_id']}", "--quiet"
-        ], check=True)
-        print(f"Subscription '{CONFIG['env']['subscription_name']}' deleted.")
+        ], check=True, capture_output=True, text=True)
+        print(f"Deleted subscription '{CONFIG['env']['subscription_name']}'")
     except subprocess.CalledProcessError as e:
-        print(f"Failed to delete subscription '{CONFIG['env']['subscription_name']}': {e}")
+        if "NOT_FOUND" in e.stderr or "not found" in e.stderr.lower():
+            print(f"  Subscription '{CONFIG['env']['subscription_name']}' not found (already deleted or never created)")
+        else:
+            print(f"Failed to delete subscription: {e.stderr.strip()}")
     
     # Delete topic
     try:
         subprocess.run([
             "gcloud", "pubsub", "topics", "delete", CONFIG['env']['topic_name'],
             f"--project={CONFIG['env']['project_id']}", "--quiet"
-        ], check=True)
-        print(f"Topic '{CONFIG['env']['topic_name']}' deleted.")
+        ], check=True, capture_output=True, text=True)
+        print(f"✓ Deleted topic '{CONFIG['env']['topic_name']}'")
     except subprocess.CalledProcessError as e:
-        print(f"Failed to delete topic '{CONFIG['env']['topic_name']}': {e}")
+        if "NOT_FOUND" in e.stderr or "not found" in e.stderr.lower():
+            print(f"  Topic '{CONFIG['env']['topic_name']}' not found (already deleted or never created)")
+        else:
+            print(f"Failed to delete topic: {e.stderr.strip()}")
     
     # Delete Cloud Run service if requested
     if delete_cloud_run:
@@ -386,11 +392,15 @@ def cleanup_resources(delete_cloud_run=False):
             cr_name = CONFIG['cloud_run']['ar_name'].replace("_", "-")
             subprocess.run([
                 "gcloud", "run", "services", "delete", cr_name,
-                f"--region={CONFIG['env']['region']}", f"--project={CONFIG['env']['project_id']}", "--quiet"
-            ], check=True)
-            print(f"Cloud Run service '{cr_name}' deleted.")
+                f"--region={CONFIG['env']['region']}", 
+                f"--project={CONFIG['env']['project_id']}", "--quiet"
+            ], check=True, capture_output=True, text=True)
+            print(f"Deleted Cloud Run service '{cr_name}'")
         except subprocess.CalledProcessError as e:
-            print(f"Failed to delete Cloud Run service: {e}")
+            if "could not be found" in e.stderr.lower() or "not found" in e.stderr.lower():
+                print(f"  Cloud Run service '{cr_name}' not found (already deleted or never created)")
+            else:
+                print(f"Failed to delete Cloud Run service: {e.stderr.strip()}")
         
         # Also delete the container image
         try:
@@ -398,10 +408,15 @@ def cleanup_resources(delete_cloud_run=False):
             subprocess.run([
                 "gcloud", "artifacts", "docker", "images", "delete", 
                 registry, "--quiet", "--delete-tags"
-            ], check=True)
-            print(f"Container image '{registry}' deleted.")
+            ], check=True, capture_output=True, text=True)
+            print(f"Deleted container image '{CONFIG['cloud_run']['ar_name']}'")
         except subprocess.CalledProcessError as e:
-            print(f"Failed to delete container image: {e}")
+            if "NOT_FOUND" in e.stderr or "not found" in e.stderr.lower():
+                print(f"  Container image not found (already deleted or never created)")
+            else:
+                print(f"Failed to delete container image: {e.stderr.strip()}")
+    
+    print("\nCleanup complete")
 
 
 def get_existing_cloud_run_url():
