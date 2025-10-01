@@ -6,6 +6,7 @@ from src.DB_processing.tools import append_audit
 # Get the current script directory and go back one directory
 env = os.path.dirname(os.path.abspath(__file__))
 env = os.path.dirname(env)  # Go back one directory
+env = os.path.dirname(env)  # Go back one directory
 
 def determine_lesion_laterality(lesion_text):
     """Simple laterality determination for individual lesion diagnosis."""

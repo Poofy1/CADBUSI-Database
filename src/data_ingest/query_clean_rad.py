@@ -3,8 +3,10 @@ import os
 import pandas as pd
 import re
 from src.DB_processing.tools import append_audit
+from src.data_ingest.findings_parser import add_ultrasound_classifications
 # Get the current script directory and go back one directory
 env = os.path.dirname(os.path.abspath(__file__))
+env = os.path.dirname(env)  # Go back one directory
 env = os.path.dirname(env)  # Go back one directory
 
 
@@ -574,6 +576,8 @@ def filter_rad_data(radiology_df, output_path):
     results = radiology_df.apply(check_for_biopsy, axis=1)
     radiology_df['is_biopsy'] = results.str[0]
     radiology_df['is_us_biopsy'] = results.str[1]
+    
+    radiology_df = add_ultrasound_classifications(radiology_df)
     
     # Add previous worst MG column
     radiology_df = add_previous_worst_mg_column(radiology_df)

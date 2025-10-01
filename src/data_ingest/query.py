@@ -7,7 +7,7 @@ from src.DB_processing.tools import append_audit
 # Get the current script directory and go back one directory
 env = os.path.dirname(os.path.abspath(__file__))
 env = os.path.dirname(env)  # Go back one directory
-
+env = os.path.dirname(env)  # Go back one directory
 
 BREAST_FILTER = """'IMG3425','IMG3426','IMG10897','IMG3571','IMG3557','IMG3558','IMG4636','IMG4637','IMG1100','IMG3506','IMG3545',
                   'IMG3508','IMG616','IMG3566','IMG1974','IMG3543','IMG3245','IMG3507','IMG3546','IMG3509','IMG1950','IMG3567',

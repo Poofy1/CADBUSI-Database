@@ -2,11 +2,11 @@ import ssl
 ssl._create_default_https_context = ssl._create_unverified_context
 
 from src._fastapi.dicom_download import *
-from src.query import *
+from src.data_ingest.query import *
 from src.encrypt_keys import *
-from src.query_clean_path import filter_path_data
-from src.query_clean_rad import filter_rad_data
-from src.filter_data import create_final_dataset
+from src.data_ingest.query_clean_path import filter_path_data
+from src.data_ingest.query_clean_rad import filter_rad_data
+from src.data_ingest.filter_data import create_final_dataset
 
 from src.DB_processing.image_processing import analyze_images
 from src.DB_processing.data_selection import Select_Data
