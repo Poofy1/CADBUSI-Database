@@ -1,7 +1,7 @@
 import ssl
 ssl._create_default_https_context = ssl._create_unverified_context
 
-from src._fastapi.dicom_download import *
+from src.dicom_downloader.dicom_download import *
 from src.data_ingest.query import *
 from src.encrypt_keys import *
 from src.data_ingest.query_clean_path import filter_path_data
