@@ -60,13 +60,7 @@ def ProcessVideoData(database_path):
     for nf in missing_features:
         video_df[nf] = None
     
-    # Check if 'processed' column exists, if not, create it and set all to False
-    if 'processed' not in video_df.columns:
-        video_df['processed'] = False
-
-    # Only keep rows where 'processed' is False
-    db_to_process = video_df[video_df['processed'] != True]
-    db_to_process['processed'] = False
+    db_to_process = video_df
     
     # Check if 'ImagesPath' column exists - if not, create empty DataFrame and return
     if 'ImagesPath' not in db_to_process.columns:
@@ -111,8 +105,6 @@ def ProcessVideoData(database_path):
     image_masks_dict = get_video_ultrasound_region(video_folder_path, filtered_first_images)
     valid_masks = sum(1 for mask in image_masks_dict.values() if mask is not None)
     append_audit("video_processing.extracted_crop_regions", valid_masks)
-    
-    db_to_process['processed'] = True
     
     descriptions = modify_keys(descriptions)
     image_masks_dict = modify_keys(image_masks_dict)

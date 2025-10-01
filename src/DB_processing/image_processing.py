@@ -367,17 +367,9 @@ def analyze_images(database_path):
     for nf in missing_features:
         image_df[nf] = None
     
-    
-    
     image_df['labeled'] = False
     
-    # Check if 'processed' column exists, if not, create it and set all to False
-    if 'processed' not in image_df.columns:
-        image_df['processed'] = False
-
-    # Only keep rows where 'processed' is False
-    db_to_process = image_df[image_df['processed'] != True]
-    db_to_process['processed'] = False
+    db_to_process = image_df
     append_audit("image_processing.input_images", len(db_to_process))
 
     print("Finding OCR Masks")

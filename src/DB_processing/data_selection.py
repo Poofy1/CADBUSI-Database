@@ -4,25 +4,6 @@ import concurrent.futures
 from functools import partial
 tqdm.pandas()
 
-def add_labeling_categories(db):
-    db['label_cat'] = ''
-
-    for idx, row in db.iterrows():
-        if row['label']:
-            orient = row['orientation']
-            image_type = row['PhotometricInterpretation']
-            if image_type == 'RGB':
-                label_cat = 'doppler'
-            elif orient in ['trans', 'long']:
-                label_cat = orient
-            else:
-                label_cat = 'other'
-            
-            db.at[idx, 'label_cat'] = label_cat
-
-    return db
-
-
 def choose_images_to_label(db, breast_df, database_path):
     initial_count = len(db)
     db['label'] = True
@@ -334,10 +315,6 @@ def Select_Data(database_path, only_labels):
     image_folder_path = f"{database_path}/images/"
     db_out = read_csv(input_file)
     breast_df = read_csv(breast_file)
-    
-    # Check if 'processed' column exists, if not create it
-    if 'processed' not in db_out.columns:
-        db_out['processed'] = False
 
     # Remove rows with missing data in crop_x, crop_y, crop_w, crop_h
     rows_before = len(db_out)
@@ -348,8 +325,7 @@ def Select_Data(database_path, only_labels):
     if only_labels:
         db_to_process = db_out
     else:
-        # Filter the rows where 'processed' is False
-        db_to_process = db_out[db_out['processed'] == False]
+        db_to_process = db_out
 
         print("Finding Similar Images")
         accession_ids = db_to_process['Accession_Number'].unique()
@@ -368,10 +344,6 @@ def Select_Data(database_path, only_labels):
                 progress.update()
 
     db_to_process = choose_images_to_label(db_to_process, breast_df, database_path)
-    db_to_process = add_labeling_categories(db_to_process)
-    
-    # Update 'processed' status to True for processed rows and merge back to the original dataframe
-    db_to_process['processed'] = True
     # List all columns that are common to both dataframes
     common_columns = db_out.columns.intersection(db_to_process.columns)
 
