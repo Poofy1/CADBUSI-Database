@@ -351,13 +351,7 @@ def process_csv_file(csv_file, bucket_name=None, bucket_path=None):
     print(f"Wait for bucket storage to fill up to {num_published} new folders, then cleanup with: python main.py --cleanup")
 
 
-def cleanup_resources(delete_cloud_run=False):
-    """
-    Delete created resources.
-    
-    Args:
-        delete_cloud_run (bool): Whether to delete the Cloud Run service
-    """
+def cleanup_resources():
     print("Cleaning up resources...")
     
     # Delete subscription
@@ -379,42 +373,41 @@ def cleanup_resources(delete_cloud_run=False):
             "gcloud", "pubsub", "topics", "delete", CONFIG['env']['topic_name'],
             f"--project={CONFIG['env']['project_id']}", "--quiet"
         ], check=True, capture_output=True, text=True)
-        print(f"✓ Deleted topic '{CONFIG['env']['topic_name']}'")
+        print(f"Deleted topic '{CONFIG['env']['topic_name']}'")
     except subprocess.CalledProcessError as e:
         if "NOT_FOUND" in e.stderr or "not found" in e.stderr.lower():
             print(f"  Topic '{CONFIG['env']['topic_name']}' not found (already deleted or never created)")
         else:
             print(f"Failed to delete topic: {e.stderr.strip()}")
     
-    # Delete Cloud Run service if requested
-    if delete_cloud_run:
-        try:
-            cr_name = CONFIG['cloud_run']['ar_name'].replace("_", "-")
-            subprocess.run([
-                "gcloud", "run", "services", "delete", cr_name,
-                f"--region={CONFIG['env']['region']}", 
-                f"--project={CONFIG['env']['project_id']}", "--quiet"
-            ], check=True, capture_output=True, text=True)
-            print(f"Deleted Cloud Run service '{cr_name}'")
-        except subprocess.CalledProcessError as e:
-            if "could not be found" in e.stderr.lower() or "not found" in e.stderr.lower():
-                print(f"  Cloud Run service '{cr_name}' not found (already deleted or never created)")
-            else:
-                print(f"Failed to delete Cloud Run service: {e.stderr.strip()}")
-        
-        # Also delete the container image
-        try:
-            registry = f"us-central1-docker.pkg.dev/{CONFIG['env']['project_id']}/{CONFIG['cloud_run']['ar']}/{CONFIG['cloud_run']['ar_name']}"
-            subprocess.run([
-                "gcloud", "artifacts", "docker", "images", "delete", 
-                registry, "--quiet", "--delete-tags"
-            ], check=True, capture_output=True, text=True)
-            print(f"Deleted container image '{CONFIG['cloud_run']['ar_name']}'")
-        except subprocess.CalledProcessError as e:
-            if "NOT_FOUND" in e.stderr or "not found" in e.stderr.lower():
-                print(f"  Container image not found (already deleted or never created)")
-            else:
-                print(f"Failed to delete container image: {e.stderr.strip()}")
+    # Delete Cloud Run service
+    try:
+        cr_name = CONFIG['cloud_run']['ar_name'].replace("_", "-")
+        subprocess.run([
+            "gcloud", "run", "services", "delete", cr_name,
+            f"--region={CONFIG['env']['region']}", 
+            f"--project={CONFIG['env']['project_id']}", "--quiet"
+        ], check=True, capture_output=True, text=True)
+        print(f"Deleted Cloud Run service '{cr_name}'")
+    except subprocess.CalledProcessError as e:
+        if "could not be found" in e.stderr.lower() or "not found" in e.stderr.lower():
+            print(f"  Cloud Run service '{cr_name}' not found (already deleted or never created)")
+        else:
+            print(f"Failed to delete Cloud Run service: {e.stderr.strip()}")
+    
+    # Also delete the container image
+    try:
+        registry = f"us-central1-docker.pkg.dev/{CONFIG['env']['project_id']}/{CONFIG['cloud_run']['ar']}/{CONFIG['cloud_run']['ar_name']}"
+        subprocess.run([
+            "gcloud", "artifacts", "docker", "images", "delete", 
+            registry, "--quiet", "--delete-tags"
+        ], check=True, capture_output=True, text=True)
+        print(f"Deleted container image '{CONFIG['cloud_run']['ar_name']}'")
+    except subprocess.CalledProcessError as e:
+        if "NOT_FOUND" in e.stderr or "not found" in e.stderr.lower():
+            print(f"  Container image not found (already deleted or never created)")
+        else:
+            print(f"Failed to delete container image: {e.stderr.strip()}")
     
     print("\nCleanup complete")
 
@@ -457,7 +450,7 @@ def dicom_download_remote_start(csv_file=None, deploy=False, cleanup=False):
     
     # Handle cleanup first - this can be run without other flags
     if cleanup:
-        cleanup_resources(delete_cloud_run=True)
+        cleanup_resources()
         return 0
     
     # For other operations, we need a CSV file

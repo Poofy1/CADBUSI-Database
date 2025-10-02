@@ -4,8 +4,7 @@ import concurrent.futures
 from functools import partial
 tqdm.pandas()
 
-def choose_images_to_label(db, breast_df, database_path):
-    initial_count = len(db)
+def choose_images_to_label(db):
     db['label'] = True
     
     #Remove images that are too dark
@@ -343,7 +342,7 @@ def Select_Data(database_path, only_labels):
                     db_to_process.update(result)
                 progress.update()
 
-    db_to_process = choose_images_to_label(db_to_process, breast_df, database_path)
+    db_to_process = choose_images_to_label(db_to_process)
     # List all columns that are common to both dataframes
     common_columns = db_out.columns.intersection(db_to_process.columns)
 

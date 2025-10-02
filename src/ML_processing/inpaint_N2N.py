@@ -119,6 +119,7 @@ def Inpaint_Dataset_N2N(csv_file_path, input_folder):
             new_row = row.copy()
             new_row['ImageName'] = new_filename
             new_row['inpainted_from'] = original_filename  # Store original filename
+            new_row['has_calipers'] = False
             new_row['label'] = True  # Set label to True for the inpainted version
             new_rows.append(new_row)
     
