@@ -23,7 +23,7 @@ def Inpaint_Dataset_N2N(csv_file_path, input_folder):
     
     # Filter the data - only process rows that haven't been inpainted yet
     processed_data = data[
-        (data['label'] == True) & 
+        (data['distance'] > 5) & # no clean duplicate available 
         ((data['has_calipers'] == True) | (data['PhotometricInterpretation'] == 'RGB')) & 
         (data['inpainted_from'].isna())
     ]
@@ -111,9 +111,6 @@ def Inpaint_Dataset_N2N(csv_file_path, input_folder):
             
             # Save inpainted image with new filename (keep original)
             save_data(final_image, new_image_path)
-            
-            # Update the original row: set label to False
-            data.loc[index, 'label'] = False
             
             # Create a copy of the current row for the inpainted version
             new_row = row.copy()

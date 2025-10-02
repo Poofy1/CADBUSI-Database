@@ -19,14 +19,9 @@ def choose_images_to_label(db):
     dark_count_after = len(db[db['label']])
     dark_removed = dark_count_before - dark_count_after
     
-    
-    # loop over caliper rows and tag twin images
+    # Mark all rows with calipers as label = False
     caliper_count_before = len(db[db['label']])
-    caliper_rows = db[db['has_calipers']]
-    for idx, row in caliper_rows.iterrows():
-        distance = row['distance']
-        if distance <= 5:
-            db.at[idx,'label'] = False
+    db.loc[db['has_calipers'], 'label'] = False
     caliper_count_after = len(db[db['label']])
     caliper_removed = caliper_count_before - caliper_count_after
     

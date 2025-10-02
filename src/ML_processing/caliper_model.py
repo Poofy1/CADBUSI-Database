@@ -64,33 +64,43 @@ class Net(torch.nn.Module):
 
 
 def find_calipers(images_dir, model_name, db_to_process, image_size=256):
-    model = Net()
-    model.load_state_dict(torch.load(f"{env}/models/{model_name}.pt"))
-    model = model.to(device)
-    model.eval()
+    # Separate RGB images from non-RGB images
+    rgb_images = db_to_process[db_to_process['PhotometricInterpretation'] == 'RGB'].copy()
+    non_rgb_images = db_to_process[db_to_process['PhotometricInterpretation'] != 'RGB'].copy()
     
-    # Data loader
-    preprocess = transforms.Compose([
-        transforms.Resize((image_size, image_size)),
-        transforms.Grayscale(num_output_channels=1), 
-        transforms.ToTensor(),
-        transforms.Normalize([0.5], [0.5]),
-    ])
-    dataset = MyDataset(images_dir, db_to_process, transform=preprocess)
-    dataloader = DataLoader(dataset, batch_size=64, num_workers=8, pin_memory=True)
-
     results = []
     
-    with torch.no_grad():
-        for images, filenames in tqdm(dataloader, total=len(dataloader)):
-            images = images.to(device)
-            with autocast('cuda'):
-                has_calipers_pred = model(images)
-            raw_predictions = has_calipers_pred.cpu().view(-1).tolist()
-            boolean_predictions = (has_calipers_pred > 0.5).cpu().view(-1).tolist()
-            
-            # Pair each filename with both its boolean prediction and raw prediction value
-            result_triplets = list(zip(filenames, boolean_predictions, raw_predictions))
-            results.extend(result_triplets)
+    # Add RGB images with False predictions
+    for img_name in rgb_images['ImageName'].values:
+        results.append((img_name, False, -1))
+    
+    # Only process non-RGB images if there are any
+    if len(non_rgb_images) > 0:
+        model = Net()
+        model.load_state_dict(torch.load(f"{env}/models/{model_name}.pt"))
+        model = model.to(device)
+        model.eval()
+        
+        # Data loader
+        preprocess = transforms.Compose([
+            transforms.Resize((image_size, image_size)),
+            transforms.Grayscale(num_output_channels=1), 
+            transforms.ToTensor(),
+            transforms.Normalize([0.5], [0.5]),
+        ])
+        dataset = MyDataset(images_dir, non_rgb_images, transform=preprocess)
+        dataloader = DataLoader(dataset, batch_size=64, num_workers=8, pin_memory=True)
+        
+        with torch.no_grad():
+            for images, filenames in tqdm(dataloader, total=len(dataloader), desc="Processing non-RGB images"):
+                images = images.to(device)
+                with autocast('cuda'):
+                    has_calipers_pred = model(images)
+                raw_predictions = has_calipers_pred.cpu().view(-1).tolist()
+                boolean_predictions = (has_calipers_pred > 0.5).cpu().view(-1).tolist()
+                
+                # Pair each filename with both its boolean prediction and raw prediction value
+                result_triplets = list(zip(filenames, boolean_predictions, raw_predictions))
+                results.extend(result_triplets)
 
     return results
