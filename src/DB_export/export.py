@@ -228,7 +228,7 @@ def PerformSplit(CONFIG, df):
     
     return df
 
-def format_data(breast_data, image_data):
+def create_train_set(breast_data, image_data):
     # Join breast_data and image_data
     data = pd.merge(breast_data, image_data, 
                     on=['Accession_Number'], 
@@ -362,15 +362,159 @@ def map_breast_data_to_instances(instance_data, image_df, breast_df, column_mapp
     
     return instance_data
         
-        
-def Export_Database(CONFIG, reparse_images = True, test_subset = None):
-    #Debug Tools
-    use_reject_system = False # True = removes rejects from training
+def apply_filters(image_df, video_df, breast_df, instance_data, CONFIG):
+    """
+    Apply all quality and relevance filters to the image and video data.
     
+    Returns:
+        tuple: (filtered_image_df, filtered_video_df, filtered_instance_data, audit_stats)
+    """
+    audit_stats = {}
+    
+    # Track initial counts
+    audit_stats['init_images'] = len(image_df)
+    audit_stats['init_videos'] = len(video_df)
+    
+    # Only labeled images
+    image_df = image_df[image_df['label'] == True]
+    image_df = image_df.drop(['label', 'area'], axis=1)
+    
+    # Only images/videos with valid patient IDs
+    valid_patient_ids = breast_df['Patient_ID'].unique()
+    image_df = image_df[image_df['Patient_ID'].isin(valid_patient_ids)]
+    video_df = video_df[video_df['Patient_ID'].isin(valid_patient_ids)]
+    
+    # Remove videos with unknown laterality
+    video_df = video_df[video_df['laterality'] != 'unknown']
+    
+    # Remove bad aspect ratios
+    min_aspect_ratio = CONFIG.get('MIN_ASPECT_RATIO', 0.5)
+    max_aspect_ratio = CONFIG.get('MAX_ASPECT_RATIO', 4.0)
+    
+    before_aspect_count = len(image_df)
+    image_df = image_df[
+        (image_df['crop_aspect_ratio'] >= min_aspect_ratio) & 
+        (image_df['crop_aspect_ratio'] <= max_aspect_ratio)
+    ]
+    audit_stats['bad_aspect_removed'] = before_aspect_count - len(image_df)
+    
+    # Remove images that are too small
+    min_dimension = CONFIG.get('MIN_DIMENSION', 200)
+    
+    before_dimension_count = len(image_df)
+    image_df = image_df[
+        (image_df['crop_w'] >= min_dimension) & 
+        (image_df['crop_h'] >= min_dimension)
+    ]
+    audit_stats['too_small_removed'] = before_dimension_count - len(image_df)
+    
+    # Update instance_data to match remaining images
+    if instance_data is not None:
+        initial_instance_count = len(instance_data)
+        final_image_hashes = set(image_df['DicomHash'])
+        instance_data = instance_data[instance_data['DicomHash'].isin(final_image_hashes)]
+        
+        filtered_instance_count = len(instance_data)
+        audit_stats['instances_filtered'] = initial_instance_count - filtered_instance_count
+        print(f"Filtered instance_data: {initial_instance_count} -> {filtered_instance_count} instances")
+    
+    # Log audit statistics
+    for key, value in audit_stats.items():
+        append_audit(f"export.{key}", value)
+    
+    return image_df, video_df, instance_data
+
+def build_instance_data(image_df, breast_df, instance_labels_csv_file, use_reject_system):
+    """
+    Build and enrich instance_data with all necessary fields from image_df, breast_df, and labelbox.
+    
+    Returns:
+        tuple: (instance_data, image_df) - image_df may be filtered if reject system is used
+    """
+    # Create base instance_data
+    instance_data = image_df[['DicomHash', 'ImageName']].copy()
+    
+    # Map breast data columns
+    column_mappings = {
+        'SYNOPTIC_REPORT': 'SYNOPTIC_REPORT',
+        'FINDINGS': 'FINDINGS', 
+        'AGE_AT_EVENT': 'Age'
+    }
+    instance_data = map_breast_data_to_instances(instance_data, image_df, breast_df, column_mappings)
+    
+    # Add PhysicalDeltaX
+    if 'PhysicalDeltaX' in image_df.columns:
+        image_to_physicaldelta_map = dict(zip(image_df['ImageName'], image_df['PhysicalDeltaX']))
+        instance_data['PhysicalDeltaX'] = instance_data['ImageName'].map(image_to_physicaldelta_map)
+    
+    # Add image dimensions
+    if 'crop_w' in image_df.columns:
+        image_to_width_map = dict(zip(image_df['ImageName'], image_df['crop_w'].fillna(0).astype(int)))
+        instance_data['image_w'] = instance_data['ImageName'].map(image_to_width_map)
+    
+    if 'crop_h' in image_df.columns:
+        image_to_height_map = dict(zip(image_df['ImageName'], image_df['crop_h'].fillna(0).astype(int)))
+        instance_data['image_h'] = instance_data['ImageName'].map(image_to_height_map)
+    
+    # Merge labelbox data if available
+    if file_exists(instance_labels_csv_file):
+        labelbox_instance_data = read_csv(instance_labels_csv_file)
+        
+        instance_data = instance_data.merge(
+            labelbox_instance_data, 
+            on='DicomHash', 
+            how='left',
+            suffixes=('', '_labelbox')
+        )
+        
+        if 'ImageName_labelbox' in instance_data.columns:
+            instance_data.drop(columns=['ImageName_labelbox'], inplace=True)
+        
+        instance_data = instance_data[instance_data['DicomHash'].isin(image_df['DicomHash'])]
+        
+        # Handle reject system
+        if 'Reject Image' in instance_data.columns:
+            if use_reject_system:
+                before_count = len(image_df)
+                rejected_images = instance_data[instance_data['Reject Image'] == True][['DicomHash', 'ImageName']]
+                instance_data = instance_data[instance_data['Reject Image'] != True]
+                image_df = image_df[~image_df['DicomHash'].isin(rejected_images['DicomHash'])]
+                
+                removed_count = before_count - len(image_df)
+                append_audit("export.labeled_reject_removed", removed_count)
+                instance_data.drop(columns=['Reject Image'], inplace=True)
+            else:
+                instance_data['Reject Image'] = instance_data['Reject Image'].fillna(False)
+    
+    return instance_data, image_df
+
+def normalize_dataframes(image_df, video_df, breast_df):
+    """
+    Standardize data types and formats across all dataframes.
+    
+    Returns:
+        tuple: (image_df, video_df, breast_df)
+    """
+    # Normalize laterality to uppercase (do once for each df)
+    image_df['laterality'] = image_df['laterality'].str.upper()
+    video_df['laterality'] = video_df['laterality'].str.upper()
+    
+    # Standardize Patient_ID as string
+    image_df['Patient_ID'] = image_df['Patient_ID'].astype(int).astype(str)
+    breast_df['Patient_ID'] = breast_df['Patient_ID'].astype(int).astype(str)
+    
+    # Standardize Accession_Number as string
+    image_df['Accession_Number'] = image_df['Accession_Number'].astype(str)
+    breast_df['Accession_Number'] = breast_df['Accession_Number'].astype(str)
+    
+    return image_df, video_df, breast_df
+
+def Export_Database(CONFIG, reparse_images = True, test_subset = None):
+
+    use_reject_system = False # True = removes rejects from training
     output_dir = CONFIG["EXPORT_DIR"]
     parsed_database = CONFIG["DATABASE_DIR"]
     labelbox_path = CONFIG["LABELBOX_LABELS"]
-    
     
     date = datetime.datetime.now().strftime("%m_%d_%Y_%H_%M_%S")
     output_dir = f'{output_dir}/export_{date}/'
@@ -378,11 +522,8 @@ def Export_Database(CONFIG, reparse_images = True, test_subset = None):
     make_dirs(output_dir)
     
     # Save the config to the export location
-    export_config_path = os.path.join(output_dir, 'export_config.json')
-    export_config_path = os.path.normpath(export_config_path)
     save_data(json.dumps(CONFIG, indent=4), os.path.normpath(os.path.join(output_dir, 'export_config.json'))) # Convert CONFIG to a JSON string
 
-    
     #Dirs
     image_csv_file = os.path.join(parsed_database, 'ImageData.csv')
     breast_csv_file = os.path.join(parsed_database, 'BreastData.csv') 
@@ -427,141 +568,17 @@ def Export_Database(CONFIG, reparse_images = True, test_subset = None):
         # Fill NaN values with empty string for images without lesions
         image_df['LesionImageName'] = image_df['LesionImageName'].fillna('')
         
-    # Always create instance_data from image_df - never None
-    instance_data = image_df[['DicomHash', 'ImageName']].copy()
-      
-    image_df['laterality'] = image_df['laterality'].str.upper()
-    image_df['Patient_ID'] = image_df['Patient_ID'].astype(int)
-
-    # Map all the breast data columns at once
-    column_mappings = {
-        'SYNOPTIC_REPORT': 'SYNOPTIC_REPORT',
-        'FINDINGS': 'FINDINGS', 
-        'AGE_AT_EVENT': 'Age'
-    }
-
-    instance_data = map_breast_data_to_instances(instance_data, image_df, breast_df, column_mappings)
-    
-    # Always add PhysicalDeltaX to instance_data for all instances
-    if 'PhysicalDeltaX' in image_df.columns:
-        image_to_physicaldelta_map = dict(zip(image_df['ImageName'], image_df['PhysicalDeltaX']))
-        instance_data['PhysicalDeltaX'] = instance_data['ImageName'].map(image_to_physicaldelta_map)
-    
-    # Add image dimensions to instance_data from crop dimensions
-    if 'crop_w' in image_df.columns:
-        image_to_width_map = dict(zip(image_df['ImageName'], image_df['crop_w'].fillna(0).astype(int)))
-        instance_data['image_w'] = instance_data['ImageName'].map(image_to_width_map)
-
-    if 'crop_h' in image_df.columns:
-        image_to_height_map = dict(zip(image_df['ImageName'], image_df['crop_h'].fillna(0).astype(int)))
-        instance_data['image_h'] = instance_data['ImageName'].map(image_to_height_map)
-        
-    # If instance labels file exists, merge that data
-    if file_exists(instance_labels_csv_file):
-        labelbox_instance_data = read_csv(instance_labels_csv_file)
-        
-        # Merge labelbox data with our base instance_data
-        instance_data = instance_data.merge(
-            labelbox_instance_data, 
-            on='DicomHash', 
-            how='left',
-            suffixes=('', '_labelbox')
-        )
-        
-        # Handle ImageName conflicts (keep the original)
-        if 'ImageName_labelbox' in instance_data.columns:
-            instance_data.drop(columns=['ImageName_labelbox'], inplace=True)
-        
-        # Only keep instances that exist in our image_df
-        instance_data = instance_data[instance_data['DicomHash'].isin(image_df['DicomHash'])]
-
-        if 'Reject Image' in instance_data.columns:
-            if use_reject_system:
-                # Count before filtering
-                before_count = len(image_df)
-                
-                # Create a new DataFrame with rejected instances
-                rejected_images = instance_data[instance_data['Reject Image'] == True][['DicomHash', 'ImageName']]
-                
-                # Remove rows where 'Reject Image' is True from instance_data
-                instance_data = instance_data[instance_data['Reject Image'] != True]
-                
-                # Remove rows from image_df based on rejected DicomHash
-                image_df = image_df[~image_df['DicomHash'].isin(rejected_images['DicomHash'])]
-                
-                # Calculate how many were removed
-                removed_count = before_count - len(image_df)
-                
-                append_audit("export.labeled_reject_removed", removed_count)
-                
-                # Drop the Reject Image column since we've processed it
-                instance_data.drop(columns=['Reject Image'], inplace=True)
-            else:
-                # If not using reject system, keep 'Reject Image' as a column
-                instance_data['Reject Image'] = instance_data['Reject Image'].fillna(False)
-        
-
-    if os.path.exists(labeled_data_dir):
-        all_files = glob.glob(f'{labeled_data_dir}/*.csv')
-        all_dfs = (read_csv(f) for f in all_files)
-        labeled_df = pd.concat(all_dfs, ignore_index=True)
-    else:
-        labeled_df = pd.DataFrame(columns=['Patient_ID'])
-    
-
-    # Filter the image data based on the filtered case study data and the 'label' column
-    image_df = image_df[image_df['label'] == True]
-    image_df = image_df[(image_df['Patient_ID'].isin(breast_df['Patient_ID']))]
-    image_df = image_df.drop(['label', 'area'], axis=1)
-    
-    video_df = video_df[video_df['laterality'] != 'unknown']
-    video_df = video_df[(video_df['Patient_ID'].isin(breast_df['Patient_ID']))]
-    
-    initial_image_count = len(image_df)
-    initial_video_count = len(video_df)
-    append_audit("export.init_images", initial_image_count)
-    append_audit("export.init_videos", initial_video_count)
-    
-    #Remove bad aspect ratios
-    min_aspect_ratio = 0.5
-    max_aspect_ratio = 4.0
-    image_df_after_aspect = image_df[(image_df['crop_aspect_ratio'] >= min_aspect_ratio) & 
-                        (image_df['crop_aspect_ratio'] <= max_aspect_ratio)]
-    
-    intermediate_image_count = len(image_df_after_aspect)
-    append_audit("export.bad_aspect_image_removed", initial_image_count - intermediate_image_count)
-    
-    # Remove images with crop width or height less than 200 pixels
-    min_dimension = 200
-    image_df = image_df_after_aspect[(image_df_after_aspect['crop_w'] >= min_dimension) & 
-                    (image_df_after_aspect['crop_h'] >= min_dimension)]
-    
-    append_audit("export.too_small_image_removed", intermediate_image_count - len(image_df))
-    
-    if 'instance_data' in locals():
-        initial_instance_count = len(instance_data)
-        final_image_hashes = set(image_df['DicomHash'])
-        instance_data = instance_data[instance_data['DicomHash'].isin(final_image_hashes)]
-        filtered_instance_count = len(instance_data)
-        print(f"Filtered instance_data: {initial_instance_count} -> {filtered_instance_count} instances")
+    # Normalize image_df BEFORE building instance_data
+    image_df, video_df, breast_df = normalize_dataframes(image_df, video_df, breast_df)
+    instance_data, image_df = build_instance_data(image_df, breast_df, instance_labels_csv_file, use_reject_system)
+    image_df, video_df, instance_data = apply_filters(image_df, video_df, breast_df, instance_data, CONFIG)
 
     if reparse_images:   
         # Crop the images for the relevant studies
         Crop_Images(image_df, parsed_database, output_dir)
         Crop_Videos(video_df, parsed_database, output_dir)
-            
-    # Convert 'Patient_ID' columns to integers
-    labeled_df['Patient_ID'] = labeled_df['Patient_ID'].astype(int).astype(str)
-    image_df['Accession_Number'] = image_df['Accession_Number'].astype(str)
-    image_df['Patient_ID'] = image_df['Patient_ID'].astype(int).astype(str)
-    breast_df['Accession_Number'] = breast_df['Accession_Number'].astype(str)
-    breast_df['Patient_ID'] = breast_df['Patient_ID'].astype(int).astype(str)
-
-    # Set 'Labeled' to True for rows with a 'Patient_ID' in labeled_df
-    image_df.loc[image_df['Patient_ID'].isin(labeled_df['Patient_ID']), 'labeled'] = True
     
     #Find Image Counts (Breast Data)
-    image_df['laterality'] = image_df['laterality'].str.upper()
     image_counts = image_df.groupby(['Patient_ID', 'laterality']).size().reset_index(name='Image_Count')
     breast_df = pd.merge(breast_df, image_counts, how='left', left_on=['Patient_ID', 'Study_Laterality'], right_on=['Patient_ID', 'laterality'])
     breast_df = breast_df.drop(['laterality'], axis=1)
@@ -580,11 +597,10 @@ def Export_Database(CONFIG, reparse_images = True, test_subset = None):
     breast_df = PerformSplit(CONFIG, breast_df)
     
     # Create trainable csv data
-    train_data = format_data(breast_df, image_df)
+    train_data = create_train_set(breast_df, image_df)
     
     # Create a mapping of (Accession_Number, laterality) to list of ImagesPath
     if not video_df.empty and 'ImagesPath' in video_df.columns:
-        video_df['laterality'] = video_df['laterality'].str.upper()
         video_paths = video_df.groupby(['Accession_Number', 'laterality'])['ImagesPath'].agg(list).to_dict()
         train_data['VideoPaths'] = train_data.apply(lambda row: video_paths.get((row['Accession_Number'], row['Study_Laterality']), []), axis=1)
         
@@ -601,7 +617,6 @@ def Export_Database(CONFIG, reparse_images = True, test_subset = None):
 
     # Write the filtered dataframes to CSV files in the output directory
     save_data(breast_df, os.path.join(output_dir, 'BreastData.csv'))
-    #save_data(labeled_df, os.path.join(output_dir, 'LabeledData.csv'))
     save_data(video_df, os.path.join(output_dir, 'VideoData.csv'))
     save_data(image_df, os.path.join(output_dir, 'ImageData.csv'))
     save_data(train_data, os.path.join(output_dir, 'TrainData.csv'))
