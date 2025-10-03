@@ -515,11 +515,8 @@ def Mask_Lesions(image_data, input_dir, output_dir, max_workers=None, debug=Fals
     columns_to_keep = [
         'Patient_ID',
         'Accession_Number',
-        'PhotometricInterpretation',
-        'DicomHash',
         'ImageSource',
         'ImageName',
-        'inpainted_from'
     ]
     
     # Return only the new lesion rows with selected columns

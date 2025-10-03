@@ -10,7 +10,7 @@ from src.data_ingest.filter_data import create_final_dataset
 
 from src.DB_processing.image_processing import analyze_images
 from src.DB_processing.data_selection import Select_Data
-from src.DB_processing.export import Export_Database
+from src.DB_export.export import Export_Database
 from src.DB_processing.dcm_parser import Parse_Dicom_Files
 from src.DB_processing.video_processing import ProcessVideoData
 from src.ML_processing.lesion_detection import Locate_Lesions

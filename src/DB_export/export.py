@@ -13,7 +13,8 @@ parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
 from storage_adapter import *
 from src.DB_processing.tools import append_audit
-from src.DB_processing.mask_images import Mask_Lesions
+from src.DB_export.mask_processing import Mask_Lesions
+from src.DB_export.audit_report import generate_audit_report
 
 
 # Paths
@@ -228,106 +229,71 @@ def PerformSplit(CONFIG, df):
     return df
 
 def format_data(breast_data, image_data):
-    # Join breast_data and image_data ONLY on Accession_Number (not laterality)
+    # Join breast_data and image_data
     data = pd.merge(breast_data, image_data, 
                     on=['Accession_Number'], 
                     suffixes=('', '_image_data'))
 
-    # Remove duplicate columns from image_data
+    # Remove duplicate columns
     for col in breast_data.columns:
         if col + '_image_data' in data.columns:
             data.drop(col + '_image_data', axis=1, inplace=True)
 
-    # Check if lesion_images column exists
-    has_lesion_images = 'lesion_images' in data.columns
+    # Check if we have lesion data
+    has_lesion_data = 'LesionImageName' in data.columns
     
-    # Keep only the specified columns (removed Study_Laterality from group by)
-    columns_to_keep = ['Patient_ID', 'Accession_Number', 'Study_Laterality', 'Has_Malignant', 'Has_Benign', 'Valid', 'AGE_AT_EVENT']
+    columns_to_keep = ['Patient_ID', 'Accession_Number', 'Study_Laterality', 
+                       'Has_Malignant', 'Has_Benign', 'Valid', 'AGE_AT_EVENT', 
+                       'ImageName']
     
-    if has_lesion_images:
-        columns_to_keep.append('lesion_images')
-    else:
-        columns_to_keep.append('ImageName')
+    if has_lesion_data:
+        columns_to_keep.append('LesionImageName')
     
     data = data[columns_to_keep]
     
-    # Group ONLY by Accession_Number (not Study_Laterality)
+    # Aggregation dictionary
     agg_dict = {
         'Patient_ID': 'first',
-        'Study_Laterality': 'first',  # Keep the laterality value but don't group by it
+        'Study_Laterality': 'first',
         'Has_Malignant': 'first', 
         'Has_Benign': 'first',
         'Valid': 'first',
-        'AGE_AT_EVENT': 'first'
+        'AGE_AT_EVENT': 'first',
+        'ImageName': lambda x: list(x)
     }
     
-    if has_lesion_images:
-        agg_dict['lesion_images'] = lambda x: list(x)
-    else:
-        agg_dict['ImageName'] = lambda x: list(x)
+    if has_lesion_data:
+        agg_dict['LesionImageName'] = lambda x: list(x)
     
-    # Reset index before groupby
     data = data.reset_index(drop=True)
-    
-    # Group by Accession_Number only - this will keep BILATERAL and aggregate all images
     data = data.groupby('Accession_Number').agg(agg_dict).reset_index()
     
+    # Clean original images
+    def clean_list(img_list):
+        if not isinstance(img_list, list):
+            return []
+        return [str(img).strip() for img in img_list if img and str(img).strip()]
     
-    # Process lesion images and create Images column
-    if has_lesion_images:
-        def process_lesion_images(lesion_list):
-            """Clean and flatten lesion images list"""
-            flattened = []
-            for item in lesion_list:
-                if pd.isna(item) or item == '':
-                    continue
-                # Handle comma-separated strings (shouldn't happen with new structure but keep for safety)
-                if ',' in str(item):
-                    # Split by comma and clean each part
-                    parts = [part.strip() for part in str(item).split(',')]
-                    flattened.extend([part for part in parts if part])
-                else:
-                    flattened.append(str(item))
-            # Remove any remaining empty strings
-            return [img for img in flattened if img and img.strip()]
-        
-        data['Images'] = data['lesion_images'].apply(process_lesion_images)
-        data.drop(['lesion_images'], axis=1, inplace=True)
-    else:
-        # For regular ImageName, also clean empty strings
-        def clean_image_names(image_list):
-            """Clean image names list"""
-            if not isinstance(image_list, list):
-                return []
-            return [img for img in image_list if img and str(img).strip()]
-        
-        data['Images'] = data['ImageName'].apply(clean_image_names)
-        data.drop(['ImageName'], axis=1, inplace=True)
+    data['Images'] = data['ImageName'].apply(clean_list)
+    data.drop(['ImageName'], axis=1, inplace=True)
     
-    # Reset index again before filtering to ensure alignment
+    # Clean lesion images
+    if has_lesion_data:
+        data['LesionImages'] = data['LesionImageName'].apply(clean_list)
+        data.drop(['LesionImageName'], axis=1, inplace=True)
+    
+    # Filter out rows with empty Images
     data = data.reset_index(drop=True)
-    
-    # Filter out rows with empty Images lists
     initial_count = len(data)
-    
-    # Create boolean mask more carefully
     has_images_mask = data['Images'].apply(lambda x: isinstance(x, list) and len(x) > 0)
-    data = data[has_images_mask]
-    
-    # Reset index after filtering
-    data = data.reset_index(drop=True)
+    data = data[has_images_mask].reset_index(drop=True)
     
     removed_count = initial_count - len(data)
     if removed_count > 0:
         print(f"Removed {removed_count} rows with no valid images")
     
-    # Remove Patient_ID
     data.drop(['Patient_ID'], axis=1, inplace=True)
-
-    # Add a new column 'ID' that counts up from 0
     data['ID'] = range(len(data))
-
-    # Make 'ID' the first column
     columns = ['ID'] + [col for col in data.columns if col != 'ID']
     data = data[columns]
 
@@ -395,259 +361,6 @@ def map_breast_data_to_instances(instance_data, image_df, breast_df, column_mapp
             instance_data[instance_col] = instance_data['ImageName'].map(image_to_value_map)
     
     return instance_data
-
-
-def ExportAuditReport(image_df, breast_df, video_df, video_images_df):
-    # -- Basic counts --
-    # Number of patients
-    unique_patients = breast_df['Patient_ID'].nunique()
-    append_audit("export.num_patients", unique_patients)
-    
-    # -- Year range --
-    # Convert DATE column to datetime if not already
-    breast_df['DATE'] = pd.to_datetime(breast_df['DATE'], errors='coerce')
-    year_min = breast_df['DATE'].dt.year.min()
-    year_max = breast_df['DATE'].dt.year.max()
-    append_audit("export.year_range_start", int(year_min))
-    append_audit("export.year_range_end", int(year_max))
-    
-    # -- Image statistics per exam --
-    # Group by Accession_Number to get image counts per exam
-    exam_image_counts = image_df.groupby('Accession_Number').size().reset_index(name='image_count')
-    append_audit("export.min_images_per_exam", int(exam_image_counts['image_count'].min()))
-    append_audit("export.max_images_per_exam", int(exam_image_counts['image_count'].max()))
-    append_audit("export.avg_images_per_exam", float(exam_image_counts['image_count'].mean()))
-    
-    # -- Video statistics per exam --
-    if not video_df.empty:
-        exam_video_counts = video_df.groupby('Accession_Number').size().reset_index(name='video_count')
-        min_videos = int(exam_video_counts['video_count'].min()) if not exam_video_counts.empty else 0
-        max_videos = int(exam_video_counts['video_count'].max()) if not exam_video_counts.empty else 0
-        avg_videos = float(exam_video_counts['video_count'].mean()) if not exam_video_counts.empty else 0
-        append_audit("export.min_videos_per_exam", min_videos)
-        append_audit("export.max_videos_per_exam", max_videos)
-        append_audit("export.avg_videos_per_exam", avg_videos)
-    else:
-        append_audit("export.min_videos_per_exam", 0)
-        append_audit("export.max_videos_per_exam", 0)
-        append_audit("export.avg_videos_per_exam", 0)
-    
-    # -- Patient age statistics --
-    # Filter out any non-numeric ages
-    valid_ages = pd.to_numeric(breast_df['AGE_AT_EVENT'], errors='coerce').dropna()
-    append_audit("export.min_patient_age", float(valid_ages.min()))
-    append_audit("export.max_patient_age", float(valid_ages.max()))
-    append_audit("export.avg_patient_age", float(valid_ages.mean()))
-
-    # -- Image dimensions --
-    # Calculate average image dimensions if crop_w and crop_h are available
-    append_audit("export.avg_image_width", float(image_df['crop_w'].mean()))
-    append_audit("export.avg_image_height", float(image_df['crop_h'].mean()))
-    
-    # -- Video dimensions and frames --
-    append_audit("export.avg_video_width", float(video_df['crop_w'].mean()))
-    append_audit("export.avg_video_height", float(video_df['crop_h'].mean()))
-    
-    # -- Video frames calculation --
-    # If video_images_df is provided and not empty
-    if video_images_df is not None and not video_images_df.empty:
-        # Calculate the frame count for each video
-        video_images_df['frame_count'] = video_images_df['images'].apply(lambda x: len(x) if isinstance(x, list) else len(eval(x)))
-        append_audit("export.avg_video_frames", float(video_images_df['frame_count'].mean()))
-        
-        # Also add min and max frame counts
-        append_audit("export.min_video_frames", int(video_images_df['frame_count'].min()))
-        append_audit("export.max_video_frames", int(video_images_df['frame_count'].max()))
-
-    # -- Laterality counts --
-    # Count left and right breasts
-    laterality_counts = breast_df['Study_Laterality'].value_counts()
-    append_audit("export.num_left_breasts", int(laterality_counts.get('LEFT', 0)))
-    append_audit("export.num_right_breasts", int(laterality_counts.get('RIGHT', 0)))
-    append_audit("export.num_bilateral_breasts", int(laterality_counts.get('BILATERAL', 0)))
-    
-    # -- Training counts by laterality and diagnosis --
-    # Initialize a dictionary to store all counts
-    breast_counts = {
-        f"{lat.lower()}_{diag.lower()}": [0, 0, 0]  # [train, val, test]
-        for lat in ['RIGHT', 'LEFT']
-        for diag in ['MALIGNANT', 'BENIGN']
-    }
-    
-    # Process each split
-    for split_num in [0, 1, 2]:  # 0->train, 1->val, 2->test
-        # Filter data by split
-        split_data = breast_df[breast_df['Valid'] == split_num]
-        
-        # Count for each combination
-        for laterality in ['RIGHT', 'LEFT']:
-            for diagnosis in ['MALIGNANT', 'BENIGN']:
-                # Create diagnosis condition
-                diagnosis_condition = split_data['final_interpretation'].isin([diagnosis])
-                
-                # Count and store in the appropriate array position
-                key = f"{laterality.lower()}_{diagnosis.lower()}"
-                breast_counts[key][split_num] = len(
-                    split_data[(split_data['Study_Laterality'] == laterality) & diagnosis_condition]
-                )
-    
-    # Save all arrays to audit
-    for key, counts in breast_counts.items():
-        append_audit(f'export.{key}_breasts', counts)
-        
-    
-    # -- Machine model distribution counts by split --
-    if 'ManufacturerModelName' in image_df.columns:
-        # Merge dataframes to get valid split information with the machine models
-        model_df = image_df.merge(breast_df[['Patient_ID', 'Accession_Number', 'Valid']], 
-                              on=['Patient_ID', 'Accession_Number'], how='left')
-        
-        # Get the unique machine models
-        unique_models = model_df['ManufacturerModelName'].unique().tolist()
-        
-        # Create three dictionaries for train, val, test splits
-        train_models = {}
-        val_models = {}
-        test_models = {}
-        
-        # Process each split and model
-        for model in unique_models:
-            # Create a safe key by replacing any characters that might cause issues
-            safe_model = str(model).replace(' ', '_').replace('-', '_').replace('.', '_').replace("'", "")
-            
-            # Count each model in each split
-            train_count = len(model_df[(model_df['Valid'] == 0) & (model_df['ManufacturerModelName'] == model)])
-            val_count = len(model_df[(model_df['Valid'] == 1) & (model_df['ManufacturerModelName'] == model)])
-            test_count = len(model_df[(model_df['Valid'] == 2) & (model_df['ManufacturerModelName'] == model)])
-            
-            # Only add to dictionaries if count > 0
-            if train_count > 0:
-                train_models[safe_model] = train_count
-            if val_count > 0:
-                val_models[safe_model] = val_count
-            if test_count > 0:
-                test_models[safe_model] = test_count
-        
-        # Save the dictionaries to audit
-        append_audit("export.train_machine_models", train_models)
-        append_audit("export.val_machine_models", val_models)
-        append_audit("export.test_machine_models", test_models)
-    else:
-        # Log that the ManufacturerModelName column wasn't found
-        append_audit("export.machine_models", "Column 'ManufacturerModelName' not found in image_df")
-    
-    # -- Breast density distribution counts by split --
-    if 'Density_Desc' in breast_df.columns:
-        # Define the density categories and their keywords
-        density_categories = {
-            'entirely_fatty': ['entirely fatty'],
-            'fibroglandular': ['fibroglandular'],
-            'heterogeneously': ['heterogeneously'],
-            'extremely_dense': ['extremely dense'],
-            'unknown': []  # Default category if no match found
-        }
-        
-        # Create three dictionaries for train, val, test splits
-        train_densities = {cat: 0 for cat in density_categories.keys()}
-        val_densities = {cat: 0 for cat in density_categories.keys()}
-        test_densities = {cat: 0 for cat in density_categories.keys()}
-        
-        # Function to classify a density description
-        def classify_density(desc):
-            if pd.isna(desc):
-                return 'unknown'
-                
-            desc = str(desc).lower()
-            
-            for category, keywords in density_categories.items():
-                for keyword in keywords:
-                    if keyword in desc:
-                        return category
-                        
-            return 'unknown'  # Default if no match found
-        
-        # Add a new column with the classified density
-        breast_df['density_category'] = breast_df['Density_Desc'].apply(classify_density)
-        
-        # Count densities by split
-        for split_num, density_dict in [(0, train_densities), (1, val_densities), (2, test_densities)]:
-            # Filter by split
-            split_data = breast_df[breast_df['Valid'] == split_num]
-            
-            # Count occurrences of each density category
-            density_counts = split_data['density_category'].value_counts().to_dict()
-            
-            # Update the dictionary with counts
-            for category in density_categories.keys():
-                density_dict[category] = density_counts.get(category, 0)
-        
-        # Save the dictionaries to audit
-        append_audit("export.train_breast_densities", train_densities)
-        append_audit("export.val_breast_densities", val_densities)
-        append_audit("export.test_breast_densities", test_densities)
-    else:
-        # Log that the Density_Desc column wasn't found
-        append_audit("export.breast_densities", "Column 'Density_Desc' not found in breast_df")
-        
-    
-    # -- BI-RADS distribution counts by split --
-    # Define all possible BI-RADS values to check
-    birad_values = ['0', '1', '2', '3', '4', '4A', '4B', '4C', '5', '6']
-    
-    # Initialize a dictionary to store counts for each BI-RADS value
-    birad_counts = {
-        birad: [0, 0, 0]  # [train, val, test]
-        for birad in birad_values
-    }
-    
-    # Process each split
-    for split_num in [0, 1, 2]:  # 0->train, 1->val, 2->test
-        # Filter data by split
-        split_data = breast_df[breast_df['Valid'] == split_num]
-        
-        # Count each BI-RADS value
-        for birad in birad_values:
-            birad_counts[birad][split_num] = len(split_data[split_data['BI-RADS'] == birad])
-    
-    # Save all arrays to audit
-    for birad, counts in birad_counts.items():
-        # Use a safe key name by replacing characters that might cause issues
-        safe_birad = birad.replace('-', '_').replace('/', '_')
-        append_audit(f'export.birad_{safe_birad}', counts)
-        
-        
-    # -- Images per split --
-    # First, merge image_df with breast_df to get split information for each image
-    merged_df = image_df.merge(breast_df[['Patient_ID', 'Accession_Number', 'Study_Laterality', 'Valid']], 
-                            on=['Patient_ID', 'Accession_Number'], how='left')
-
-    # Create mapping for numeric codes to split names
-    split_mapping = {
-        0: 'train',
-        1: 'val',
-        2: 'test'
-    }
-
-    # Count images by valid value (0, 1, 2)
-    valid_counts = merged_df.groupby('Valid').size()
-
-    # Map the counts to the correct split names and log them
-    for valid_code, split_name in split_mapping.items():
-        count = int(valid_counts.get(valid_code, 0))
-        append_audit(f'export.images_in_{split_name}', count)
-        
-    # -- Detailed counts per case --
-    # Get image counts for every case (just the counts, not the IDs)
-    case_image_counts = image_df.groupby('Accession_Number').size().tolist()
-    append_audit("export.img_per_case", case_image_counts)
-    
-    # Get video counts for every case (just the counts, not the IDs)
-    if not video_df.empty:
-        case_video_counts = video_df.groupby('Accession_Number').size().tolist()
-        append_audit("export.vid_per_case", case_video_counts)
-    else:
-        # If no videos, return empty list
-        append_audit("export.vid_per_case", [])
         
         
 def Export_Database(CONFIG, reparse_images = True, test_subset = None):
@@ -683,8 +396,6 @@ def Export_Database(CONFIG, reparse_images = True, test_subset = None):
     
     # Apply test subset early if specified
     if test_subset:
-        print(f"Original data sizes - Breast: {len(breast_df)}, Image: {len(image_df)}, Video: {len(video_df)}")
-        
         # Limit breast_df first
         breast_df = breast_df.head(test_subset)
         
@@ -692,10 +403,29 @@ def Export_Database(CONFIG, reparse_images = True, test_subset = None):
         subset_patient_ids = breast_df['Patient_ID'].unique()
         image_df = image_df[image_df['Patient_ID'].isin(subset_patient_ids)]
         video_df = video_df[video_df['Patient_ID'].isin(subset_patient_ids)]
-        
         print(f"Subset data sizes - Breast: {len(breast_df)}, Image: {len(image_df)}, Video: {len(video_df)}")
     
     lesion_df = Mask_Lesions(image_df, parsed_database, output_dir)
+
+    # Merge lesion data into image_df using Patient_ID, Accession_Number, and ImageSource
+    if not lesion_df.empty:
+        # Rename ImageName in lesion_df to avoid conflicts
+        lesion_df_renamed = lesion_df.rename(columns={'ImageName': 'LesionImageName'})
+        
+        # Merge on Patient_ID, Accession_Number, and matching ImageSource with ImageName
+        image_df = image_df.merge(
+            lesion_df_renamed,
+            left_on=['Patient_ID', 'Accession_Number', 'ImageName'],
+            right_on=['Patient_ID', 'Accession_Number', 'ImageSource'],
+            how='left'
+        )
+        
+        # Drop the redundant ImageSource column
+        if 'ImageSource' in image_df.columns:
+            image_df.drop('ImageSource', axis=1, inplace=True)
+        
+        # Fill NaN values with empty string for images without lesions
+        image_df['LesionImageName'] = image_df['LesionImageName'].fillna('')
         
     # Always create instance_data from image_df - never None
     instance_data = image_df[['DicomHash', 'ImageName']].copy()
@@ -875,9 +605,9 @@ def Export_Database(CONFIG, reparse_images = True, test_subset = None):
     save_data(video_df, os.path.join(output_dir, 'VideoData.csv'))
     save_data(image_df, os.path.join(output_dir, 'ImageData.csv'))
     save_data(train_data, os.path.join(output_dir, 'TrainData.csv'))
-    save_data(lesion_df, os.path.join(output_dir, 'LesionData.csv'))
+    save_data(lesion_df, os.path.join(output_dir, 'LesionLink.csv'))
     if instance_data is not None:
         save_data(instance_data, os.path.join(output_dir, 'InstanceData.csv'))
     
     # Generate and save audit report
-    ExportAuditReport(image_df, breast_df, video_df, video_images_df if reparse_images else None)
+    generate_audit_report(image_df, breast_df, video_df, video_images_df if reparse_images else None)
