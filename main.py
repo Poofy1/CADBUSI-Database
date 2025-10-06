@@ -33,7 +33,7 @@ def parse_arguments():
     
     # Query arguments
     parser.add_argument('--query', action='store_true', help='Run breast imaging query')
-    parser.add_argument('--limit', type=int, help='Optional limit for the query (e.g., 10)')
+    parser.add_argument('--limit', type=int, help='Optional limit for the query/export')
     
     # Download arguments
     parser.add_argument('--deploy', action='store_true', help='Deploy FastAPI to Cloud Run')
@@ -127,7 +127,9 @@ def main():
 
         
     elif args.export:
-        Export_Database(CONFIG)
+        if args.limit:
+            print(f"Exporting with limit: {args.limit}")
+        Export_Database(CONFIG, limit=args.limit)
     
     else:
         print("No action specified. Use --help for available options.")

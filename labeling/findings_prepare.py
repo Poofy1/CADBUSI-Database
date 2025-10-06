@@ -97,11 +97,13 @@ print("Applying filters...")
 df_filtered = df[
     (df['FINDINGS'].notna()) & 
     (df['FINDINGS'].str.strip() != '') &
-    (df['Study_Laterality'] != 'BILATERAL')
+    (df['Study_Laterality'] != 'BILATERAL') &
+    (df['MODALITY'] == 'US') &
+    (df['is_biopsy'] != 'T')
 ]
 
 print(f"Total rows: {len(df)}")
-print(f"Rows with FINDINGS data (excluding BILATERAL): {len(df_filtered)}")
+print(f"Rows after filtering: {len(df_filtered)}")
 
 # Random sampling if needed
 if SAMPLE_SIZE is not None and len(df_filtered) > SAMPLE_SIZE:

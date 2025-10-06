@@ -393,9 +393,6 @@ def Mask_Lesions(image_data, input_dir, output_dir, max_workers=None, debug=Fals
     image_dir = f"{input_dir}/images/"
     mask_dir = f"{input_dir}/lesion_masks/"
     lesion_output_dir = f"{output_dir}/lesions/"
-
-    # Create output directory
-    os.makedirs(lesion_output_dir, exist_ok=True)
     
     # Create debug directory if debug is enabled
     debug_dir = None
@@ -517,6 +514,8 @@ def Mask_Lesions(image_data, input_dir, output_dir, max_workers=None, debug=Fals
         'Accession_Number',
         'ImageSource',
         'ImageName',
+        'crop_w',
+        'crop_h',
     ]
     
     # Return only the new lesion rows with selected columns
@@ -539,5 +538,5 @@ def Mask_Lesions(image_data, input_dir, output_dir, max_workers=None, debug=Fals
     
     if debug:
         print(f"Debug images saved to: {debug_dir}")
-
+        
     return result_df
