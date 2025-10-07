@@ -387,7 +387,7 @@ def analyze_images(database_path):
     append_audit("image_processing.extracted_darkness_measurements", len(darknesses))
 
     print("Finding Calipers")
-    caliper_results = find_calipers(image_folder_path, 'caliper_model', db_to_process)
+    caliper_results = find_calipers(image_folder_path, db_to_process)
     caliper_count = sum(1 for _, bool_val, _ in caliper_results if bool_val)
     append_audit("image_processing.images_with_calipers", caliper_count)
     
