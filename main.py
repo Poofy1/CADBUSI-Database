@@ -16,6 +16,7 @@ from src.DB_processing.video_processing import ProcessVideoData
 from src.ML_processing.lesion_detection import Locate_Lesions
 from src.ML_processing.inpaint_N2N import Inpaint_Dataset_N2N
 from src.ML_processing.orientation_detection import Find_Orientation
+from src.ML_processing.download_models import download_models
 
 from storage_adapter import * 
 from config import CONFIG
@@ -94,6 +95,7 @@ def main():
         BUCKET_PATH = f'{CONFIG["storage"]["download_path"]}/'
         
         print(f"Starting database processing for {BUCKET_PATH}...")
+        download_models() # Download all models
 
         # Step 1: Encrypt IDs
         print("Step 1/5: Encrypting IDs...")

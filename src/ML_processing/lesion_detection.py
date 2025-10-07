@@ -10,7 +10,6 @@ import pandas as pd
 from tqdm import tqdm
 from scipy import ndimage
 from storage_adapter import *
-from src.ML_processing.download_models import *
 from src.DB_processing.tools import get_reader, reader, append_audit
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -147,22 +146,6 @@ def prepare_box_prompts(boxes, image_size, model_input_size):
         scaled_boxes.append([scaled_x1, scaled_y1, scaled_x2, scaled_y2])
     
     return torch.tensor(scaled_boxes, dtype=torch.float32)
-
-
-def load_yolo_model():
-    """Load the YOLO model for caliper detection"""
-    # First try to download the model if it doesn't exist
-    try:
-        model_path = download_yolo_model()
-    except Exception as e:
-        print(f"Failed to download YOLO model: {e}")
-        # Fallback to checking the env path
-        model_path = os.path.join(env, 'models', 'yolo_lesion_detect.pt')
-        if not os.path.exists(model_path):
-            raise FileNotFoundError(f"YOLO model not found at {model_path}")
-    
-    yolo_model = YOLO(model_path)
-    return yolo_model
 
 def detect_calipers_yolo(image, yolo_model, confidence_threshold=0.5):
     """
@@ -440,14 +423,12 @@ def process_image_pairs_multithreading(image_names, image_dir, image_data_df, mo
     return results
 
 def Locate_Lesions(csv_file_path, image_dir, save_debug_images=False):
-    # Download model
-    download_samus_model()
-    
     print("Starting lesion location using YOLO-based caliper detection...")
     
     # Load YOLO model
     try:
-        yolo_model = load_yolo_model()
+        model_path = os.path.join(env, 'models', 'yolo_lesion_detect.pt')
+        yolo_model = YOLO(model_path)
         print("YOLO model loaded successfully")
     except Exception as e:
         print(f"Failed to load YOLO model: {e}")

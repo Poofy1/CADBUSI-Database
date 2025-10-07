@@ -20,6 +20,9 @@ config.py
 encryption_key.pkl
 src/ML_processing/models/SAMUS.pth
 src/ML_processing/models/yolo_lesion_detect.pt
+src/ML_processing/models/caliper_detect_10_7_25.pt
+training/model/*
+
 
 
 # User-specific files (MonoDevelop/Xamarin Studio)

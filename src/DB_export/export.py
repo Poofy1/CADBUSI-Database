@@ -277,9 +277,9 @@ def create_train_set(breast_data, image_data, lesion_df=None):
         # Merge lesion data with main data
         data = data.merge(lesion_grouped, on='Accession_Number', how='left')
         
-        # Clean lesion images list
+        # Clean lesion images list - handle NaN values properly
         data['LesionImages'] = data['LesionImages'].apply(
-            lambda x: clean_list(x) if pd.notna(x) else []
+            lambda x: clean_list(x) if isinstance(x, list) else []
         )
     else:
         # No lesion data available
