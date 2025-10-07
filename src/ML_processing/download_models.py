@@ -38,7 +38,7 @@ def download_models():
         print(f"\nDownloading {model_info['filename']} from Hugging Face...")
         
         try:
-            response = requests.get(model_info["url"], stream=True)
+            response = requests.get(model_info["url"], stream=True, verify=False)
             response.raise_for_status()
             
             # Get file size for progress
