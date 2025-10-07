@@ -14,16 +14,28 @@ def download_models():
     # Define all models to download
     models = {
         "SAMUS": {
-            "url": "https://huggingface.co/poofy38/SAMUS/resolve/main/SAMUS.pth",
+            "url": "https://huggingface.co/poofy38/CADBUSI/resolve/main/SAMUS.pth",
             "filename": "SAMUS.pth"
         },
         "YOLO": {
-            "url": "https://huggingface.co/poofy38/SAMUS/resolve/main/YOLO.pt",
+            "url": "https://huggingface.co/poofy38/CADBUSI/resolve/main/YOLO.pt",
             "filename": "yolo_lesion_detect.pt"
         },
         "Caliper": {
-            "url": "https://huggingface.co/poofy38/SAMUS/resolve/main/caliper_detect_10_7_25.pt",
+            "url": "https://huggingface.co/poofy38/CADBUSI/resolve/main/caliper_detect_10_7_25.pt",
             "filename": "caliper_detect_10_7_25.pt"
+        },
+        "Mask": {
+            "url": "https://huggingface.co/poofy38/CADBUSI/resolve/main/mask_model.pt",
+            "filename": "mask_model.pt"
+        },
+        "N2N": {
+            "url": "https://huggingface.co/poofy38/CADBUSI/resolve/main/N2N_7.pth",
+            "filename": "N2N_7.pth"
+        },
+        "Ori": {
+            "url": "https://huggingface.co/poofy38/CADBUSI/resolve/main/ori_model.pt",
+            "filename": "ori_model.pt"
         }
     }
     
