@@ -847,7 +847,7 @@ def create_final_dataset(rad_df, path_df, output_path):
     pathology_subset['cancer_type'] = pathology_subset['lesion_diag'].apply(extract_cancer_type)
     
     # Save the US-only filtered dataset
-    final_df_us.to_csv(f'{env}/raw_data/endpoint_data.csv', index=False)
+    final_df_us.to_csv(f'{env}/data/endpoint_data.csv', index=False)
     pathology_subset.to_csv(f'{output_path}/lesion_pathology.csv', index=False)
 
     # Print statistics
@@ -861,7 +861,7 @@ def create_final_dataset(rad_df, path_df, output_path):
 if __name__ == "__main__":
     # Load the parsed radiology and pathology data
     try:
-        output_path = os.path.join(env, "raw_data")
+        output_path = os.path.join(env, "data")
         rad_file_path = f'{output_path}/parsed_radiology.csv'
         path_file_path = f'{output_path}/parsed_pathology.csv'
         

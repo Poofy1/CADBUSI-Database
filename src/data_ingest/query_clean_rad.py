@@ -602,6 +602,6 @@ def filter_rad_data(radiology_df, output_path):
     
     
 if __name__ == "__main__":
-    rad_df = pd.read_csv(f'{env}/raw_data/raw_radiology.csv')
-    output_path = os.path.join(env, "raw_data")
+    rad_df = pd.read_csv(f'{env}/data/raw_radiology.csv')
+    output_path = os.path.join(env, "data")
     filter_rad_data(rad_df, output_path)

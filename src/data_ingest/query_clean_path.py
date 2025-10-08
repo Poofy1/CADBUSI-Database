@@ -340,5 +340,5 @@ def filter_path_data(pathology_df, output_path):
     return output_df
 
 if __name__ == "__main__":
-    pathology_df = pd.read_csv(f'{env}/raw_data/raw_pathology.csv')
+    pathology_df = pd.read_csv(f'{env}/data/raw_pathology.csv')
     filter_path_data(pathology_df)

@@ -613,7 +613,7 @@ def Export_Database(CONFIG, limit = None, reparse_images = True):
     save_data(json.dumps(CONFIG, indent=4), os.path.normpath(os.path.join(output_dir, 'export_config.json'))) # Convert CONFIG to a JSON string
 
     # Read data from SQLite database
-    with DatabaseManager(parsed_database) as db:
+    with DatabaseManager() as db:
         video_df = db.get_videos_dataframe()
         image_df = db.get_images_dataframe()
         breast_df = db.get_study_cases_dataframe()
@@ -670,7 +670,7 @@ def Export_Database(CONFIG, limit = None, reparse_images = True):
     print(f"Processed {lesion_count} lesions from masks")
 
     # Read lesion data from database
-    with DatabaseManager(parsed_database) as db:
+    with DatabaseManager() as db:
         lesion_df = pd.read_sql_query("""
             SELECT
                 source_image_name as ImageSource,

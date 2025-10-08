@@ -396,7 +396,7 @@ def Mask_Lesions(database_path, max_workers=None, debug=False):
     Returns:
         Number of lesion records created
     """
-    with DatabaseManager(database_path) as db:
+    with DatabaseManager() as db:
         # Load image data from database
         image_data = db.get_images_dataframe()
 

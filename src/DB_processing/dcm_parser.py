@@ -588,7 +588,7 @@ def parse_anon_file(anon_location, database_path, image_df):
     breast_csv['Has_Benign'] = breast_csv['final_interpretation'] == 'BENIGN'
 
     # Use DatabaseManager to save to SQLite
-    with DatabaseManager(database_path) as db:
+    with DatabaseManager() as db:
         # Create schema if it doesn't exist
         db.create_schema()
 
@@ -706,7 +706,7 @@ def Parse_Dicom_Files(CONFIG, anon_location, lesion_anon_file, raw_storage_datab
     print("Inserting lesion/pathology data")
     lesion_csv = pd.read_csv(lesion_anon_file)
 
-    with DatabaseManager(database_path) as db:
+    with DatabaseManager() as db:
         # Insert pathology data
         pathology_data = lesion_csv.to_dict('records')
         inserted_pathology = db.insert_pathology_batch(pathology_data)

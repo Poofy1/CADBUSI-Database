@@ -10,15 +10,9 @@ import os
 class DatabaseManager:
     """Manages SQLite database connections and operations for DICOM processing."""
 
-    def __init__(self, database_path: str):
-        """
-        Initialize database manager.
-
-        Args:
-            database_path: Path to the database directory (e.g., 'Databases/database_2024_01_15/')
-        """
-        self.database_path = database_path
-        self.db_file = os.path.join(database_path, 'cadbusi.db')
+    def __init__(self):
+        self.database_path = "data"
+        self.db_file = os.path.join(self.database_path, 'cadbusi.db')
         self.conn = None
 
     def connect(self):

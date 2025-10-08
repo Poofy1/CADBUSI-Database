@@ -280,7 +280,7 @@ def run_breast_imaging_query(limit=None):
         limit (int, optional): Limit the number of patients to process
     """
     # Create data directory if it doesn't exist
-    data_dir = os.path.join(env, "raw_data")
+    data_dir = os.path.join(env, "data")
     if not os.path.exists(data_dir):
         os.makedirs(data_dir)
         print(f"Created directory: {data_dir}")
@@ -296,7 +296,7 @@ def run_breast_imaging_query(limit=None):
     rad_df = get_radiology_data(limit=limit)
 
     # Audit radiology results
-    rad_path = os.path.join(env, "raw_data", "raw_radiology.csv")
+    rad_path = os.path.join(env, "data", "raw_radiology.csv")
     rad_df.to_csv(rad_path, index=False)
     append_audit("query.raw_rad_record_count", len(rad_df))
     
@@ -310,7 +310,7 @@ def run_breast_imaging_query(limit=None):
     path_df = get_pathology_data(patient_ids)
     
     # Audit pathology results
-    path_path = os.path.join(env, "raw_data", "raw_pathology.csv")
+    path_path = os.path.join(env, "data", "raw_pathology.csv")
     path_df.to_csv(path_path, index=False)
     append_audit("query.raw_path_record_count", len(path_df))
     

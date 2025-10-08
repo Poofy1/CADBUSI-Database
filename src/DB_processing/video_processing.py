@@ -49,7 +49,7 @@ def get_video_ultrasound_region(image_folder_path, first_images):
 
 def ProcessVideoData(database_path):
 
-    with DatabaseManager(database_path) as db:
+    with DatabaseManager() as db:
         video_folder_path = f"{database_path}/videos/"
 
         # Load data from database

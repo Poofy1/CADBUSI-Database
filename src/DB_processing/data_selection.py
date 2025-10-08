@@ -305,7 +305,7 @@ def create_caliper_file(database_path, image_df, breast_df, max_workers=None):
 
 
 def Select_Data(database_path, only_labels):
-    with DatabaseManager(database_path) as db:
+    with DatabaseManager() as db:
         image_folder_path = f"{database_path}/images/"
 
         # Load data from database

@@ -57,8 +57,8 @@ def main():
     # Main entry point for the script
     args = parse_arguments()
     
-    dicom_query_file = f'{env}/raw_data/endpoint_data.csv'
-    output_path = os.path.join(env, "raw_data")
+    dicom_query_file = f'{env}/data/endpoint_data.csv'
+    output_path = os.path.join(env, "data")
     
     # Handle query command
     if args.query:
@@ -88,9 +88,9 @@ def main():
         dicom_download_remote_start(dicom_query_file, args.deploy, args.cleanup)
         
     elif args.database:
-        lesion_pathology = f'{env}/raw_data/lesion_pathology.csv'
-        lesion_anon_file = f'{env}/raw_data/lesion_anon_data.csv'
-        anon_file = f'{env}/raw_data/anon_data.csv'
+        lesion_pathology = f'{env}/data/lesion_pathology.csv'
+        lesion_anon_file = f'{env}/data/lesion_anon_data.csv'
+        anon_file = f'{env}/data/anon_data.csv'
         key_output = f'{env}/encryption_key.pkl'
         BUCKET_PATH = f'{CONFIG["storage"]["download_path"]}/'
         

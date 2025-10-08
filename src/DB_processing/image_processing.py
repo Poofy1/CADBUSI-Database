@@ -356,7 +356,7 @@ def get_OCR(image_folder_path, description_masks):
 # Main method to perform operations
 def analyze_images(database_path):
 
-    with DatabaseManager(database_path) as db:
+    with DatabaseManager() as db:
         image_folder_path = f"{database_path}/images/"
 
         # Load data from database
