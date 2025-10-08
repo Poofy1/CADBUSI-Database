@@ -4,9 +4,17 @@ import numpy as np
 from PIL import Image
 import cv2
 from tqdm import tqdm
-from storage_adapter import read_csv, read_image, save_data
+from storage_adapter import read_image, save_data
 import ast
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import sys
+
+# Add parent directory to path for imports
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+sys.path.append(parent_dir)
+
+from src.DB_processing.database import DatabaseManager
 
 def parse_caliper_boxes(caliper_boxes_str):
     """
@@ -376,167 +384,150 @@ def process_single_mask(args):
             'lesions_created': 0
         }
 
-def Mask_Lesions(image_data, input_dir, output_dir, max_workers=None, debug=False):
+def Mask_Lesions(database_path, max_workers=None, debug=False):
     """
-    Multithreaded version of Mask_Lesions that creates separate rows for each lesion image.
-    
+    Multithreaded version of Mask_Lesions that creates lesion records in the database.
+
     Args:
-        image_data: DataFrame containing image data
-        input_dir: Input directory path
-        output_dir: Output directory path  
+        database_path: Path to the database directory
         max_workers: Maximum number of worker threads (None = use all CPU cores)
         debug: Boolean flag to enable debug image saving
-    
+
     Returns:
-        DataFrame with separate rows for each lesion image
+        Number of lesion records created
     """
-    image_dir = f"{input_dir}/images/"
-    mask_dir = f"{input_dir}/lesion_masks/"
-    lesion_output_dir = f"{output_dir}/lesions/"
-    
-    # Create debug directory if debug is enabled
-    debug_dir = None
-    if debug:
-        debug_dir = f"{output_dir}/debug/"
-        os.makedirs(debug_dir, exist_ok=True)
-        print(f"Debug mode enabled. Debug images will be saved to: {debug_dir}")
+    with DatabaseManager(database_path) as db:
+        # Load image data from database
+        image_data = db.get_images_dataframe()
 
-    # Filter for rows where has_caliper_mask = True
-    masked_images = image_data[image_data['has_caliper_mask'] == True]
-    
-    if len(masked_images) == 0:
-        print("No images found with has_caliper_mask = True")
-        return image_data
-    
-    print(f"Found {len(masked_images)} images with masks")
+        # Prepare column mapping
+        image_data = image_data.rename(columns={
+            'image_name': 'ImageName',
+            'accession_number': 'Accession_Number',
+            'patient_id': 'Patient_ID'
+        })
 
-    # Prepare arguments for each worker
-    worker_args = []
-    for idx, row in masked_images.iterrows():
-        worker_args.append((idx, row, image_dir, mask_dir, lesion_output_dir, debug, debug_dir))
+        image_dir = f"{database_path}/images/"
+        mask_dir = f"{database_path}/lesion_masks/"
+        lesion_output_dir = f"{database_path}/lesions/"
 
-    # Initialize counters
-    processed_count = 0
-    failed_count = 0
-    total_lesions_created = 0
-    
-    # Store results for creating new rows
-    processing_results = {}
-    
-    # Use ThreadPoolExecutor for concurrent processing
-    if max_workers is None:
-        max_workers = min(os.cpu_count(), len(worker_args))
-    
-    print(f"Using {max_workers} worker threads")
-    
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Submit all tasks
-        futures = {executor.submit(process_single_mask, args): args[0] for args in worker_args}
-        
-        # Process completed tasks with progress bar
-        with tqdm(total=len(futures), desc="Processing masked images") as pbar:
-            for future in as_completed(futures):
-                result = future.result()
-                idx = result['idx']
-                processing_results[idx] = result
-                
-                if result['success']:
-                    processed_count += 1
-                    total_lesions_created += result['lesions_created']
-                else:
-                    print(result['error'])
-                    failed_count += 1
-                
-                pbar.update(1)
-    
-    # Create new rows for each lesion image
-    new_lesion_rows = []
-    
-    for idx, row in masked_images.iterrows():
-        if idx in processing_results and processing_results[idx]['success']:
-            result = processing_results[idx]
-            
-            # Store the original image name
-            original_image_name = row['ImageName']
-            
-            # Parse lesion images (comma-separated)
-            lesion_images_str = result['lesion_images']
-            if lesion_images_str:
-                lesion_images = [img.strip() for img in lesion_images_str.split(',') if img.strip()]
-                
-                # Parse dimensions
-                image_w_str = result['image_w']
-                image_h_str = result['image_h']
-                
-                if '; ' in image_w_str:
-                    # Multiple dimensions
-                    widths = [w.strip() for w in image_w_str.split(';')]
-                    heights = [h.strip() for h in image_h_str.split(';')]
-                else:
-                    # Single dimension or empty
-                    widths = [image_w_str] * len(lesion_images)
-                    heights = [image_h_str] * len(lesion_images)
-                
-                # Create a new row for each lesion image
-                for i, lesion_img in enumerate(lesion_images):
-                    new_row = row.copy()
-                    
-                    # Add the original image source
-                    new_row['ImageSource'] = original_image_name
-                    
-                    # Update ImageName to the lesion image
-                    new_row['ImageName'] = lesion_img
-                    
-                    # Set individual dimensions
-                    if i < len(widths):
-                        new_row['image_w'] = widths[i]
-                        new_row['image_h'] = heights[i]
-                        
-                        # Also update crop_w and crop_h to match the actual lesion dimensions
-                        try:
-                            new_row['crop_w'] = int(widths[i]) if widths[i] else 0
-                            new_row['crop_h'] = int(heights[i]) if heights[i] else 0
-                        except (ValueError, TypeError):
-                            new_row['crop_w'] = 0
-                            new_row['crop_h'] = 0
+        # Create debug directory if debug is enabled
+        debug_dir = None
+        if debug:
+            debug_dir = f"{database_path}/debug/"
+            os.makedirs(debug_dir, exist_ok=True)
+            print(f"Debug mode enabled. Debug images will be saved to: {debug_dir}")
+
+        # Filter for rows where has_caliper_mask = True
+        # Note: This field might not exist in the database yet, so we'll check
+        if 'has_caliper_mask' in image_data.columns:
+            masked_images = image_data[image_data['has_caliper_mask'] == True]
+        else:
+            # Fallback: use images that have masks in the mask directory
+            print("Warning: 'has_caliper_mask' column not found, checking for mask files")
+            masked_images = image_data.copy()
+
+        if len(masked_images) == 0:
+            print("No images found with masks")
+            return 0
+
+        print(f"Found {len(masked_images)} images to process")
+
+        # Prepare arguments for each worker
+        worker_args = []
+        for idx, row in masked_images.iterrows():
+            worker_args.append((idx, row, image_dir, mask_dir, lesion_output_dir, debug, debug_dir))
+
+        # Initialize counters
+        processed_count = 0
+        failed_count = 0
+        total_lesions_created = 0
+
+        # Store results for creating new rows
+        processing_results = {}
+
+        # Use ThreadPoolExecutor for concurrent processing
+        if max_workers is None:
+            max_workers = min(os.cpu_count(), len(worker_args))
+
+        print(f"Using {max_workers} worker threads")
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all tasks
+            futures = {executor.submit(process_single_mask, args): args[0] for args in worker_args}
+
+            # Process completed tasks with progress bar
+            with tqdm(total=len(futures), desc="Processing masked images") as pbar:
+                for future in as_completed(futures):
+                    result = future.result()
+                    idx = result['idx']
+                    processing_results[idx] = result
+
+                    if result['success']:
+                        processed_count += 1
+                        total_lesions_created += result['lesions_created']
                     else:
-                        new_row['image_w'] = ""
-                        new_row['image_h'] = ""
-                        new_row['crop_w'] = 0
-                        new_row['crop_h'] = 0
-                    
-                    new_lesion_rows.append(new_row)
-        # If processing failed, we skip this original row (it won't be in the final result)
-    
-    # Define columns to keep
-    columns_to_keep = [
-        'Patient_ID',
-        'Accession_Number',
-        'ImageSource',
-        'ImageName',
-        'crop_w',
-        'crop_h',
-    ]
-    
-    # Return only the new lesion rows with selected columns
-    if new_lesion_rows:
-        lesion_df = pd.DataFrame(new_lesion_rows)
-        
-        # Keep only specified columns (add empty string if column doesn't exist)
-        for col in columns_to_keep:
-            if col not in lesion_df.columns:
-                lesion_df[col] = ""
-        
-        # Select only the columns we want to keep
-        result_df = lesion_df[columns_to_keep]
-    else:
-        # No lesion images created, return empty DataFrame with selected columns
-        result_df = pd.DataFrame(columns=columns_to_keep)
+                        print(result['error'])
+                        failed_count += 1
 
-    print(f"Successfully processed: {processed_count} images | Failed: {failed_count} | Total lesions created: {total_lesions_created}")
-    print(f"Original rows with masks: {len(masked_images)} | New lesion rows created: {len(new_lesion_rows)}")
-    
-    if debug:
-        print(f"Debug images saved to: {debug_dir}")
-        
-    return result_df
+                    pbar.update(1)
+
+        # Insert lesion records into database
+        cursor = db.conn.cursor()
+        lesion_records_inserted = 0
+
+        for idx, row in masked_images.iterrows():
+            if idx in processing_results and processing_results[idx]['success']:
+                result = processing_results[idx]
+
+                # Store the original image name
+                original_image_name = row['ImageName']
+
+                # Parse lesion images (comma-separated)
+                lesion_images_str = result['lesion_images']
+                if lesion_images_str:
+                    lesion_images = [img.strip() for img in lesion_images_str.split(',') if img.strip()]
+
+                    # Parse dimensions
+                    image_w_str = result['image_w']
+                    image_h_str = result['image_h']
+
+                    if '; ' in image_w_str:
+                        # Multiple dimensions
+                        widths = [w.strip() for w in image_w_str.split(';')]
+                        heights = [h.strip() for h in image_h_str.split(';')]
+                    else:
+                        # Single dimension or empty
+                        widths = [image_w_str] * len(lesion_images)
+                        heights = [image_h_str] * len(lesion_images)
+
+                    # Create a lesion record for each lesion image
+                    for i, lesion_img in enumerate(lesion_images):
+                        crop_w = int(widths[i]) if i < len(widths) and widths[i] else 0
+                        crop_h = int(heights[i]) if i < len(heights) and heights[i] else 0
+
+                        cursor.execute("""
+                            INSERT OR REPLACE INTO Lesions (
+                                source_image_name, image_name, accession_number, patient_id,
+                                crop_w, crop_h, has_mask
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                            original_image_name,
+                            lesion_img,
+                            row.get('Accession_Number'),
+                            row.get('Patient_ID'),
+                            crop_w,
+                            crop_h,
+                            1  # has_mask = True since we created it from a mask
+                        ))
+                        lesion_records_inserted += 1
+
+        db.conn.commit()
+
+        print(f"Successfully processed: {processed_count} images | Failed: {failed_count} | Total lesions created: {total_lesions_created}")
+        print(f"Original rows with masks: {len(masked_images)} | Lesion records inserted: {lesion_records_inserted}")
+
+        if debug:
+            print(f"Debug images saved to: {debug_dir}")
+
+        return lesion_records_inserted

@@ -21,7 +21,16 @@ encryption_key.pkl
 src/ML_processing/models/*
 training/model/*
 
-
+# SQLite database files
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.sqlite-journal
+*.db-wal
+*.sqlite-wal
+*.db-shm
+*.sqlite-shm
 
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs

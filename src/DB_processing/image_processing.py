@@ -15,6 +15,7 @@ sys.path.append(parent_dir)
 from src.ML_processing.caliper_detection import *
 from src.ML_processing.mask_model import *
 from src.DB_processing.tools import get_reader, reader, append_audit
+from src.DB_processing.database import DatabaseManager
 
 description_labels_dict = {
     'area':{'breast':['breast'],
@@ -352,86 +353,118 @@ def get_OCR(image_folder_path, description_masks):
 
 
 
-# Main method to prefrom operations
+# Main method to perform operations
 def analyze_images(database_path):
-        
-    image_folder_path = f"{database_path}/images/"
-    image_data_file = f'{database_path}/ImageData.csv'
-    breast_data_file = f'{database_path}/BreastData.csv'
-    image_df = read_csv(image_data_file)
-    breast_df = read_csv(breast_data_file)
 
-    # Check if any new features are missing in image_df and add them
-    new_features = ['labeled', 'crop_x', 'crop_y', 'crop_w', 'crop_h', 'description', 'has_calipers',  'has_calipers_prediction', 'darkness', 'area', 'laterality', 'orientation', 'clock_pos', 'nipple_dist']
-    missing_features = set(new_features) - set(image_df.columns)
-    for nf in missing_features:
-        image_df[nf] = None
-    
-    image_df['labeled'] = False
-    
-    db_to_process = image_df
-    append_audit("image_processing.input_images", len(db_to_process))
+    with DatabaseManager(database_path) as db:
+        image_folder_path = f"{database_path}/images/"
 
-    print("Finding OCR Masks")
-    _, description_masks = find_masks(image_folder_path, 'mask_model', db_to_process, 1920, 1080)
-    append_audit("image_processing.extracted_description_masks", len(description_masks))
-    
-    print("Performing OCR")  
-    descriptions = get_OCR(image_folder_path, description_masks)
-    valid_descriptions = sum(1 for desc in descriptions.values() if desc)
-    append_audit("image_processing.extracted_ocr_descriptions", valid_descriptions)
-    
-    print("Finding Darkness and Image Masks")
-    image_masks, darknesses = process_images_combined(image_folder_path, db_to_process)
-    append_audit("image_processing.extracted_crop_regions", len(image_masks))
-    append_audit("image_processing.extracted_darkness_measurements", len(darknesses))
+        # Load data from database
+        image_df = db.get_images_dataframe()
+        breast_df = db.get_study_cases_dataframe()
 
-    print("Finding Calipers")
-    caliper_results = find_calipers(image_folder_path, db_to_process)
-    caliper_count = sum(1 for _, bool_val, _ in caliper_results if bool_val)
-    append_audit("image_processing.images_with_calipers", caliper_count)
-    
-    # Convert lists of tuples to dictionaries
-    has_calipers_dict = {filename: bool_val for filename, bool_val, _ in caliper_results}
-    has_calipers_confidence_dict = {filename: pred_val for filename, _, pred_val in caliper_results}
-    darknesses_dict = {filename: value for filename, value in darknesses}
-    image_masks_dict = {filename: mask for filename, mask in image_masks}
+        # Prepare column mapping for database field names
+        image_df = image_df.rename(columns={
+            'image_name': 'ImageName',
+            'accession_number': 'Accession_Number',
+            'patient_id': 'Patient_ID'
+        })
 
-    # Update dataframe using map
-    db_to_process['description'] = db_to_process['ImageName'].map(pd.Series(descriptions))
-    db_to_process['darkness'] = db_to_process['ImageName'].map(pd.Series(darknesses_dict))
-    db_to_process['has_calipers'] = db_to_process['ImageName'].map(pd.Series(has_calipers_dict))
-    db_to_process['has_calipers_prediction'] = db_to_process['ImageName'].map(pd.Series(has_calipers_confidence_dict))
-    db_to_process['bounding_box'] = db_to_process['ImageName'].map(pd.Series(image_masks_dict))
-    
-    
-    # Fill NaN values with (None, None, None, None) before expanding
-    db_to_process['bounding_box'] = db_to_process['bounding_box'].apply(
-        lambda x: (None, None, None, None) if pd.isna(x) else x
-    )
-    db_to_process[['crop_x', 'crop_y', 'crop_w', 'crop_h']] = pd.DataFrame(
-        db_to_process['bounding_box'].tolist(), index=db_to_process.index
-    )
-    
-    # Construct a temporary DataFrame with the feature extraction
-    temp_df = db_to_process['description'].apply(lambda x: extract_descript_features(x, labels_dict=description_labels_dict)).apply(pd.Series)
-    for column in temp_df.columns:
-        db_to_process[column] = temp_df[column]
-    
-    # Overwrite non bilateral cases with known lateralities
-    laterality_mapping = breast_df[breast_df['Study_Laterality'].isin(['LEFT', 'RIGHT'])].set_index('Accession_Number')['Study_Laterality'].to_dict()
-    db_to_process['laterality'] = db_to_process.apply(
-        lambda row: laterality_mapping.get(row['Accession_Number']).lower() 
-        if row['Accession_Number'] in laterality_mapping 
-        else row['laterality'],
-        axis=1
-    )
-    
-    # Count unknown lateralities after correction
-    unknown_after = db_to_process[db_to_process['laterality'] == 'unknown'].shape[0]
-    append_audit("image_processing.bilateral_with_missing_lat", unknown_after)
+        breast_df = breast_df.rename(columns={
+            'accession_number': 'Accession_Number',
+            'study_laterality': 'Study_Laterality'
+        })
 
-    image_df.update(db_to_process, overwrite=True)
-    
-    save_data(image_df, image_data_file)
+        db_to_process = image_df
+        append_audit("image_processing.input_images", len(db_to_process))
+
+        print("Finding OCR Masks")
+        _, description_masks = find_masks(image_folder_path, 'mask_model', db_to_process, 1920, 1080)
+        append_audit("image_processing.extracted_description_masks", len(description_masks))
+
+        print("Performing OCR")
+        descriptions = get_OCR(image_folder_path, description_masks)
+        valid_descriptions = sum(1 for desc in descriptions.values() if desc)
+        append_audit("image_processing.extracted_ocr_descriptions", valid_descriptions)
+
+        print("Finding Darkness and Image Masks")
+        image_masks, darknesses = process_images_combined(image_folder_path, db_to_process)
+        append_audit("image_processing.extracted_crop_regions", len(image_masks))
+        append_audit("image_processing.extracted_darkness_measurements", len(darknesses))
+
+        print("Finding Calipers")
+        caliper_results = find_calipers(image_folder_path, db_to_process)
+        caliper_count = sum(1 for _, bool_val, _ in caliper_results if bool_val)
+        append_audit("image_processing.images_with_calipers", caliper_count)
+
+        # Convert lists of tuples to dictionaries
+        has_calipers_dict = {filename: bool_val for filename, bool_val, _ in caliper_results}
+        has_calipers_confidence_dict = {filename: pred_val for filename, _, pred_val in caliper_results}
+        darknesses_dict = {filename: value for filename, value in darknesses}
+        image_masks_dict = {filename: mask for filename, mask in image_masks}
+
+        # Update dataframe using map
+        db_to_process['description'] = db_to_process['ImageName'].map(pd.Series(descriptions))
+        db_to_process['darkness'] = db_to_process['ImageName'].map(pd.Series(darknesses_dict))
+        db_to_process['has_calipers'] = db_to_process['ImageName'].map(pd.Series(has_calipers_dict))
+        db_to_process['has_calipers_prediction'] = db_to_process['ImageName'].map(pd.Series(has_calipers_confidence_dict))
+        db_to_process['bounding_box'] = db_to_process['ImageName'].map(pd.Series(image_masks_dict))
+
+        # Fill NaN values with (None, None, None, None) before expanding
+        db_to_process['bounding_box'] = db_to_process['bounding_box'].apply(
+            lambda x: (None, None, None, None) if pd.isna(x) else x
+        )
+        db_to_process[['crop_x', 'crop_y', 'crop_w', 'crop_h']] = pd.DataFrame(
+            db_to_process['bounding_box'].tolist(), index=db_to_process.index
+        )
+
+        # Construct a temporary DataFrame with the feature extraction
+        temp_df = db_to_process['description'].apply(lambda x: extract_descript_features(x, labels_dict=description_labels_dict)).apply(pd.Series)
+        for column in temp_df.columns:
+            db_to_process[column] = temp_df[column]
+
+        # Overwrite non bilateral cases with known lateralities
+        laterality_mapping = breast_df[breast_df['Study_Laterality'].isin(['LEFT', 'RIGHT'])].set_index('Accession_Number')['Study_Laterality'].to_dict()
+        db_to_process['laterality'] = db_to_process.apply(
+            lambda row: laterality_mapping.get(row['Accession_Number']).lower()
+            if row['Accession_Number'] in laterality_mapping
+            else row['laterality'],
+            axis=1
+        )
+
+        # Count unknown lateralities after correction
+        unknown_after = db_to_process[db_to_process['laterality'] == 'unknown'].shape[0]
+        append_audit("image_processing.bilateral_with_missing_lat", unknown_after)
+
+        # Update database with processed results
+        cursor = db.conn.cursor()
+
+        for _, row in db_to_process.iterrows():
+            cursor.execute("""
+                UPDATE Images
+                SET crop_x = ?, crop_y = ?, crop_w = ?, crop_h = ?,
+                    has_calipers = ?, darkness = ?,
+                    laterality = ?, area = ?, orientation = ?,
+                    is_labeled = 1,
+                    crop_aspect_ratio = CASE WHEN ? IS NOT NULL AND ? != 0 THEN CAST(? AS REAL) / ? ELSE NULL END
+                WHERE image_name = ?
+            """, (
+                row.get('crop_x'),
+                row.get('crop_y'),
+                row.get('crop_w'),
+                row.get('crop_h'),
+                1 if row.get('has_calipers') else 0,
+                row.get('darkness'),
+                row.get('laterality'),
+                row.get('area'),
+                row.get('orientation'),
+                row.get('crop_w'),
+                row.get('crop_h'),
+                row.get('crop_w'),
+                row.get('crop_h'),
+                row['ImageName']
+            ))
+
+        db.conn.commit()
+        print(f"Updated {len(db_to_process)} images in database")
     

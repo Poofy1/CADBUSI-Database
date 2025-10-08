@@ -12,6 +12,7 @@ import time
 from storage_adapter import *
 from src.encrypt_keys import *
 from src.DB_processing.tools import append_audit
+from src.DB_processing.database import DatabaseManager
 logging.getLogger().setLevel(logging.ERROR)
 warnings.filterwarnings('ignore', category=UserWarning, message='.*Invalid value for VR UI.*')
 env = os.path.dirname(os.path.abspath(__file__))
@@ -537,14 +538,14 @@ def parse_files(CONFIG, dcm_files_list, database_path, batch_size=100):
     return df
 
 
-def parse_anon_file(anon_location, database_path, image_df, ):
-    
+def parse_anon_file(anon_location, database_path, image_df):
+
     video_df = image_df[image_df['DataType'] == 'video']
     image_df = image_df[image_df['DataType'] == 'image']
-    
+
     # Define common columns
-    common_columns = ['Patient_ID', 'Accession_Number', 'RegionSpatialFormat', 'RegionDataType', 
-                    'RegionLocationMinX0', 'RegionLocationMinY0', 'RegionLocationMaxX1', 
+    common_columns = ['Patient_ID', 'Accession_Number', 'RegionSpatialFormat', 'RegionDataType',
+                    'RegionLocationMinX0', 'RegionLocationMinY0', 'RegionLocationMaxX1',
                     'RegionLocationMaxY1', 'PhotometricInterpretation', 'Rows', 'Columns',
                     'FileName', 'DicomHash', 'SoftwareVersions', 'ManufacturerModelName', 'PhysicalDeltaX']
 
@@ -553,8 +554,7 @@ def parse_anon_file(anon_location, database_path, image_df, ):
         video_df = video_df[common_columns + ['ImagesPath', 'SavedFrames']]
 
     image_df = image_df[common_columns + ['ImageName', 'RegionCount']]
-    
-    
+
     # Find all csv files and combine into df
     anon_location = os.path.normpath(anon_location)
     breast_csv = pd.read_csv(anon_location)
@@ -564,66 +564,75 @@ def parse_anon_file(anon_location, database_path, image_df, ):
         'ACCESSION_NUMBER': 'Accession_Number'
     })
 
-    
     # Convert 'Patient_ID' to str in both dataframes before merging
     image_df[['Patient_ID', 'Accession_Number']] = image_df[['Patient_ID', 'Accession_Number']].astype(str)
     breast_csv[['Patient_ID', 'Accession_Number']] = breast_csv[['Patient_ID', 'Accession_Number']].astype(str)
-    
-    # ADD THIS: Filter to only keep rows where Accession_Number exists in both datasets
+
+    # Filter to only keep rows where Accession_Number exists in both datasets
     image_accession_numbers = set(image_df['Accession_Number'].unique())
     breast_accession_numbers = set(breast_csv['Accession_Number'].unique())
-    
+
     # Keep only matching accession numbers
     matching_accession_numbers = image_accession_numbers.intersection(breast_accession_numbers)
-    
+
     image_df = image_df[image_df['Accession_Number'].isin(matching_accession_numbers)]
     breast_csv = breast_csv[breast_csv['Accession_Number'].isin(matching_accession_numbers)]
-    
+
     total_breast_accessions = len(breast_accession_numbers)
     non_matching_breast_accessions = len(breast_accession_numbers - matching_accession_numbers)
     percentage_without_images = (non_matching_breast_accessions / total_breast_accessions) * 100 if total_breast_accessions > 0 else 0
     print(f"{percentage_without_images:.1f}% of breast accessions did not have images")
-    
+
     # Populate Has_Malignant and Has_Benign based on final_interpretation
     breast_csv['Has_Malignant'] = breast_csv['final_interpretation'] == 'MALIGNANT'
     breast_csv['Has_Benign'] = breast_csv['final_interpretation'] == 'BENIGN'
-    
-    image_csv_file = f'{database_path}/ImageData.csv'
-    video_csv_file = f'{database_path}/VideoData.csv'
-    breast_csv_file = f'{database_path}/BreastData.csv'
-    
-    image_combined_df = image_df
-    if file_exists(image_csv_file):
-        existing_image_df = read_csv(image_csv_file)
-        existing_image_df['Patient_ID'] = existing_image_df['Patient_ID'].astype(str)
+
+    # Use DatabaseManager to save to SQLite
+    with DatabaseManager(database_path) as db:
+        # Create schema if it doesn't exist
+        db.create_schema()
+
+        # Check existing patient IDs
+        existing_patient_ids = db.check_existing_patient_ids()
+
+        # Filter out images from existing patients
         image_df['Patient_ID'] = image_df['Patient_ID'].astype(str)
-        
-        # keep only old IDs that don't exist in new data
-        image_df = image_df[~image_df['Patient_ID'].isin(existing_image_df['Patient_ID'].unique())]
-        
-        # now concatenate the old data with the new data
-        image_combined_df = pd.concat([existing_image_df, image_df], ignore_index=True)
+        image_df_new = image_df[~image_df['Patient_ID'].isin(existing_patient_ids)]
 
-        
-    if file_exists(video_csv_file):
-        existing_video_df = read_csv(video_csv_file)
-        video_df = pd.concat([existing_video_df, video_df], ignore_index=True)
+        # Insert study cases (breast data)
+        study_data = breast_csv.to_dict('records')
+        inserted_studies = db.insert_study_cases_batch(study_data)
 
+        # Insert images
+        if not image_df_new.empty:
+            image_data = image_df_new.to_dict('records')
+            inserted_images = db.insert_images_batch(image_data)
+        else:
+            inserted_images = 0
 
-    if file_exists(breast_csv_file):
-        existing_breast_df = read_csv(breast_csv_file)
-        breast_csv = pd.concat([existing_breast_df, breast_csv], ignore_index=True)
-        breast_csv = breast_csv.sort_values(['Patient_ID', 'Accession_Number', 'Breast'])
-        breast_csv = breast_csv.drop_duplicates(subset=['Patient_ID', 'Accession_Number', 'Breast'], keep='last')
-        breast_csv = breast_csv.reset_index(drop=True)
+        # Insert videos
+        if not video_df.empty:
+            video_data = video_df.to_dict('records')
+            inserted_videos = db.insert_videos_batch(video_data)
+        else:
+            inserted_videos = 0
 
-    # Export the DataFrames to CSV files
-    save_data(image_combined_df, image_csv_file)
-    save_data(video_df, video_csv_file)
-    save_data(breast_csv, breast_csv_file)
-    append_audit("dicom_parsing.images_success", len(image_combined_df))
-    append_audit("dicom_parsing.video_success", len(video_df))
-    append_audit("dicom_parsing.breast_success", len(breast_csv))
+        # Update metadata for images/videos from study cases
+        db.update_image_metadata_from_studies()
+        db.extract_metadata_from_filenames()
+
+        # Get total counts from database
+        total_images = len(db.get_images_dataframe())
+        total_videos = len(db.get_videos_dataframe())
+        total_studies = len(db.get_study_cases_dataframe())
+
+        print(f"Inserted {inserted_images} new images (Total: {total_images})")
+        print(f"Inserted {inserted_videos} new videos (Total: {total_videos})")
+        print(f"Inserted {inserted_studies} study cases (Total: {total_studies})")
+
+        append_audit("dicom_parsing.images_success", total_images)
+        append_audit("dicom_parsing.video_success", total_videos)
+        append_audit("dicom_parsing.breast_success", total_studies)
     
 def deduplicate_dcm_files(dcm_files_list):
     """Remove duplicate files based on DicomHash (filename without extension)"""
@@ -692,9 +701,15 @@ def Parse_Dicom_Files(CONFIG, anon_location, lesion_anon_file, raw_storage_datab
     append_audit("dicom_parsing.missing_ID_removed", removed_rows)
     
     parse_anon_file(anon_location, database_path, image_df)
-    
-    # Save lesion data
+
+    # Insert lesion/pathology data into database
+    print("Inserting lesion/pathology data")
     lesion_csv = pd.read_csv(lesion_anon_file)
-    save_data(lesion_csv, f'{database_path}/LesionData.csv')
+
+    with DatabaseManager(database_path) as db:
+        # Insert pathology data
+        pathology_data = lesion_csv.to_dict('records')
+        inserted_pathology = db.insert_pathology_batch(pathology_data)
+        print(f"Inserted {inserted_pathology} pathology records")
     
     

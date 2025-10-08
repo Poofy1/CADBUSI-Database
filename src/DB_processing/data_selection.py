@@ -1,5 +1,6 @@
 from src.DB_processing.image_processing import *
 from src.DB_processing.tools import append_audit
+from src.DB_processing.database import DatabaseManager
 import concurrent.futures
 from functools import partial
 tqdm.pandas()
@@ -304,52 +305,80 @@ def create_caliper_file(database_path, image_df, breast_df, max_workers=None):
 
 
 def Select_Data(database_path, only_labels):
-    input_file = f'{database_path}/ImageData.csv'
-    breast_file = f'{database_path}/BreastData.csv'
-    image_folder_path = f"{database_path}/images/"
-    db_out = read_csv(input_file)
-    breast_df = read_csv(breast_file)
+    with DatabaseManager(database_path) as db:
+        image_folder_path = f"{database_path}/images/"
 
-    # Remove rows with missing data in crop_x, crop_y, crop_w, crop_h
-    rows_before = len(db_out)
-    db_out.dropna(subset=['crop_x', 'crop_y', 'crop_w', 'crop_h'], inplace=True)
-    rows_after = len(db_out)
-    append_audit("image_processing.missing_crop_removed", rows_before - rows_after)
+        # Load data from database
+        db_out = db.get_images_dataframe()
+        breast_df = db.get_study_cases_dataframe()
 
-    if only_labels:
-        db_to_process = db_out
-    else:
-        db_to_process = db_out
+        # Prepare column mapping for database field names
+        db_out = db_out.rename(columns={
+            'image_name': 'ImageName',
+            'accession_number': 'Accession_Number',
+            'patient_id': 'Patient_ID',
+            'region_count': 'RegionCount',
+            'photometric_interpretation': 'PhotometricInterpretation',
+            'region_location_min_x0': 'RegionLocationMinX0',
+            'region_location_min_y0': 'RegionLocationMinY0',
+            'region_location_max_x1': 'RegionLocationMaxX1',
+            'region_location_max_y1': 'RegionLocationMaxY1'
+        })
 
-        print("Finding Similar Images")
-        accession_ids = db_to_process['Accession_Number'].unique()
+        breast_df = breast_df.rename(columns={
+            'accession_number': 'Accession_Number',
+            'has_malignant': 'Has_Malignant'
+        })
 
-        db_to_process['closest_fn']=''
-        db_to_process['distance'] = 99999
+        # Remove rows with missing data in crop_x, crop_y, crop_w, crop_h
+        rows_before = len(db_out)
+        db_out.dropna(subset=['crop_x', 'crop_y', 'crop_w', 'crop_h'], inplace=True)
+        rows_after = len(db_out)
+        append_audit("image_processing.missing_crop_removed", rows_before - rows_after)
 
-        # 1 worker is the fastest for GCP, do not change
-        with ThreadPoolExecutor(max_workers=1) as executor, tqdm(total=len(accession_ids), desc='') as progress:
-            futures = {executor.submit(process_nearest_given_ids, pid, db_to_process, image_folder_path): pid for pid in accession_ids}
+        if only_labels:
+            db_to_process = db_out
+        else:
+            db_to_process = db_out
 
-            for future in as_completed(futures):
-                result = future.result()
-                if result is not None and not result.empty:
-                    db_to_process.update(result)
-                progress.update()
+            print("Finding Similar Images")
+            accession_ids = db_to_process['Accession_Number'].unique()
 
-    db_to_process = choose_images_to_label(db_to_process)
-    # List all columns that are common to both dataframes
-    common_columns = db_out.columns.intersection(db_to_process.columns)
+            db_to_process['closest_fn'] = ''
+            db_to_process['distance'] = 99999
 
-    # Set 'ImageName' as the key for merging
-    key_column = 'ImageName'
+            # 1 worker is the fastest for GCP, do not change
+            with ThreadPoolExecutor(max_workers=1) as executor, tqdm(total=len(accession_ids), desc='') as progress:
+                futures = {executor.submit(process_nearest_given_ids, pid, db_to_process, image_folder_path): pid for pid in accession_ids}
 
-    # Take in all rows from db_to_process and only rows from db_out that aren't already present.
-    db_out = pd.merge(db_to_process, db_out[~db_out[key_column].isin(db_to_process[key_column])], on=common_columns.tolist(), how='outer')
+                for future in as_completed(futures):
+                    result = future.result()
+                    if result is not None and not result.empty:
+                        db_to_process.update(result)
+                    progress.update()
 
-    if 'latIsLeft' in db_out.columns:
-        db_out = db_out.drop(columns=['latIsLeft'])
+        db_to_process = choose_images_to_label(db_to_process)
 
-    save_data(db_out, input_file)
-    
-    create_caliper_file(database_path, db_out, breast_df)
+        # Update database with distance, closest_fn, and label information
+        cursor = db.conn.cursor()
+
+        for _, row in db_to_process.iterrows():
+            cursor.execute("""
+                UPDATE Images
+                SET is_labeled = ?
+                WHERE image_name = ?
+            """, (
+                1 if row.get('label') else 0,
+                row['ImageName']
+            ))
+
+            # Only update distance and closest_fn if they were calculated (not only_labels mode)
+            if not only_labels and 'distance' in row and 'closest_fn' in row:
+                # Store distance and closest_fn in a JSON or separate tracking mechanism
+                # For now, we'll skip storing these as they're not in the schema
+                pass
+
+        db.conn.commit()
+        print(f"Updated {len(db_to_process)} images in database")
+
+        create_caliper_file(database_path, db_out, breast_df)

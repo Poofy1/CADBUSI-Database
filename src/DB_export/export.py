@@ -13,6 +13,7 @@ parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
 from storage_adapter import *
 from src.DB_processing.tools import append_audit
+from src.DB_processing.database import DatabaseManager
 from src.DB_export.mask_processing import Mask_Lesions
 from src.DB_export.audit_report import generate_audit_report
 
@@ -602,31 +603,55 @@ def Export_Database(CONFIG, limit = None, reparse_images = True):
     output_dir = CONFIG["EXPORT_DIR"]
     parsed_database = CONFIG["DATABASE_DIR"]
     labelbox_path = CONFIG["LABELBOX_LABELS"]
-    
+
     date = datetime.datetime.now().strftime("%m_%d_%Y_%H_%M_%S")
     output_dir = f'{output_dir}/export_{date}/'
     print(f"Exporting dataset to {output_dir}")
     make_dirs(output_dir)
-    
+
     # Save the config to the export location
     save_data(json.dumps(CONFIG, indent=4), os.path.normpath(os.path.join(output_dir, 'export_config.json'))) # Convert CONFIG to a JSON string
 
-    #Dirs
-    image_csv_file = os.path.join(parsed_database, 'ImageData.csv')
-    breast_csv_file = os.path.join(parsed_database, 'BreastData.csv') 
-    video_csv_file = os.path.join(parsed_database, 'VideoData.csv')
+    # Read data from SQLite database
+    with DatabaseManager(parsed_database) as db:
+        video_df = db.get_videos_dataframe()
+        image_df = db.get_images_dataframe()
+        breast_df = db.get_study_cases_dataframe()
+
+        # Rename columns to match expected format
+        image_df = image_df.rename(columns={
+            'image_name': 'ImageName',
+            'accession_number': 'Accession_Number',
+            'patient_id': 'Patient_ID',
+            'dicom_hash': 'DicomHash',
+            'physical_delta_x': 'PhysicalDeltaX',
+            'region_count': 'RegionCount'
+        })
+
+        video_df = video_df.rename(columns={
+            'images_path': 'ImagesPath',
+            'accession_number': 'Accession_Number',
+            'patient_id': 'Patient_ID'
+        })
+
+        breast_df = breast_df.rename(columns={
+            'accession_number': 'Accession_Number',
+            'patient_id': 'Patient_ID',
+            'study_laterality': 'Study_Laterality',
+            'has_malignant': 'Has_Malignant',
+            'has_benign': 'Has_Benign',
+            'age_at_event': 'AGE_AT_EVENT',
+            'synoptic_report': 'SYNOPTIC_REPORT',
+            'findings': 'FINDINGS'
+        })
+
     instance_labels_csv_file = os.path.join(labelbox_path, 'InstanceLabels.csv')
-    
-    # Read data
-    video_df = read_csv(video_csv_file)
-    image_df = read_csv(image_csv_file)
-    breast_df = read_csv(breast_csv_file)
-    
+
     # Apply test subset early if specified
     if limit:
         # Limit breast_df first
         breast_df = breast_df.head(limit)
-        
+
         # Filter image_df and video_df to only include patients from the subset breast_df
         subset_patient_ids = breast_df['Patient_ID'].unique()
         image_df = image_df[image_df['Patient_ID'].isin(subset_patient_ids)]
@@ -640,11 +665,28 @@ def Export_Database(CONFIG, limit = None, reparse_images = True):
     image_df, video_df, breast_df = apply_filters(image_df, video_df, breast_df, CONFIG)
     image_df = apply_reject_system(image_df, instance_labels_csv_file, use_reject_system)
     
-    # Merge lesion data into image_df using Patient_ID, Accession_Number, and ImageSource
-    lesion_df = Mask_Lesions(image_df, parsed_database, output_dir)
+    # Process lesion masks and get lesion data from database
+    lesion_count = Mask_Lesions(parsed_database)
+    print(f"Processed {lesion_count} lesions from masks")
+
+    # Read lesion data from database
+    with DatabaseManager(parsed_database) as db:
+        lesion_df = pd.read_sql_query("""
+            SELECT
+                source_image_name as ImageSource,
+                image_name as ImageName,
+                accession_number as Accession_Number,
+                patient_id as Patient_ID,
+                crop_w,
+                crop_h
+            FROM Lesions
+        """, db.conn)
+
     image_df = image_df.copy()
     if not lesion_df.empty:
         image_df_with_lesions = pd.concat([image_df, lesion_df], ignore_index=True)
+    else:
+        image_df_with_lesions = image_df
     
     instance_data = build_instance_data(image_df_with_lesions, breast_df)
     instance_data = add_lesions_to_instance_data(instance_data, lesion_df, image_df_with_lesions, breast_df)
