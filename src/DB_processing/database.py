@@ -1,6 +1,5 @@
 """
 SQLite database handler for CADBUSI Database processing.
-Replaces CSV-based storage with a normalized relational database.
 """
 import sqlite3
 import pandas as pd
@@ -24,6 +23,8 @@ class DatabaseManager:
 
     def connect(self):
         """Create database connection and enable foreign keys."""
+        os.makedirs(self.database_path, exist_ok=True)  # ensure dir exists
+        self.db_file = os.path.abspath(self.db_file)
         self.conn = sqlite3.connect(self.db_file)
         self.conn.execute("PRAGMA foreign_keys = ON")
         return self.conn
