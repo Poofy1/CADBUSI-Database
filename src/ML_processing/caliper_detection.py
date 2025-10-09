@@ -94,8 +94,8 @@ class Net(torch.nn.Module):
 
 def find_calipers(images_dir, db_to_process, image_size=256):
     # Separate RGB images from non-RGB images
-    rgb_images = db_to_process[db_to_process['PhotometricInterpretation'] == 'RGB'].copy()
-    non_rgb_images = db_to_process[db_to_process['PhotometricInterpretation'] != 'RGB'].copy()
+    rgb_images = db_to_process[db_to_process['photometric_interpretation'] == 'RGB'].copy()
+    non_rgb_images = db_to_process[db_to_process['photometric_interpretation'] != 'RGB'].copy()
     
     results = []
     

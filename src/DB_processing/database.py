@@ -477,3 +477,40 @@ class DatabaseManager:
         rows_updated = cursor.rowcount
         self.conn.commit()
         print(f"Extracted metadata from {rows_updated} image filenames")
+        
+    def update_images_batch(self, updates: List[Dict[str, Any]]) -> int:
+        """Batch update image records."""
+        cursor = self.conn.cursor()
+        
+        update_query = """
+            UPDATE Images
+            SET crop_x = ?, crop_y = ?, crop_w = ?, crop_h = ?,
+                has_calipers = ?, darkness = ?,
+                laterality = ?, area = ?, orientation = ?,
+                is_labeled = 1,
+                crop_aspect_ratio = CASE 
+                    WHEN ? IS NOT NULL AND ? != 0 
+                    THEN CAST(? AS REAL) / ? 
+                    ELSE NULL 
+                END
+            WHERE image_name = ?
+        """
+        
+        rows_to_update = [
+            (
+                row.get('crop_x'), row.get('crop_y'), 
+                row.get('crop_w'), row.get('crop_h'),
+                1 if row.get('has_calipers') else 0,
+                row.get('darkness'),
+                row.get('laterality'), row.get('area'), 
+                row.get('orientation'),
+                row.get('crop_w'), row.get('crop_h'),
+                row.get('crop_w'), row.get('crop_h'),
+                row['ImageName']
+            )
+            for _, row in updates.iterrows()
+        ]
+        
+        cursor.executemany(update_query, rows_to_update)
+        self.conn.commit()
+        return cursor.rowcount

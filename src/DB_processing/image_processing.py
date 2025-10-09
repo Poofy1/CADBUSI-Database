@@ -437,34 +437,6 @@ def analyze_images(database_path):
         append_audit("image_processing.bilateral_with_missing_lat", unknown_after)
 
         # Update database with processed results
-        cursor = db.conn.cursor()
-
-        for _, row in db_to_process.iterrows():
-            cursor.execute("""
-                UPDATE Images
-                SET crop_x = ?, crop_y = ?, crop_w = ?, crop_h = ?,
-                    has_calipers = ?, darkness = ?,
-                    laterality = ?, area = ?, orientation = ?,
-                    is_labeled = 1,
-                    crop_aspect_ratio = CASE WHEN ? IS NOT NULL AND ? != 0 THEN CAST(? AS REAL) / ? ELSE NULL END
-                WHERE image_name = ?
-            """, (
-                row.get('crop_x'),
-                row.get('crop_y'),
-                row.get('crop_w'),
-                row.get('crop_h'),
-                1 if row.get('has_calipers') else 0,
-                row.get('darkness'),
-                row.get('laterality'),
-                row.get('area'),
-                row.get('orientation'),
-                row.get('crop_w'),
-                row.get('crop_h'),
-                row.get('crop_w'),
-                row.get('crop_h'),
-                row['ImageName']
-            ))
-
-        db.conn.commit()
-        print(f"Updated {len(db_to_process)} images in database")
+        updated_count = db.update_images_batch(db_to_process)
+        print(f"Updated {updated_count} images in database")
     
