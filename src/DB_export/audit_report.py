@@ -8,9 +8,9 @@ def calculate_patient_stats(breast_df):
     append_audit("export.num_patients", unique_patients)
     
     # Year range
-    breast_df['DATE'] = pd.to_datetime(breast_df['DATE'], errors='coerce')
-    append_audit("export.year_range_start", int(breast_df['DATE'].dt.year.min()))
-    append_audit("export.year_range_end", int(breast_df['DATE'].dt.year.max()))
+    breast_df['study_date'] = pd.to_datetime(breast_df['study_date'], errors='coerce')
+    append_audit("export.year_range_start", int(breast_df['study_date'].dt.year.min()))
+    append_audit("export.year_range_end", int(breast_df['study_date'].dt.year.max()))
     
     # Age statistics
     valid_ages = pd.to_numeric(breast_df['AGE_AT_EVENT'], errors='coerce').dropna()

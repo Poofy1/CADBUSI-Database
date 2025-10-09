@@ -555,27 +555,25 @@ def Locate_Lesions(image_dir, save_debug_images=False):
         )
 
         # Update the database with results
-        cursor = db.conn.cursor()
         processed_count = 0
-        
+        batch_updates = []
+
         for i, result in enumerate(results):
             if result is not None:
                 clean_idx = image_to_clean_idx[i]
                 image_name = valid_images[i]
                 
-                # Update database directly
-                cursor.execute("""
-                    UPDATE Images
-                    SET caliper_boxes = ?,
-                        has_caliper_mask = ?
-                    WHERE image_name = ?
-                """, (result['caliper_boxes'], 
-                      1 if result['has_caliper_mask'] else 0,
-                      image_name))
-                
+                # Prepare update data for batch insert
+                update_data = {
+                    'image_name': image_name,
+                    'caliper_boxes': result['caliper_boxes'],
+                    'has_caliper_mask': result['has_caliper_mask']
+                }
+                batch_updates.append(update_data)
                 processed_count += 1
             else:
                 print(f"Warning: Failed to process image {i}")
 
-        db.conn.commit()
-        print(f"Processed {processed_count} images with YOLO-based caliper detection")
+        if batch_updates:
+            db.insert_images_batch(batch_updates, update_only=True)
+            print(f"Processed {processed_count} images with YOLO-based caliper detection")

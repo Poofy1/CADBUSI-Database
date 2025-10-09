@@ -893,7 +893,7 @@ def process_image_pairs_multithreading(pairs, image_dir, image_data_df, model, t
     # Pre-compute lookup dictionary ONCE
     image_name_to_row = {}
     for idx, row in image_data_df.iterrows():
-        image_name_to_row[row['ImageName']] = row
+        image_name_to_row[row['image_name']] = row
     
     def worker(pair):
         # O(1) dictionary lookup

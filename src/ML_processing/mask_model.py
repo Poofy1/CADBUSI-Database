@@ -39,7 +39,7 @@ class MyDataset(Dataset):
         """
         Args:
             root_dir: Root directory for images
-            db_to_process: DataFrame with ImageName column (already renamed from image_name)
+            db_to_process: DataFrame with image_name column (already renamed from image_name)
             max_width: Maximum width for padding
             max_height: Maximum height for padding
         """
@@ -52,7 +52,7 @@ class MyDataset(Dataset):
         
         # Filter by the database image names
         self.images = sorted([os.path.basename(file_dict[img_name]) 
-                            for img_name in db_to_process['ImageName'].values 
+                            for img_name in db_to_process['image_name'].values 
                             if img_name in file_dict])
         
         self.max_width = max_width
@@ -83,7 +83,7 @@ class MyDatasetVideo(Dataset):
         """
         Args:
             root_dir: Root directory for video frames
-            db_to_process: DataFrame with ImagesPath column (already renamed from images_path)
+            db_to_process: DataFrame with images_path column (already renamed from images_path)
             max_width: Maximum width for padding
             max_height: Maximum height for padding
         """
@@ -93,7 +93,7 @@ class MyDatasetVideo(Dataset):
         all_first_images = get_first_image_in_each_folder(root_dir)
         
         # Filter to only include images from db_to_process
-        images_to_process = set(db_to_process['ImagesPath'].tolist())
+        images_to_process = set(db_to_process['images_path'].tolist())
         
         self.images = [img for img in all_first_images 
                        if img.split('/')[0] in images_to_process]
@@ -128,7 +128,7 @@ def find_masks(images_dir, model_name, db_to_process, max_width, max_height,
     Args:
         images_dir: Directory containing images
         model_name: Name of the model file (without .pt extension)
-        db_to_process: DataFrame with image data (with renamed columns: ImageName or ImagesPath)
+        db_to_process: DataFrame with image data (with renamed columns: image_name or images_path)
         max_width: Maximum width for padding
         max_height: Maximum height for padding
         video_format: Whether processing video frames

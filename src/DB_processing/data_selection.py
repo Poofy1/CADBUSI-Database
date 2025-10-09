@@ -22,7 +22,7 @@ def choose_images_to_label(db):
     
     # Mark all rows with calipers as label = False
     caliper_count_before = len(db[db['label']])
-    db.loc[db['has_calipers'], 'label'] = False
+    db.loc[db['has_calipers'] == 1, 'label'] = False
     caliper_count_after = len(db[db['label']])
     caliper_removed = caliper_count_before - caliper_count_after
     
@@ -39,9 +39,9 @@ def choose_images_to_label(db):
     lat_count_after = len(db[db['label']])
     lat_removed = lat_count_before - lat_count_after
     
-    # Set label = False for all images with 'RegionCount' > 1
+    # Set label = False for all images with 'region_count' > 1
     region_count_before = len(db[db['label']])
-    db.loc[db['RegionCount'] > 1, 'label'] = False
+    db.loc[db['region_count'] > 1, 'label'] = False
     region_count_after = len(db[db['label']])
     region_removed = region_count_before - region_count_after
     
@@ -56,9 +56,9 @@ def choose_images_to_label(db):
     append_audit("image_processing.multi_region_removed", region_removed)
     append_audit("image_processing.usable_images", len(db[db['label']]))
     
-    total_caliper_images = len(db[db['has_calipers']])
+    total_caliper_images = len(db[db['has_calipers'] == 1])
     append_audit("image_processing.total_caliper_images", total_caliper_images)
-    caliper_with_duplicates = len(db[(db['has_calipers']) & (db['distance'] <= 5)])
+    caliper_with_duplicates = len(db[(db['has_calipers'] == 1) & (db['distance'] <= 5)])
     append_audit("image_processing.caliper_with_duplicates", caliper_with_duplicates)
     total_near_duplicates = len(db[db['distance'] <= 5]) 
     append_audit("image_processing.total_near_duplicates", total_near_duplicates)
@@ -79,14 +79,14 @@ def find_nearest_images(subset, image_folder_path):
     image_pairs_checked = set()
 
     # All regions have same coordinates - get them once
-    coord_cols = ['RegionLocationMinX0', 'RegionLocationMinY0', 'RegionLocationMaxX1', 'RegionLocationMaxY1']
+    coord_cols = ['region_location_min_x0', 'region_location_min_y0', 'region_location_max_x1', 'region_location_max_y1']
     x, y, x1, y1 = subset.iloc[0][coord_cols].astype(int)
     w, h = x1 - x, y1 - y
 
     # Load and crop all images once
     cropped_images = {}
     for image_id in idx:
-        file_name = subset.loc[image_id, 'ImageName']
+        file_name = subset.loc[image_id, 'image_name']
         full_filename = os.path.join(image_folder_path, file_name)
         img = read_image(full_filename, use_pil=True)
         img = np.array(img).astype(np.uint8)
@@ -121,15 +121,15 @@ def find_nearest_images(subset, image_folder_path):
         
         # Store results for both images
         result[current_id] = {
-            'image_filename': subset.at[current_id, 'ImageName'],
-            'sister_filename': subset.at[sister_id, 'ImageName'],
+            'image_filename': subset.at[current_id, 'image_name'],
+            'sister_filename': subset.at[sister_id, 'image_name'],
             'distance': distance
         }
         
         if sister_id not in result:
             result[sister_id] = {
-                'image_filename': subset.at[sister_id, 'ImageName'],
-                'sister_filename': subset.at[current_id, 'ImageName'],
+                'image_filename': subset.at[sister_id, 'image_name'],
+                'sister_filename': subset.at[current_id, 'image_name'],
                 'distance': distance
             }
         
@@ -141,15 +141,15 @@ def find_nearest_images(subset, image_folder_path):
 
 def process_nearest_given_ids(pid, db_out, image_folder_path):
     # Filter by accession number first
-    subset = db_out[db_out['Accession_Number'] == pid]
+    subset = db_out[db_out['accession_number'] == pid]
     
     # EARLY EXIT:
-    subset = subset[subset['PhotometricInterpretation'] != 'RGB']
+    subset = subset[subset['photometric_interpretation'] != 'RGB']
     
     # Validate crop coordinates
     invalid_coords = (
-        (subset['RegionLocationMaxX1'] <= subset['RegionLocationMinX0']) |
-        (subset['RegionLocationMaxY1'] <= subset['RegionLocationMinY0'])
+        (subset['region_location_max_x1'] <= subset['region_location_min_x0']) |
+        (subset['region_location_max_y1'] <= subset['region_location_min_y0'])
     )
     if invalid_coords.any():
         subset = subset[~invalid_coords]
@@ -159,7 +159,7 @@ def process_nearest_given_ids(pid, db_out, image_folder_path):
         return subset
     
     # Group by crop coordinates
-    coord_cols = ['RegionLocationMinX0', 'RegionLocationMinY0', 'RegionLocationMaxX1', 'RegionLocationMaxY1']
+    coord_cols = ['region_location_min_x0', 'region_location_min_y0', 'region_location_max_x1', 'region_location_max_y1']
     
     # Create coordinate groups
     subset['coord_key'] = subset[coord_cols].apply(lambda row: tuple(row), axis=1)
@@ -219,30 +219,30 @@ def create_caliper_file(database_path, image_df, breast_df, max_workers=None):
     
     # Create the caliper dataframe with required columns
     caliper_df = pd.DataFrame()
-    caliper_df['Patient_ID'] = caliper_images['Patient_ID']
-    caliper_df['Accession_Number'] = caliper_images.get('Accession_Number', '')
+    caliper_df['patient_id'] = caliper_images['patient_id']
+    caliper_df['accession_number'] = caliper_images.get('accession_number', '')
     caliper_df['Distance'] = caliper_images['distance']
-    caliper_df['Caliper_Image'] = caliper_images['ImageName']
+    caliper_df['Caliper_Image'] = caliper_images['image_name']
     caliper_df['Raw_Image'] = caliper_images['closest_fn']
     
     # Fix leading zeros issue - normalize both accession number columns
-    caliper_df['Accession_Number'] = caliper_df['Accession_Number'].astype(str).str.lstrip('0')
+    caliper_df['accession_number'] = caliper_df['accession_number'].astype(str).str.lstrip('0')
     breast_df = breast_df.copy()  # Don't modify the original
-    breast_df['Accession_Number'] = breast_df['Accession_Number'].astype(str).str.lstrip('0')
+    breast_df['accession_number'] = breast_df['accession_number'].astype(str).str.lstrip('0')
     
     # Handle edge case where all zeros becomes empty string
-    caliper_df['Accession_Number'] = caliper_df['Accession_Number'].replace('', '0')
-    breast_df['Accession_Number'] = breast_df['Accession_Number'].replace('', '0')
+    caliper_df['accession_number'] = caliper_df['accession_number'].replace('', '0')
+    breast_df['accession_number'] = breast_df['accession_number'].replace('', '0')
     
-    # Merge with breast data to get Has_Malignant information
+    # Merge with breast data to get has_malignant information
     caliper_df = caliper_df.merge(
-        breast_df[['Accession_Number', 'Has_Malignant']], 
-        on='Accession_Number', 
+        breast_df[['accession_number', 'has_malignant']], 
+        on='accession_number', 
         how='left'
     )
     
     # Reorder columns to match your specification
-    column_order = ['Patient_ID', 'Accession_Number', 'Has_Malignant', 'Distance', 'Raw_Image', 'Caliper_Image']
+    column_order = ['patient_id', 'accession_number', 'has_malignant', 'Distance', 'Raw_Image', 'Caliper_Image']
     caliper_df = caliper_df[column_order]
     
     # Function to copy both caliper and raw images for a single row
@@ -312,24 +312,6 @@ def Select_Data(database_path, only_labels):
         db_out = db.get_images_dataframe()
         breast_df = db.get_study_cases_dataframe()
 
-        # Prepare column mapping for database field names
-        db_out = db_out.rename(columns={
-            'image_name': 'ImageName',
-            'accession_number': 'Accession_Number',
-            'patient_id': 'Patient_ID',
-            'region_count': 'RegionCount',
-            'photometric_interpretation': 'PhotometricInterpretation',
-            'region_location_min_x0': 'RegionLocationMinX0',
-            'region_location_min_y0': 'RegionLocationMinY0',
-            'region_location_max_x1': 'RegionLocationMaxX1',
-            'region_location_max_y1': 'RegionLocationMaxY1'
-        })
-
-        breast_df = breast_df.rename(columns={
-            'accession_number': 'Accession_Number',
-            'has_malignant': 'Has_Malignant'
-        })
-
         # Remove rows with missing data in crop_x, crop_y, crop_w, crop_h
         rows_before = len(db_out)
         db_out.dropna(subset=['crop_x', 'crop_y', 'crop_w', 'crop_h'], inplace=True)
@@ -338,11 +320,13 @@ def Select_Data(database_path, only_labels):
 
         if only_labels:
             db_to_process = db_out
+            columns_to_update = ['image_name', 'label', 'crop_aspect_ratio']
         else:
             db_to_process = db_out
+            columns_to_update = ['image_name', 'label', 'crop_aspect_ratio', 'closest_fn', 'distance']
 
             print("Finding Similar Images")
-            accession_ids = db_to_process['Accession_Number'].unique()
+            accession_ids = db_to_process['accession_number'].unique()
 
             db_to_process['closest_fn'] = ''
             db_to_process['distance'] = 99999
@@ -359,26 +343,12 @@ def Select_Data(database_path, only_labels):
 
         db_to_process = choose_images_to_label(db_to_process)
 
-        # Update database with distance, closest_fn, and label information
-        cursor = db.conn.cursor()
-
-        for _, row in db_to_process.iterrows():
-            cursor.execute("""
-                UPDATE Images
-                SET is_labeled = ?
-                WHERE image_name = ?
-            """, (
-                1 if row.get('label') else 0,
-                row['ImageName']
-            ))
-
-            # Only update distance and closest_fn if they were calculated (not only_labels mode)
-            if not only_labels and 'distance' in row and 'closest_fn' in row:
-                # Store distance and closest_fn in a JSON or separate tracking mechanism
-                # For now, we'll skip storing these as they're not in the schema
-                pass
-
-        db.conn.commit()
+        # Convert DataFrame to list of dicts for batch insert
+        update_data = db_to_process[columns_to_update].to_dict('records')
+        
+        # Use batch update for existing records (more efficient than upsert)
+        db.insert_images_batch(update_data, update_only=True)
+        
         print(f"Updated {len(db_to_process)} images in database")
 
         create_caliper_file(database_path, db_out, breast_df)

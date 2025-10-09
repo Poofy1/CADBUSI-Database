@@ -351,9 +351,6 @@ def get_OCR(image_folder_path, description_masks):
 # MAIN
 ######################################################
 
-
-
-# Main method to perform operations
 def analyze_images(database_path):
 
     with DatabaseManager() as db:
@@ -389,13 +386,13 @@ def analyze_images(database_path):
         has_calipers_confidence_dict = {filename: pred_val for filename, _, pred_val in caliper_results}
         darknesses_dict = {filename: value for filename, value in darknesses}
         image_masks_dict = {filename: mask for filename, mask in image_masks}
-
+        
         # Update dataframe using map
-        image_df['description'] = image_df['image_name'].map(pd.Series(descriptions))
-        image_df['darkness'] = image_df['image_name'].map(pd.Series(darknesses_dict))
-        image_df['has_calipers'] = image_df['image_name'].map(pd.Series(has_calipers_dict))
-        image_df['has_calipers_prediction'] = image_df['image_name'].map(pd.Series(has_calipers_confidence_dict))
-        image_df['bounding_box'] = image_df['image_name'].map(pd.Series(image_masks_dict))
+        image_df['description'] = image_df['image_name'].map(descriptions)
+        image_df['darkness'] = image_df['image_name'].map(darknesses_dict)
+        image_df['has_calipers'] = image_df['image_name'].map(has_calipers_dict)
+        image_df['has_calipers_prediction'] = image_df['image_name'].map(has_calipers_confidence_dict)
+        image_df['bounding_box'] = image_df['image_name'].map(image_masks_dict)
 
         # Fill NaN values with (None, None, None, None) before expanding
         image_df['bounding_box'] = image_df['bounding_box'].apply(
@@ -423,7 +420,7 @@ def analyze_images(database_path):
         unknown_after = image_df[image_df['laterality'] == 'unknown'].shape[0]
         append_audit("image_processing.bilateral_with_missing_lat", unknown_after)
 
-        # Update database with processed results
-        updated_count = db.update_images_batch(image_df)
+        # Update database with processed results using upsert
+        image_updates = image_df.to_dict('records')
+        updated_count = db.insert_images_batch(image_updates, upsert=True)
         print(f"Updated {updated_count} images in database")
-    

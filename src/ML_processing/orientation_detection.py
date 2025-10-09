@@ -26,7 +26,7 @@ class MyDataset(Dataset):
         file_dict = {os.path.basename(img): img for img in all_files}
 
         # Filter by the database image names and store only the filenames (not full paths)
-        self.images = sorted([os.path.basename(file_dict[img_name]) for img_name in db_to_process['ImageName'].values 
+        self.images = sorted([os.path.basename(file_dict[img_name]) for img_name in db_to_process['image_name'].values 
                             if img_name in file_dict])
 
     def __len__(self):
@@ -90,14 +90,6 @@ def Find_Orientation(CONFIG, image_size=375):
         # Read image data
         image_df = db.get_images_dataframe()
         
-        # Prepare column mapping for database field names
-        image_df = image_df.rename(columns={
-            'image_name': 'ImageName',
-            'patient_id': 'Patient_ID',
-            'orientation': 'orientation',
-            'region_count': 'RegionCount'
-        })
-        
         if 'reparsed_orientation' not in image_df.columns:
             image_df['reparsed_orientation'] = False
         else:
@@ -109,9 +101,9 @@ def Find_Orientation(CONFIG, image_size=375):
         
         # Filter to only process images for bilateral patients
         db_to_process = image_df[(image_df['orientation'] == 'unknown') 
-                         & (image_df['RegionCount'] == 1) 
+                         & (image_df['region_count'] == 1) 
                          & (image_df['reparsed_orientation'] != True)
-                         & (image_df['Patient_ID'].isin(bilateral_patients))]
+                         & (image_df['patient_id'].isin(bilateral_patients))]
         
         # If no images to process, return early
         if len(db_to_process) == 0:

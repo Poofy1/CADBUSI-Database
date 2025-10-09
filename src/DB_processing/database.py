@@ -101,9 +101,14 @@ class DatabaseManager:
                 physical_delta_x REAL,
                 has_calipers INTEGER DEFAULT 0,
                 has_calipers_prediction REAL,
+                caliper_boxes TEXT,
+                has_caliper_mask INTEGER DEFAULT 0,
                 darkness REAL,
                 is_labeled INTEGER DEFAULT 1,
+                label INTEGER DEFAULT 1,
                 region_count INTEGER DEFAULT 1,
+                closest_fn TEXT,
+                distance REAL DEFAULT 99999,
                 file_name TEXT,
                 software_versions TEXT,
                 manufacturer_model_name TEXT,
@@ -138,6 +143,7 @@ class DatabaseManager:
                 columns INTEGER,
                 physical_delta_x REAL,
                 file_name TEXT,
+                label INTEGER DEFAULT 1,
                 software_versions TEXT,
                 manufacturer_model_name TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -203,45 +209,97 @@ class DatabaseManager:
         self.conn.commit()
         print("Database schema created successfully")
 
-    def insert_images_batch(self, image_data: List[Dict[str, Any]]) -> int:
-        """Insert multiple images in a single transaction."""
+    def insert_images_batch(self, image_data: List[Dict[str, Any]], upsert: bool = False, update_only: bool = False) -> int:
+        """
+        Insert multiple images in a single transaction.
+        Only inserts columns that are present in the data.
+        
+        Args:
+            image_data: List of dictionaries with image data
+            upsert: If True, updates existing records. If False, ignores duplicates.
+            update_only: If True, only updates existing records (no insert attempt). Requires 'image_name' in data.
+        """
+        if not image_data:
+            return 0
+        
         cursor = self.conn.cursor()
         
-        insert_query = """
-            INSERT OR IGNORE INTO Images (
-                accession_number, patient_id, image_name, dicom_hash,
-                region_spatial_format, region_data_type,
-                region_location_min_x0, region_location_min_y0,
-                region_location_max_x1, region_location_max_y1,
-                photometric_interpretation, rows, columns, physical_delta_x,
-                region_count, file_name, software_versions, manufacturer_model_name
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """
+        # Get all possible columns (excluding auto-increment and timestamp)
+        all_columns = [
+            'accession_number', 'patient_id', 'image_name', 'dicom_hash',
+            'laterality', 'area', 'orientation', 'clock_pos', 'nipple_dist', 'description',
+            'region_spatial_format', 'region_data_type',
+            'region_location_min_x0', 'region_location_min_y0',
+            'region_location_max_x1', 'region_location_max_y1',
+            'crop_x', 'crop_y', 'crop_w', 'crop_h', 'crop_aspect_ratio',
+            'photometric_interpretation', 'rows', 'columns', 'physical_delta_x',
+            'has_calipers', 'has_calipers_prediction', 'caliper_boxes', 'has_caliper_mask',
+            'darkness', 'is_labeled', 'label', 'region_count', 'closest_fn', 'distance',
+            'file_name', 'software_versions', 'manufacturer_model_name'
+        ]
         
+        # Find which columns are actually present in the data
+        first_row = image_data[0]
+        present_columns = [col for col in all_columns if col in first_row]
+        
+        # Handle UPDATE-only mode
+        if update_only:
+            if 'image_name' not in present_columns:
+                raise ValueError("update_only mode requires 'image_name' in data")
+            
+            # Build UPDATE query
+            update_cols = [col for col in present_columns if col != 'image_name']
+            set_clause = ', '.join([f"{col} = ?" for col in update_cols])
+            update_query = f"UPDATE Images SET {set_clause} WHERE image_name = ?"
+            
+            # Extract values for UPDATE (excluding image_name, which goes at the end)
+            rows_to_update = [
+                tuple(
+                    # Handle boolean conversions
+                    [(1 if row.get(col) else 0) if col in ['has_calipers', 'has_caliper_mask', 'is_labeled', 'label']
+                    else str(row.get(col, '')) if col in ['caliper_boxes']
+                    else row.get(col)
+                    for col in update_cols] +
+                    [str(row.get('image_name', ''))]  # image_name for WHERE clause
+                )
+                for row in image_data
+            ]
+            
+            cursor.executemany(update_query, rows_to_update)
+            self.conn.commit()
+            return cursor.rowcount
+        
+        # Original INSERT logic for non-update_only mode
+        placeholders = ', '.join(['?' for _ in present_columns])
+        columns_str = ', '.join(present_columns)
+        
+        if upsert:
+            # Update all columns except the primary key on conflict
+            update_cols = [col for col in present_columns if col not in ['image_name', 'dicom_hash']]
+            update_str = ', '.join([f"{col} = excluded.{col}" for col in update_cols])
+            insert_query = f"""
+                INSERT INTO Images ({columns_str})
+                VALUES ({placeholders})
+                ON CONFLICT(image_name) DO UPDATE SET {update_str}
+            """
+        else:
+            insert_query = f"""
+                INSERT OR IGNORE INTO Images ({columns_str})
+                VALUES ({placeholders})
+            """
+        
+        # Extract values in the same order as present_columns
         rows_to_insert = [
-            (
-                str(row.get('accession_number', '')),
-                str(row.get('patient_id', '')),
-                str(row.get('image_name', '')),
-                str(row.get('dicom_hash', '')),
-                row.get('region_spatial_format'),
-                row.get('region_data_type'),
-                row.get('region_location_min_x0'),
-                row.get('region_location_min_y0'),
-                row.get('region_location_max_x1'),
-                row.get('region_location_max_y1'),
-                row.get('photometric_interpretation'),
-                row.get('rows'),
-                row.get('columns'),
-                row.get('physical_delta_x'),
-                row.get('region_count', 1),
-                row.get('file_name'),
-                row.get('software_versions'),
-                row.get('manufacturer_model_name')
+            tuple(
+                # Handle boolean conversions
+                (1 if row.get(col) else 0) if col in ['has_calipers', 'has_caliper_mask', 'is_labeled', 'label']
+                else str(row.get(col, '')) if col in ['accession_number', 'patient_id', 'image_name', 'dicom_hash', 'caliper_boxes']
+                else row.get(col)
+                for col in present_columns
             )
             for row in image_data
         ]
-        
+                
         cursor.executemany(insert_query, rows_to_insert)
         self.conn.commit()
         return cursor.rowcount
@@ -388,11 +446,11 @@ class DatabaseManager:
         # Change this part - use snake_case
         rows_to_insert = [
             (
-                str(row.get('patient_id', '')),      # was PATIENT_ID
-                str(row.get('accession_number', '')), # was ACCESSION_NUMBER
-                str(row.get('specimen_date', '')),    # was DATE
+                str(row.get('patient_id', '')), 
+                str(row.get('accession_number', '')), 
+                str(row.get('specimen_date', '')),
                 str(row.get('lesion_diag', '')),
-                str(row.get('synoptic_report', '')),  # was SYNOPTIC_REPORT
+                str(row.get('synoptic_report', '')),
                 str(row.get('cancer_type', ''))
             )
             for row in pathology_data
@@ -420,10 +478,7 @@ class DatabaseManager:
                 WHERE StudyCases.accession_number = Images.accession_number
             )
         """)
-
-        rows_updated = cursor.rowcount
         self.conn.commit()
-        print(f"Updated laterality for {rows_updated} images from study cases")
 
     def extract_metadata_from_filenames(self):
         """Extract laterality and area from image/video filenames where missing."""
@@ -447,48 +502,4 @@ class DatabaseManager:
             END
             WHERE laterality IS NULL OR area IS NULL
         """)
-
-        rows_updated = cursor.rowcount
         self.conn.commit()
-        print(f"Extracted metadata from {rows_updated} image filenames")
-        
-    def update_images_batch(self, updates: pd.DataFrame) -> int:
-        """Batch update image records."""
-        cursor = self.conn.cursor()
-        
-        update_query = """
-            UPDATE Images
-            SET crop_x = ?, crop_y = ?, crop_w = ?, crop_h = ?,
-                has_calipers = ?, has_calipers_prediction = ?, darkness = ?,
-                laterality = ?, area = ?, orientation = ?,
-                clock_pos = ?, nipple_dist = ?, description = ?,
-                is_labeled = 1,
-                crop_aspect_ratio = CASE 
-                    WHEN ? IS NOT NULL AND ? != 0 
-                    THEN CAST(? AS REAL) / ? 
-                    ELSE NULL 
-                END
-            WHERE image_name = ?
-        """
-        
-        rows_to_update = [
-            (
-                row.get('crop_x'), row.get('crop_y'), 
-                row.get('crop_w'), row.get('crop_h'),
-                1 if row.get('has_calipers') else 0,
-                row.get('has_calipers_prediction'),
-                row.get('darkness'),
-                row.get('laterality'), row.get('area'), 
-                row.get('orientation'),
-                row.get('clock_pos'), row.get('nipple_dist'),
-                row.get('description'),
-                row.get('crop_w'), row.get('crop_h'),
-                row.get('crop_w'), row.get('crop_h'),
-                row['image_name']  # Changed from ImageName
-            )
-            for _, row in updates.iterrows()
-        ]
-        
-        cursor.executemany(update_query, rows_to_update)
-        self.conn.commit()
-        return cursor.rowcount

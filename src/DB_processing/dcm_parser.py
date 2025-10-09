@@ -494,8 +494,6 @@ def parse_files(CONFIG, dcm_files_list, database_path, batch_size=100):
     print("Parsing DCM Data")
     video_n_frames = CONFIG["VIDEO_SAMPLING"]
     
-    print(f'New Dicom Files: {len(dcm_files_list)}')
-    
     # Check if there are no new files to process
     if len(dcm_files_list) == 0:
         raise ValueError("No *new* DICOM files found to process.")
@@ -670,7 +668,7 @@ def deduplicate_dcm_files(dcm_files_list):
     return unique_files
 
 # Main Method
-def parse_dicom_files(CONFIG, anon_location, lesion_anon_file, raw_storage_database, encryption_key):
+def Parse_Dicom_Files(CONFIG, anon_location, lesion_anon_file, raw_storage_database, encryption_key):
     database_path = CONFIG["DATABASE_DIR"]
     data_range = CONFIG["DEBUG_DATA_RANGE"]
     

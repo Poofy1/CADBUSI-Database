@@ -28,13 +28,13 @@ class MyDataset(Dataset):
         file_dict = {os.path.basename(img): img for img in all_files}
 
         # Filter by the database image names and store only the filenames (not full paths)
-        self.images = sorted([os.path.basename(file_dict[img_name]) for img_name in db_to_process['ImageName'].values 
+        self.images = sorted([os.path.basename(file_dict[img_name]) for img_name in db_to_process['image_name'].values 
                             if img_name in file_dict])
         
-        # Create a mapping from ImageName to crop parameters
+        # Create a mapping from image_name to crop parameters
         self.crop_info = {}
         for idx, row in db_to_process.iterrows():
-            img_name = row['ImageName']
+            img_name = row['image_name']
             if img_name in file_dict:
                 self.crop_info[os.path.basename(img_name)] = {
                     'crop_x': row.get('crop_x', None),

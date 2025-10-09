@@ -42,11 +42,6 @@ def download_models():
     for model_name, model_info in models.items():
         model_path = model_dir / model_info["filename"]
         
-        # Check if file already exists
-        if model_path.exists():
-            print(f"✓ {model_info['filename']} already exists")
-            continue
-        
         print(f"\nDownloading {model_info['filename']} from Hugging Face...")
         
         try:
@@ -67,10 +62,10 @@ def download_models():
                             progress = (downloaded / total_size) * 100
                             print(f"\rProgress: {progress:.1f}%", end='', flush=True)
             
-            print(f"\n✓ Successfully downloaded {model_info['filename']} ({downloaded / (1024*1024):.1f} MB)")
+            print(f"\nSuccessfully downloaded {model_info['filename']} ({downloaded / (1024*1024):.1f} MB)")
             
         except Exception as e:
-            print(f"\n✗ Error downloading {model_info['filename']}: {e}")
+            print(f"\nError downloading {model_info['filename']}: {e}")
             # Clean up partial download
             if model_path.exists():
                 model_path.unlink()
