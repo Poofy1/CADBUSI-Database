@@ -81,6 +81,9 @@ class DatabaseManager:
                 laterality TEXT,
                 area TEXT,
                 orientation TEXT,
+                clock_pos TEXT,
+                nipple_dist INTEGER,
+                description TEXT,
                 region_spatial_format INTEGER,
                 region_data_type INTEGER,
                 region_location_min_x0 INTEGER,
@@ -97,6 +100,7 @@ class DatabaseManager:
                 columns INTEGER,
                 physical_delta_x REAL,
                 has_calipers INTEGER DEFAULT 0,
+                has_calipers_prediction REAL,
                 darkness REAL,
                 is_labeled INTEGER DEFAULT 1,
                 region_count INTEGER DEFAULT 1,
@@ -107,6 +111,7 @@ class DatabaseManager:
                 FOREIGN KEY (accession_number) REFERENCES StudyCases(accession_number) ON DELETE CASCADE
             )
         """)
+
 
         # Videos table (Video sequence data)
         cursor.execute("""
@@ -199,18 +204,9 @@ class DatabaseManager:
         print("Database schema created successfully")
 
     def insert_images_batch(self, image_data: List[Dict[str, Any]]) -> int:
-        """
-        Insert multiple images in a single transaction.
-
-        Args:
-            image_data: List of dictionaries containing image data
-
-        Returns:
-            Number of rows inserted
-        """
+        """Insert multiple images in a single transaction."""
         cursor = self.conn.cursor()
-
-        # Map CSV column names to database columns
+        
         insert_query = """
             INSERT OR IGNORE INTO Images (
                 accession_number, patient_id, image_name, dicom_hash,
@@ -221,46 +217,39 @@ class DatabaseManager:
                 region_count, file_name, software_versions, manufacturer_model_name
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
-
-        rows_to_insert = []
-        for row in image_data:
-            rows_to_insert.append((
-                str(row.get('Accession_Number', '')),
-                str(row.get('Patient_ID', '')),
-                str(row.get('ImageName', '')),
-                str(row.get('DicomHash', '')),
-                row.get('RegionSpatialFormat'),
-                row.get('RegionDataType'),
-                row.get('RegionLocationMinX0'),
-                row.get('RegionLocationMinY0'),
-                row.get('RegionLocationMaxX1'),
-                row.get('RegionLocationMaxY1'),
-                row.get('PhotometricInterpretation'),
-                row.get('Rows'),
-                row.get('Columns'),
-                row.get('PhysicalDeltaX'),
-                row.get('RegionCount', 1),
-                row.get('FileName'),
-                row.get('SoftwareVersions'),
-                row.get('ManufacturerModelName')
-            ))
-
+        
+        rows_to_insert = [
+            (
+                str(row.get('accession_number', '')),
+                str(row.get('patient_id', '')),
+                str(row.get('image_name', '')),
+                str(row.get('dicom_hash', '')),
+                row.get('region_spatial_format'),
+                row.get('region_data_type'),
+                row.get('region_location_min_x0'),
+                row.get('region_location_min_y0'),
+                row.get('region_location_max_x1'),
+                row.get('region_location_max_y1'),
+                row.get('photometric_interpretation'),
+                row.get('rows'),
+                row.get('columns'),
+                row.get('physical_delta_x'),
+                row.get('region_count', 1),
+                row.get('file_name'),
+                row.get('software_versions'),
+                row.get('manufacturer_model_name')
+            )
+            for row in image_data
+        ]
+        
         cursor.executemany(insert_query, rows_to_insert)
         self.conn.commit()
         return cursor.rowcount
 
     def insert_videos_batch(self, video_data: List[Dict[str, Any]]) -> int:
-        """
-        Insert multiple videos in a single transaction.
-
-        Args:
-            video_data: List of dictionaries containing video data
-
-        Returns:
-            Number of rows inserted
-        """
+        """Insert multiple videos in a single transaction."""
         cursor = self.conn.cursor()
-
+        
         insert_query = """
             INSERT OR IGNORE INTO Videos (
                 accession_number, patient_id, images_path, dicom_hash, saved_frames,
@@ -271,46 +260,39 @@ class DatabaseManager:
                 file_name, software_versions, manufacturer_model_name
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
-
-        rows_to_insert = []
-        for row in video_data:
-            rows_to_insert.append((
-                str(row.get('Accession_Number', '')),
-                str(row.get('Patient_ID', '')),
-                str(row.get('ImagesPath', '')),
-                str(row.get('DicomHash', '')),
-                row.get('SavedFrames'),
-                row.get('RegionSpatialFormat'),
-                row.get('RegionDataType'),
-                row.get('RegionLocationMinX0'),
-                row.get('RegionLocationMinY0'),
-                row.get('RegionLocationMaxX1'),
-                row.get('RegionLocationMaxY1'),
-                row.get('PhotometricInterpretation'),
-                row.get('Rows'),
-                row.get('Columns'),
-                row.get('PhysicalDeltaX'),
-                row.get('FileName'),
-                row.get('SoftwareVersions'),
-                row.get('ManufacturerModelName')
-            ))
-
+        
+        rows_to_insert = [
+            (
+                str(row.get('accession_number', '')),
+                str(row.get('patient_id', '')),
+                str(row.get('images_path', '')),
+                str(row.get('dicom_hash', '')),
+                row.get('saved_frames'),
+                row.get('region_spatial_format'),
+                row.get('region_data_type'),
+                row.get('region_location_min_x0'),
+                row.get('region_location_min_y0'),
+                row.get('region_location_max_x1'),
+                row.get('region_location_max_y1'),
+                row.get('photometric_interpretation'),
+                row.get('rows'),
+                row.get('columns'),
+                row.get('physical_delta_x'),
+                row.get('file_name'),
+                row.get('software_versions'),
+                row.get('manufacturer_model_name')
+            )
+            for row in video_data
+        ]
+        
         cursor.executemany(insert_query, rows_to_insert)
         self.conn.commit()
         return cursor.rowcount
 
     def insert_study_cases_batch(self, study_data: List[Dict[str, Any]]) -> int:
-        """
-        Insert multiple study cases in a single transaction.
-
-        Args:
-            study_data: List of dictionaries containing study case data
-
-        Returns:
-            Number of rows inserted
-        """
+        """Insert multiple study cases in a single transaction."""
         cursor = self.conn.cursor()
-
+        
         insert_query = """
             INSERT OR REPLACE INTO StudyCases (
                 accession_number, patient_id, study_laterality, study_date,
@@ -319,30 +301,28 @@ class DatabaseManager:
                 ethnicity, race, zipcode
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
-
-        rows_to_insert = []
-        for row in study_data:
-            # Handle laterality field - could be 'Breast' or 'Study_Laterality'
-            laterality = row.get('Study_Laterality') or row.get('Breast') or row.get('BREAST')
-
-            rows_to_insert.append((
-                str(row.get('Accession_Number', '')),
-                str(row.get('Patient_ID', '')),
-                laterality,
-                row.get('DATE') or row.get('Study_Date'),
-                1 if row.get('Has_Malignant') else 0,
-                1 if row.get('Has_Benign') else 0,
-                row.get('final_interpretation') or row.get('FINAL_INTERPRETATION'),
-                row.get('FINDINGS'),
-                row.get('SYNOPTIC_REPORT'),
-                row.get('BI-RADS'),
-                row.get('MODALITY'),
-                row.get('AGE_AT_EVENT'),
-                row.get('ETHNICITY'),
-                row.get('RACE'),
-                row.get('ZIPCODE')
-            ))
-
+        
+        rows_to_insert = [
+            (
+                str(row.get('accession_number', '')),
+                str(row.get('patient_id', '')),
+                row.get('study_laterality'),
+                row.get('study_date'),
+                1 if row.get('has_malignant') else 0,
+                1 if row.get('has_benign') else 0,
+                row.get('final_interpretation'),
+                row.get('findings'),
+                row.get('synoptic_report'),
+                row.get('bi_rads'),
+                row.get('modality'),
+                row.get('age_at_event'),
+                row.get('ethnicity'),
+                row.get('race'),
+                row.get('zipcode')
+            )
+            for row in study_data
+        ]
+        
         cursor.executemany(insert_query, rows_to_insert)
         self.conn.commit()
         return cursor.rowcount
@@ -395,15 +375,7 @@ class DatabaseManager:
         return {row[0] for row in cursor.fetchall()}
 
     def insert_pathology_batch(self, pathology_data: List[Dict[str, Any]]) -> int:
-        """
-        Insert multiple pathology/lesion records in a single transaction.
-
-        Args:
-            pathology_data: List of dictionaries containing pathology data
-
-        Returns:
-            Number of rows inserted
-        """
+        """Insert multiple pathology/lesion records in a single transaction."""
         cursor = self.conn.cursor()
 
         insert_query = """
@@ -413,16 +385,18 @@ class DatabaseManager:
             ) VALUES (?, ?, ?, ?, ?, ?)
         """
 
-        rows_to_insert = []
-        for row in pathology_data:
-            rows_to_insert.append((
-                str(row.get('PATIENT_ID', '')),
-                str(row.get('ACCESSION_NUMBER', '')),
-                str(row.get('DATE', '')),
+        # Change this part - use snake_case
+        rows_to_insert = [
+            (
+                str(row.get('patient_id', '')),      # was PATIENT_ID
+                str(row.get('accession_number', '')), # was ACCESSION_NUMBER
+                str(row.get('specimen_date', '')),    # was DATE
                 str(row.get('lesion_diag', '')),
-                str(row.get('SYNOPTIC_REPORT', '')),
+                str(row.get('synoptic_report', '')),  # was SYNOPTIC_REPORT
                 str(row.get('cancer_type', ''))
-            ))
+            )
+            for row in pathology_data
+        ]
 
         cursor.executemany(insert_query, rows_to_insert)
         self.conn.commit()
@@ -478,15 +452,16 @@ class DatabaseManager:
         self.conn.commit()
         print(f"Extracted metadata from {rows_updated} image filenames")
         
-    def update_images_batch(self, updates: List[Dict[str, Any]]) -> int:
+    def update_images_batch(self, updates: pd.DataFrame) -> int:
         """Batch update image records."""
         cursor = self.conn.cursor()
         
         update_query = """
             UPDATE Images
             SET crop_x = ?, crop_y = ?, crop_w = ?, crop_h = ?,
-                has_calipers = ?, darkness = ?,
+                has_calipers = ?, has_calipers_prediction = ?, darkness = ?,
                 laterality = ?, area = ?, orientation = ?,
+                clock_pos = ?, nipple_dist = ?, description = ?,
                 is_labeled = 1,
                 crop_aspect_ratio = CASE 
                     WHEN ? IS NOT NULL AND ? != 0 
@@ -501,12 +476,15 @@ class DatabaseManager:
                 row.get('crop_x'), row.get('crop_y'), 
                 row.get('crop_w'), row.get('crop_h'),
                 1 if row.get('has_calipers') else 0,
+                row.get('has_calipers_prediction'),
                 row.get('darkness'),
                 row.get('laterality'), row.get('area'), 
                 row.get('orientation'),
+                row.get('clock_pos'), row.get('nipple_dist'),
+                row.get('description'),
                 row.get('crop_w'), row.get('crop_h'),
                 row.get('crop_w'), row.get('crop_h'),
-                row['ImageName']
+                row['image_name']  # Changed from ImageName
             )
             for _, row in updates.iterrows()
         ]

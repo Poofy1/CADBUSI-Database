@@ -100,7 +100,7 @@ def find_calipers(images_dir, db_to_process, image_size=256):
     results = []
     
     # Add RGB images with False predictions
-    for img_name in rgb_images['ImageName'].values:
+    for img_name in rgb_images['image_name'].values:
         results.append((img_name, False, -1))
     
     # Only process non-RGB images if there are any

@@ -9,6 +9,7 @@ import warnings, logging, cv2
 from functools import lru_cache
 from PIL import Image
 import time
+import re
 from storage_adapter import *
 from src.encrypt_keys import *
 from src.DB_processing.tools import append_audit
@@ -537,55 +538,68 @@ def parse_files(CONFIG, dcm_files_list, database_path, batch_size=100):
     df = pd.DataFrame(data_list)
     return df
 
+def to_snake_case(name):
+    """Convert any naming convention to snake_case"""
+    # Handle UPPERCASE -> snake_case
+    if name.isupper():
+        return name.lower()
+    # Handle CamelCase/PascalCase -> snake_case
+    s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
+    return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
+
 
 def parse_anon_file(anon_location, database_path, image_df):
+    
+    # Convert all DataFrame columns to snake_case immediately
+    image_df.columns = [to_snake_case(col) for col in image_df.columns]
+    
+    # Split into video and image dataframes
+    video_df = image_df[image_df['data_type'] == 'video']
+    image_df = image_df[image_df['data_type'] == 'image']
 
-    video_df = image_df[image_df['DataType'] == 'video']
-    image_df = image_df[image_df['DataType'] == 'image']
-
-    # Define common columns
-    common_columns = ['Patient_ID', 'Accession_Number', 'RegionSpatialFormat', 'RegionDataType',
-                    'RegionLocationMinX0', 'RegionLocationMinY0', 'RegionLocationMaxX1',
-                    'RegionLocationMaxY1', 'PhotometricInterpretation', 'Rows', 'Columns',
-                    'FileName', 'DicomHash', 'SoftwareVersions', 'ManufacturerModelName', 'PhysicalDeltaX']
+    # Define common columns (all snake_case now)
+    common_columns = [
+        'patient_id', 'accession_number', 'region_spatial_format', 'region_data_type',
+        'region_location_min_x0', 'region_location_min_y0', 'region_location_max_x1',
+        'region_location_max_y1', 'photometric_interpretation', 'rows', 'columns',
+        'file_name', 'dicom_hash', 'software_versions', 'manufacturer_model_name', 
+        'physical_delta_x'
+    ]
 
     # Keep only necessary columns from dataframes
     if not video_df.empty:
-        video_df = video_df[common_columns + ['ImagesPath', 'SavedFrames']]
+        video_df = video_df[common_columns + ['images_path', 'saved_frames']]
 
-    image_df = image_df[common_columns + ['ImageName', 'RegionCount']]
+    image_df = image_df[common_columns + ['image_name', 'region_count']]
 
-    # Find all csv files and combine into df
+    # Read CSV and convert columns to snake_case
     anon_location = os.path.normpath(anon_location)
     breast_csv = pd.read_csv(anon_location)
-    breast_csv = breast_csv.sort_values('PATIENT_ID')
-    breast_csv = breast_csv.rename(columns={
-        'PATIENT_ID': 'Patient_ID',
-        'ACCESSION_NUMBER': 'Accession_Number'
-    })
+    breast_csv.columns = [to_snake_case(col) for col in breast_csv.columns]
+    breast_csv = breast_csv.sort_values('patient_id')
 
-    # Convert 'Patient_ID' to str in both dataframes before merging
-    image_df[['Patient_ID', 'Accession_Number']] = image_df[['Patient_ID', 'Accession_Number']].astype(str)
-    breast_csv[['Patient_ID', 'Accession_Number']] = breast_csv[['Patient_ID', 'Accession_Number']].astype(str)
+    # Convert to str (no more manual renaming needed!)
+    image_df[['patient_id', 'accession_number']] = image_df[['patient_id', 'accession_number']].astype(str)
+    breast_csv[['patient_id', 'accession_number']] = breast_csv[['patient_id', 'accession_number']].astype(str)
 
-    # Filter to only keep rows where Accession_Number exists in both datasets
-    image_accession_numbers = set(image_df['Accession_Number'].unique())
-    breast_accession_numbers = set(breast_csv['Accession_Number'].unique())
+    # Filter to only keep rows where accession_number exists in both datasets
+    image_accession_numbers = set(image_df['accession_number'].unique())
+    breast_accession_numbers = set(breast_csv['accession_number'].unique())
 
     # Keep only matching accession numbers
     matching_accession_numbers = image_accession_numbers.intersection(breast_accession_numbers)
 
-    image_df = image_df[image_df['Accession_Number'].isin(matching_accession_numbers)]
-    breast_csv = breast_csv[breast_csv['Accession_Number'].isin(matching_accession_numbers)]
+    image_df = image_df[image_df['accession_number'].isin(matching_accession_numbers)]
+    breast_csv = breast_csv[breast_csv['accession_number'].isin(matching_accession_numbers)]
 
     total_breast_accessions = len(breast_accession_numbers)
     non_matching_breast_accessions = len(breast_accession_numbers - matching_accession_numbers)
     percentage_without_images = (non_matching_breast_accessions / total_breast_accessions) * 100 if total_breast_accessions > 0 else 0
     print(f"{percentage_without_images:.1f}% of breast accessions did not have images")
 
-    # Populate Has_Malignant and Has_Benign based on final_interpretation
-    breast_csv['Has_Malignant'] = breast_csv['final_interpretation'] == 'MALIGNANT'
-    breast_csv['Has_Benign'] = breast_csv['final_interpretation'] == 'BENIGN'
+    # Populate has_malignant and has_benign based on final_interpretation
+    breast_csv['has_malignant'] = breast_csv['final_interpretation'] == 'MALIGNANT'
+    breast_csv['has_benign'] = breast_csv['final_interpretation'] == 'BENIGN'
 
     # Use DatabaseManager to save to SQLite
     with DatabaseManager() as db:
@@ -596,21 +610,21 @@ def parse_anon_file(anon_location, database_path, image_df):
         existing_patient_ids = db.check_existing_patient_ids()
 
         # Filter out images from existing patients
-        image_df['Patient_ID'] = image_df['Patient_ID'].astype(str)
-        image_df_new = image_df[~image_df['Patient_ID'].isin(existing_patient_ids)]
+        image_df['patient_id'] = image_df['patient_id'].astype(str)
+        image_df_new = image_df[~image_df['patient_id'].isin(existing_patient_ids)]
 
-        # Insert study cases (breast data)
+        # Insert study cases (breast data) - dict keys now match DB columns exactly
         study_data = breast_csv.to_dict('records')
         inserted_studies = db.insert_study_cases_batch(study_data)
 
-        # Insert images
+        # Insert images - dict keys match DB columns
         if not image_df_new.empty:
             image_data = image_df_new.to_dict('records')
             inserted_images = db.insert_images_batch(image_data)
         else:
             inserted_images = 0
 
-        # Insert videos
+        # Insert videos - dict keys match DB columns
         if not video_df.empty:
             video_data = video_df.to_dict('records')
             inserted_videos = db.insert_videos_batch(video_data)
@@ -656,7 +670,7 @@ def deduplicate_dcm_files(dcm_files_list):
     return unique_files
 
 # Main Method
-def Parse_Dicom_Files(CONFIG, anon_location, lesion_anon_file, raw_storage_database, encryption_key):
+def parse_dicom_files(CONFIG, anon_location, lesion_anon_file, raw_storage_database, encryption_key):
     database_path = CONFIG["DATABASE_DIR"]
     data_range = CONFIG["DEBUG_DATA_RANGE"]
     
@@ -664,7 +678,7 @@ def Parse_Dicom_Files(CONFIG, anon_location, lesion_anon_file, raw_storage_datab
     global ENCRYPTION_KEY
     ENCRYPTION_KEY = encryption_key
     
-    #Create database dir
+    # Create database dir
     make_dirs(database_path)
     make_dirs(f'{database_path}/images/')
     make_dirs(f'{database_path}/videos/')
@@ -684,32 +698,35 @@ def Parse_Dicom_Files(CONFIG, anon_location, lesion_anon_file, raw_storage_datab
     dcm_files_list = deduplicate_dcm_files(dcm_files_list)
     print(f'Unique DICOM files to process: {len(dcm_files_list)}')
 
-    # Get DCM Data
+    # Get DCM Data (already returns snake_case columns from updated parse_files)
     image_df = parse_files(CONFIG, dcm_files_list, database_path)
-    image_df = image_df.rename(columns={'PatientID': 'Patient_ID'})
-    image_df = image_df.rename(columns={'AccessionNumber': 'Accession_Number'})
+    
+    # Convert all columns to snake_case (defensive - in case parse_files missed any)
+    image_df.columns = [to_snake_case(col) for col in image_df.columns]
 
-    #Remove missing IDs
+    # Remove missing IDs (now using snake_case)
     original_row_count = len(image_df)
     # Handle both NaN and empty strings
-    image_df['Patient_ID'] = image_df['Patient_ID'].replace('', np.nan)
-    image_df['Accession_Number'] = image_df['Accession_Number'].replace('', np.nan)
-    image_df = image_df.dropna(subset=['Patient_ID', 'Accession_Number'])
+    image_df['patient_id'] = image_df['patient_id'].replace('', np.nan)
+    image_df['accession_number'] = image_df['accession_number'].replace('', np.nan)
+    image_df = image_df.dropna(subset=['patient_id', 'accession_number'])
     new_row_count = len(image_df)
     removed_rows = original_row_count - new_row_count
     print(f"Removed {removed_rows} rows with empty values.")
     append_audit("dicom_parsing.missing_ID_removed", removed_rows)
     
+    # Parse and insert study/image/video data
     parse_anon_file(anon_location, database_path, image_df)
 
     # Insert lesion/pathology data into database
     print("Inserting lesion/pathology data")
     lesion_csv = pd.read_csv(lesion_anon_file)
+    
+    # Convert lesion CSV columns to snake_case
+    lesion_csv.columns = [to_snake_case(col) for col in lesion_csv.columns]
 
     with DatabaseManager() as db:
-        # Insert pathology data
+        # Insert pathology data (dict keys now match DB schema)
         pathology_data = lesion_csv.to_dict('records')
         inserted_pathology = db.insert_pathology_batch(pathology_data)
         print(f"Inserted {inserted_pathology} pathology records")
-    
-    
