@@ -10,6 +10,7 @@ from torchvision.datasets import ImageFolder
 import torch.nn as nn
 from torch.utils.data import Dataset
 from storage_adapter import *
+from src.DB_processing.database import DatabaseManager
 warnings.filterwarnings('ignore')
 env = os.path.dirname(os.path.abspath(__file__))
 device = torch.device("cuda")
@@ -67,94 +68,105 @@ def Find_Orientation(CONFIG, image_size=375):
     
     images_dir = f'{CONFIG["DATABASE_DIR"]}/images/'
     model_name = 'ori_model'
-    image_csv = f'{CONFIG["DATABASE_DIR"]}/ImageData.csv'
-    breast_csv = f'{CONFIG["DATABASE_DIR"]}/BreastData.csv'
     
-    model = Net()
-    model.load_state_dict(torch.load(f"{env}/models/{model_name}.pt"))
-    model = model.to(device)
-    model.eval()
-    
-    # Data loader
-    preprocess = transforms.Compose([
-        transforms.Resize((image_size, image_size)),
-        transforms.Grayscale(num_output_channels=1), 
-        transforms.ToTensor(),
-        transforms.Normalize([0.5], [0.5]),
-    ])
-    
-    # Read breast data to get patients with BILATERAL laterality
-    breast_df = read_csv(breast_csv)
-    bilateral_patients = breast_df[breast_df['Study_Laterality'] == 'BILATERAL']['Patient_ID'].unique()
-    
-    # Read image data
-    image_df = read_csv(image_csv)
-    if 'reparsed_orientation' not in image_df.columns:
-        image_df['reparsed_orientation'] = False
-    else:
-        image_df['reparsed_orientation'] = image_df['reparsed_orientation'].where(image_df['reparsed_orientation'], False)
+    with DatabaseManager() as db:
+        model = Net()
+        model.load_state_dict(torch.load(f"{env}/models/{model_name}.pt"))
+        model = model.to(device)
+        model.eval()
         
-    # Add orientation_confidence column if it doesn't exist
-    if 'orientation_confidence' not in image_df.columns:
-        image_df['orientation_confidence'] = None
-    
-    # Filter to only process images for bilateral patients
-    db_to_process = image_df[(image_df['orientation'] == 'unknown') 
-                     & (image_df['RegionCount'] == 1) 
-                     & (image_df['reparsed_orientation'] != True)
-                     & (image_df['Patient_ID'].isin(bilateral_patients))]
-    
-    # If no images to process, return early
-    if len(db_to_process) == 0:
-        print("No bilateral patient images to process")
-        return
+        # Data loader
+        preprocess = transforms.Compose([
+            transforms.Resize((image_size, image_size)),
+            transforms.Grayscale(num_output_channels=1), 
+            transforms.ToTensor(),
+            transforms.Normalize([0.5], [0.5]),
+        ])
         
-    # Add new column 'reparsed_orientation' and set its value to True
-    db_to_process['reparsed_orientation'] = True
-    
-    dataset = MyDataset(images_dir, db_to_process, transform=preprocess)
-    dataloader = DataLoader(dataset, batch_size=4, num_workers=3)
-
-    orientation_results = []
-    confidence_results = []
-    
-    softmax = nn.Softmax(dim=1)
-    label_dict = {0: "unknown", 1: "trans", 2: "long"}
-
-    with torch.no_grad():
-        for images, filenames in tqdm(dataloader, total=len(dataloader)):
-            images = images.to(device)
-            ori_pred = model(images)
-
-            # Apply softmax to the output to get probabilities
-            ori_pred_prob = softmax(ori_pred)
-
-            # Get the class indices with max probability
-            max_probs, predicted_indices = torch.max(ori_pred_prob, 1)
+        # Read breast data to get patients with BILATERAL laterality
+        breast_df = db.get_study_cases_dataframe()
+        bilateral_patients = breast_df[breast_df['study_laterality'] == 'BILATERAL']['patient_id'].unique()
+        
+        # Read image data
+        image_df = db.get_images_dataframe()
+        
+        # Prepare column mapping for database field names
+        image_df = image_df.rename(columns={
+            'image_name': 'ImageName',
+            'patient_id': 'Patient_ID',
+            'orientation': 'orientation',
+            'region_count': 'RegionCount'
+        })
+        
+        if 'reparsed_orientation' not in image_df.columns:
+            image_df['reparsed_orientation'] = False
+        else:
+            image_df['reparsed_orientation'] = image_df['reparsed_orientation'].where(image_df['reparsed_orientation'], False)
             
-            # Get the class labels
-            predicted_labels = [label_dict[i.item()] for i in predicted_indices]
+        # Add orientation_confidence column if it doesn't exist
+        if 'orientation_confidence' not in image_df.columns:
+            image_df['orientation_confidence'] = None
+        
+        # Filter to only process images for bilateral patients
+        db_to_process = image_df[(image_df['orientation'] == 'unknown') 
+                         & (image_df['RegionCount'] == 1) 
+                         & (image_df['reparsed_orientation'] != True)
+                         & (image_df['Patient_ID'].isin(bilateral_patients))]
+        
+        # If no images to process, return early
+        if len(db_to_process) == 0:
+            print("No bilateral patient images to process")
+            return
+            
+        # Add new column 'reparsed_orientation' and set its value to True
+        db_to_process['reparsed_orientation'] = True
+        
+        dataset = MyDataset(images_dir, db_to_process, transform=preprocess)
+        dataloader = DataLoader(dataset, batch_size=4, num_workers=3)
 
-            for i in range(len(filenames)):
-                # Store filename with predicted orientation and confidence
-                orientation_results.append((filenames[i], predicted_labels[i]))
-                confidence_results.append((filenames[i], max_probs[i].item()))
+        orientation_results = []
+        confidence_results = []
+        
+        softmax = nn.Softmax(dim=1)
+        label_dict = {0: "unknown", 1: "trans", 2: "long"}
 
-    # Create dictionaries and series for updating the dataframe
-    orientation_dict = {filename: value for filename, value in orientation_results}
-    orientation_series = pd.Series(orientation_dict)
-    
-    confidence_dict = {filename: value for filename, value in confidence_results}
-    confidence_series = pd.Series(confidence_dict)
+        with torch.no_grad():
+            for images, filenames in tqdm(dataloader, total=len(dataloader)):
+                images = images.to(device)
+                ori_pred = model(images)
 
-    # Update the dataframe with new orientations and confidences
-    db_to_process['orientation'] = db_to_process['ImageName'].map(orientation_series)
-    db_to_process['orientation_confidence'] = db_to_process['ImageName'].map(confidence_series)
+                # Apply softmax to the output to get probabilities
+                ori_pred_prob = softmax(ori_pred)
 
-    # Update the main dataframe
-    image_df.update(db_to_process, overwrite=True)
+                # Get the class indices with max probability
+                max_probs, predicted_indices = torch.max(ori_pred_prob, 1)
+                
+                # Get the class labels
+                predicted_labels = [label_dict[i.item()] for i in predicted_indices]
 
-    # Save to CSV
-    save_data(image_df, image_csv)
-    
-    print(f"Processed {len(db_to_process)} images for {len(bilateral_patients)} bilateral patients")
+                for i in range(len(filenames)):
+                    # Store filename with predicted orientation and confidence
+                    orientation_results.append((filenames[i], predicted_labels[i]))
+                    confidence_results.append((filenames[i], max_probs[i].item()))
+
+        # Update database with results
+        cursor = db.conn.cursor()
+        
+        for filename, orientation in orientation_results:
+            cursor.execute("""
+                UPDATE Images
+                SET orientation = ?,
+                    reparsed_orientation = 1
+                WHERE image_name = ?
+            """, (orientation, filename))
+        
+        for filename, confidence in confidence_results:
+            cursor.execute("""
+                UPDATE Images
+                SET orientation_confidence = ?
+                WHERE image_name = ?
+            """, (confidence, filename))
+        
+        db.conn.commit()
+        
+        print(f"Processed {len(db_to_process)} images for {len(bilateral_patients)} bilateral patients")

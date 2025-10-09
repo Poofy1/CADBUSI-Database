@@ -118,10 +118,9 @@ def main():
         # Make inpainting optional
         if not args.skip_inpaint:
             print("Running inpainting (can be skipped with --skip-inpaint)...")
-            Inpaint_Dataset_N2N(f'{CONFIG["DATABASE_DIR"]}/ImageData.csv', 
-                            f'{CONFIG["DATABASE_DIR"]}/images/')
+            Inpaint_Dataset_N2N( f'{CONFIG["DATABASE_DIR"]}/images/')
             
-        Locate_Lesions(f'{CONFIG["DATABASE_DIR"]}/ImageData.csv', f'{CONFIG["DATABASE_DIR"]}/images/')
+        Locate_Lesions(f'{CONFIG["DATABASE_DIR"]}/images/')
         
         # Step 5: Process video
         print("Step 5/5: Processing video data...")

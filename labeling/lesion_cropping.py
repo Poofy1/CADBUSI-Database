@@ -7,6 +7,7 @@ import ast
 from pathlib import Path
 from collections import defaultdict
 from storage_adapter import * 
+from src.DB_processing.database import DatabaseManager
 
 env = os.path.dirname(os.path.abspath(__file__))
 import sys
@@ -342,38 +343,34 @@ def main():
     
     StorageClient.get_instance(CONFIG["WINDIR"], CONFIG["BUCKET"])
     
-    database = "Databases/database_2025_8_11_main"
-    
-    # File paths
-    lesion_csv = f"{database}/LesionData.csv"
-    image_csv = f"{database}/ImageData.csv"
-    breast_csv = f"{database}/BreastData.csv"
-    image_base_path = f"{database}/images"
+    database_path = "Databases/database_2025_8_11_main"
+    image_base_path = f"{database_path}/images"
     
     # Set random seed for reproducibility
     np.random.seed(42)
     
-    print("Loading csv data...")
-    lesion_df = read_csv(lesion_csv)
-    image_df = read_csv(image_csv)
-    
-    # Filter out inpainted images
-    print("\nFiltering out inpainted images...")
-    image_df = filter_non_inpainted_images(image_df)
-    
-    # Create balanced dataset with examples per cancer type, avoiding accessions with >25 images
-    selected_accessions, cancer_type_counts = create_balanced_cancer_dataset(
-        lesion_df, image_df, target_count=4, max_images_per_accession=25
-    )
-    
-    # Save the balanced selection results
-    save_results(selected_accessions, cancer_type_counts, image_df)
-    
-    # Analyze caliper boxes for selected accessions only
-    analyze_caliper_boxes(image_df, selected_accessions)
-    
-    # Save annotated images with caliper boxes drawn on them
-    process_and_save_annotated_images(image_df, selected_accessions, image_base_path)
+    print("Loading data from database...")
+    with DatabaseManager() as db:
+        lesion_df = db.get_lesions_dataframe()
+        image_df = db.get_images_dataframe()
+        
+        # Filter out inpainted images
+        print("\nFiltering out inpainted images...")
+        image_df = filter_non_inpainted_images(image_df)
+        
+        # Create balanced dataset with examples per cancer type, avoiding accessions with >25 images
+        selected_accessions, cancer_type_counts = create_balanced_cancer_dataset(
+            lesion_df, image_df, target_count=4, max_images_per_accession=25
+        )
+        
+        # Save the balanced selection results
+        save_results(selected_accessions, cancer_type_counts, image_df)
+        
+        # Analyze caliper boxes for selected accessions only
+        analyze_caliper_boxes(image_df, selected_accessions)
+        
+        # Save annotated images with caliper boxes drawn on them
+        process_and_save_annotated_images(image_df, selected_accessions, image_base_path)
 
 if __name__ == "__main__":
     main()

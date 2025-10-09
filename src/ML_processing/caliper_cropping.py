@@ -11,6 +11,7 @@ from tqdm import tqdm
 from scipy import ndimage
 from storage_adapter import *
 from src.DB_processing.tools import get_reader, reader, append_audit
+from src.DB_processing.database import DatabaseManager
 env = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -49,7 +50,7 @@ def clamp_coordinates(x1, y1, x2, y2, max_width, max_height, min_x=0, min_y=0):
         max(min_y, min(y2, max_height))
     )
     
-def get_caliper_inpainted_pairs(csv_file_path):
+def get_caliper_inpainted_pairs(db):
     """
     Find all image pairs of original caliper images and their inpainted/clean versions.
     
@@ -57,21 +58,20 @@ def get_caliper_inpainted_pairs(csv_file_path):
     1. Inpainted pairs: Images with inpainted_from not null paired with their originals
     2. Closest clean pairs: Images with distance <= 5 and has_calipers = True paired with closest_fn
     
-    Ignores pairs where either image has PhotometricInterpretation = 'RGB'
+    Ignores pairs where either image has photometric_interpretation = 'RGB'
     
     Returns:
-        Dictionary containing:
-        - 'all_pairs': Combined list of all pairs
+        List of all pairs (combined)
     """
     print("Finding caliper and inpainted image pairs...")
     
-    # Load the CSV file
-    data = read_csv(csv_file_path)
+    # Load image data from database
+    data = db.get_images_dataframe()
     
-    # Create a dictionary for quick lookup of all images by ImageName
+    # Create a dictionary for quick lookup of all images by image_name
     all_images_dict = {}
     for index, row in data.iterrows():
-        all_images_dict[row['ImageName']] = {
+        all_images_dict[row['image_name']] = {
             'index': index,
             'data': row
         }
@@ -84,7 +84,7 @@ def get_caliper_inpainted_pairs(csv_file_path):
     original_images_dict = {}
     for index, row in data.iterrows():
         if pd.isna(row.get('inpainted_from')):
-            original_images_dict[row['ImageName']] = {
+            original_images_dict[row['image_name']] = {
                 'index': index,
                 'data': row
             }
@@ -95,20 +95,20 @@ def get_caliper_inpainted_pairs(csv_file_path):
         if original_filename in original_images_dict:
             original_info = original_images_dict[original_filename]
             
-            # Skip if either image has PhotometricInterpretation = 'RGB'
-            if (original_info['data'].get('PhotometricInterpretation') == 'RGB' or 
-                inpainted_row.get('PhotometricInterpretation') == 'RGB'):
+            # Skip if either image has photometric_interpretation = 'RGB'
+            if (original_info['data'].get('photometric_interpretation') == 'RGB' or 
+                inpainted_row.get('photometric_interpretation') == 'RGB'):
                 continue
             
             pair = {
                 'type': 'inpainted',
                 'caliper_image': original_filename,
-                'clean_image': inpainted_row['ImageName']
+                'clean_image': inpainted_row['image_name']
             }
             
             inpainted_pairs.append(pair)
         else:
-            print(f"Warning: Original image '{original_filename}' not found for inpainted image '{inpainted_row['ImageName']}'")
+            print(f"Warning: Original image '{original_filename}' not found for inpainted image '{inpainted_row['image_name']}'")
     
     # CASE 2: Find closest clean pairs
     closest_pairs = []
@@ -127,20 +127,20 @@ def get_caliper_inpainted_pairs(csv_file_path):
         if closest_filename in all_images_dict:
             clean_info = all_images_dict[closest_filename]
             
-            # Skip if either image has PhotometricInterpretation = 'RGB'
-            if (caliper_row.get('PhotometricInterpretation') == 'RGB' or 
-                clean_info['data'].get('PhotometricInterpretation') == 'RGB'):
+            # Skip if either image has photometric_interpretation = 'RGB'
+            if (caliper_row.get('photometric_interpretation') == 'RGB' or 
+                clean_info['data'].get('photometric_interpretation') == 'RGB'):
                 continue
             
             pair = {
                 'type': 'closest_clean',
-                'caliper_image': caliper_row['ImageName'],
+                'caliper_image': caliper_row['image_name'],
                 'clean_image': closest_filename
             }
             
             closest_pairs.append(pair)
         else:
-            print(f"Warning: Closest clean image '{closest_filename}' not found for caliper image '{caliper_row['ImageName']}'")
+            print(f"Warning: Closest clean image '{closest_filename}' not found for caliper image '{caliper_row['image_name']}'")
     
     # Combine all pairs
     all_pairs = inpainted_pairs + closest_pairs
@@ -149,7 +149,6 @@ def get_caliper_inpainted_pairs(csv_file_path):
     print(f"Found {len(closest_pairs)} closest clean pairs")
     print(f"Total: {len(all_pairs)} image pairs")
     return all_pairs
-
 
 
 def create_difference_mask(caliper_path, clean_path, input_folder, threshold=30):
@@ -926,131 +925,135 @@ def process_image_pairs_multithreading(pairs, image_dir, image_data_df, model, t
     
     return results
     
-def Locate_Lesions(csv_file_path, image_dir, save_debug_images=False):
+def Locate_Lesions(image_dir, save_debug_images=False):
     print("Starting lesion location using mask-based caliper detection...")
     
-    # Load image data
-    image_data = read_csv(csv_file_path)
-    
-    # Add new columns if they don't exist
-    for col in ["caliper_pairs", "caliper_boxes"]:
-        if col not in image_data.columns:
-            image_data[col] = ""
-            
-    # Initialize has_caliper_mask to False for ALL rows
-    if "has_caliper_mask" not in image_data.columns:
-        image_data["has_caliper_mask"] = False
-    else:
-        # If column exists, ensure all values are False initially
-        image_data["has_caliper_mask"] = False
+    with DatabaseManager() as db:
+        # Load image data from database
+        image_data = db.get_images_dataframe()
         
-    
-    # Set up parameters
-    encoder_input_size = 256
-    low_image_size = 128
-    modelname = 'SAMUS'
-    checkpoint_path = os.path.join(env, 'models', 'SAMUS.pth')
-    
-    # Set up config
-    opt = Config_BUSI
-    opt.modelname = modelname
-    device = torch.device(opt.device)
-    
-    # Load model
-    class Args:
-        def __init__(self):
-            self.modelname = modelname
-            self.encoder_input_size = encoder_input_size
-            self.low_image_size = low_image_size
-            self.vit_name = 'vit_b'
-            self.sam_ckpt = checkpoint_path
-            self.batch_size = 1
-            self.n_gpu = 1
-            self.base_lr = 0.0001
-            self.warmup = False
-            self.warmup_period = 250
-            self.keep_log = False
-    
-    args = Args()
-    
-    model = get_model(modelname, args=args, opt=opt)
-    model.to(device)
-    
-    # Load checkpoint
-    checkpoint = torch.load(checkpoint_path)
-    new_state_dict = {}
-    for k, v in checkpoint.items():
-        if k[:7] == 'module.':
-            new_state_dict[k[7:]] = v
+        # Add new columns if they don't exist
+        for col in ["caliper_pairs", "caliper_boxes"]:
+            if col not in image_data.columns:
+                image_data[col] = ""
+                
+        # Initialize has_caliper_mask to False for ALL rows
+        if "has_caliper_mask" not in image_data.columns:
+            image_data["has_caliper_mask"] = False
         else:
-            new_state_dict[k] = v
-    model.load_state_dict(new_state_dict)
-    model.eval()
-    
-    # Transform for preprocessing images
-    transform = transforms.Compose([
-        transforms.Resize((encoder_input_size, encoder_input_size)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.5], std=[0.5])
-    ])
-    
-    # Get image pairs for mask-based detection
-    pairs = get_caliper_inpainted_pairs(csv_file_path)
-    
-    if not pairs:
-        print("No image pairs found for mask-based detection.")
-        return None
-    
-    # Create a mapping from ImageName to row index for faster lookup
-    image_name_to_idx = {row['ImageName']: idx for idx, row in image_data.iterrows()}
-    
-    # Prepare valid pairs with their corresponding rows
-    valid_pairs = []
-    pair_to_clean_idx = {}  # Map to track which dataframe row each result corresponds to
-    
-    for pair in pairs:
-        clean_image_name = pair['clean_image']
+            image_data["has_caliper_mask"] = False
         
-        if clean_image_name in image_name_to_idx:
-            clean_idx = image_name_to_idx[clean_image_name]
-            valid_pairs.append(pair)
-            pair_to_clean_idx[len(valid_pairs) - 1] = clean_idx  # Map result index to dataframe index
-        else:
-            print(f"Warning: Clean image '{clean_image_name}' not found in CSV data")
-    
-    if not valid_pairs:
-        print("No valid image pairs found.")
-        return image_data
-    
-    print(f"Processing {len(valid_pairs)} image pairs...")
-    
-    results = process_image_pairs_multithreading(
-        pairs=valid_pairs,
-        image_dir=image_dir,
-        image_data_df=image_data,
-        model=model,
-        transform=transform,
-        device=device,
-        encoder_input_size=encoder_input_size,
-        save_debug_images=save_debug_images,
-    )
-    
-    # Update the dataframe with results
-    processed_count = 0
-    for i, result in enumerate(results):
-        if result is not None:
-            clean_idx = pair_to_clean_idx[i]
+        # Set up parameters
+        encoder_input_size = 256
+        low_image_size = 128
+        modelname = 'SAMUS'
+        checkpoint_path = os.path.join(env, 'models', 'SAMUS.pth')
+        
+        # Set up config
+        opt = Config_BUSI
+        opt.modelname = modelname
+        device = torch.device(opt.device)
+        
+        # Load model
+        class Args:
+            def __init__(self):
+                self.modelname = modelname
+                self.encoder_input_size = encoder_input_size
+                self.low_image_size = low_image_size
+                self.vit_name = 'vit_b'
+                self.sam_ckpt = checkpoint_path
+                self.batch_size = 1
+                self.n_gpu = 1
+                self.base_lr = 0.0001
+                self.warmup = False
+                self.warmup_period = 250
+                self.keep_log = False
+        
+        args = Args()
+        
+        model = get_model(modelname, args=args, opt=opt)
+        model.to(device)
+        
+        # Load checkpoint
+        checkpoint = torch.load(checkpoint_path)
+        new_state_dict = {}
+        for k, v in checkpoint.items():
+            if k[:7] == 'module.':
+                new_state_dict[k[7:]] = v
+            else:
+                new_state_dict[k] = v
+        model.load_state_dict(new_state_dict)
+        model.eval()
+        
+        # Transform for preprocessing images
+        transform = transforms.Compose([
+            transforms.Resize((encoder_input_size, encoder_input_size)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.5], std=[0.5])
+        ])
+        
+        # Get image pairs for mask-based detection
+        pairs = get_caliper_inpainted_pairs(db)
+        
+        if not pairs:
+            print("No image pairs found for mask-based detection.")
+            return None
+        
+        # Create a mapping from image_name to row index for faster lookup
+        image_name_to_idx = {row['image_name']: idx for idx, row in image_data.iterrows()}
+        
+        # Prepare valid pairs with their corresponding rows
+        valid_pairs = []
+        pair_to_clean_idx = {}
+        
+        for pair in pairs:
+            clean_image_name = pair['clean_image']
             
-            # Store both pieces of information
-            image_data.at[clean_idx, "caliper_boxes"] = result['caliper_boxes']
-            image_data.at[clean_idx, "has_caliper_mask"] = result['has_caliper_mask']
-            
-            processed_count += 1
-        else:
-            print(f"Warning: Failed to process pair {i}")
-    
-    # Save updated CSV
-    save_data(image_data, csv_file_path)
-    
-    print(f"Processed {processed_count} image pairs with mask-based detection")
-    return image_data
+            if clean_image_name in image_name_to_idx:
+                clean_idx = image_name_to_idx[clean_image_name]
+                valid_pairs.append(pair)
+                pair_to_clean_idx[len(valid_pairs) - 1] = clean_idx
+            else:
+                print(f"Warning: Clean image '{clean_image_name}' not found in database")
+        
+        if not valid_pairs:
+            print("No valid image pairs found.")
+            return
+        
+        print(f"Processing {len(valid_pairs)} image pairs...")
+        
+        results = process_image_pairs_multithreading(
+            pairs=valid_pairs,
+            image_dir=image_dir,
+            image_data_df=image_data,
+            model=model,
+            transform=transform,
+            device=device,
+            encoder_input_size=encoder_input_size,
+            save_debug_images=save_debug_images,
+        )
+        
+        # Update the database with results
+        cursor = db.conn.cursor()
+        processed_count = 0
+        
+        for i, result in enumerate(results):
+            if result is not None:
+                clean_idx = pair_to_clean_idx[i]
+                clean_image_name = valid_pairs[i]['clean_image']
+                
+                cursor.execute("""
+                    UPDATE Images
+                    SET caliper_boxes = ?,
+                        has_caliper_mask = ?
+                    WHERE image_name = ?
+                """, (result['caliper_boxes'], 
+                      1 if result['has_caliper_mask'] else 0,
+                      clean_image_name))
+                
+                processed_count += 1
+            else:
+                print(f"Warning: Failed to process pair {i}")
+        
+        db.conn.commit()
+        print(f"Processed {processed_count} image pairs with mask-based detection")

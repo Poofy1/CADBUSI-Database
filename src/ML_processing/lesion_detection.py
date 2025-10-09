@@ -10,7 +10,7 @@ import pandas as pd
 from tqdm import tqdm
 from scipy import ndimage
 from storage_adapter import *
-from src.DB_processing.tools import get_reader, reader, append_audit
+from src.DB_processing.database import DatabaseManager
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Add YOLO import
@@ -20,47 +20,56 @@ env = os.path.dirname(os.path.abspath(__file__))
 
 
 class Config_BUSI:
-    workers = 1                         # number of data loading workers (default: 8)
-    epochs = 400                        # number of total epochs to run (default: 400)
-    batch_size = 8                     # batch size (default: 4)
-    learning_rate = 1e-4                # iniial learning rate (default: 0.001)
-    momentum = 0.9                      # momntum
-    classes = 2                         # thenumber of classes (background + foreground)
-    img_size = 256                      # theinput size of model
-    train_split = "train-Breast-BUSI"   # the file name of training set
-    val_split = "val-Breast-BUSI"       # the file name of testing set
-    test_split = "test-Breast-BUSI"     # the file name of testing set
-    crop = None                         # the cropped image size
-    eval_freq = 1                       # the frequency of evaluate the model
-    save_freq = 2000                    # the frequency of saving the model
-    device = "cuda"                     # training device, cpu or cuda
-    cuda = "on"                         # switch on/off cuda option (default: off)
-    gray = "yes"                        # the type of input image
-    img_channel = 1                     # the channel of input image
-    eval_mode = "mask_slice"                 # the mode when evaluate the model, slice level or patient level
+    workers = 1
+    epochs = 400
+    batch_size = 8
+    learning_rate = 1e-4
+    momentum = 0.9
+    classes = 2
+    img_size = 256
+    train_split = "train-Breast-BUSI"
+    val_split = "val-Breast-BUSI"
+    test_split = "test-Breast-BUSI"
+    crop = None
+    eval_freq = 1
+    save_freq = 2000
+    device = "cuda"
+    cuda = "on"
+    gray = "yes"
+    img_channel = 1
+    eval_mode = "mask_slice"
     pre_trained = False
     mode = "val"
     visual = True
     modelname = "SAM"
 
 
-def get_target_data(csv_file_path, limit=None):
-    # Load the CSV file
-    data = read_csv(csv_file_path)
+def get_target_data(db_manager, limit=None):
+    """
+    Get target images from database.
     
-    # Filter out RGB images using vectorized operations
-    filtered_data = data[data['PhotometricInterpretation'] != 'RGB']
+    Args:
+        db_manager: DatabaseManager instance
+        limit: Optional limit on number of images to process
+    
+    Returns:
+        List of image names to process
+    """
+    # Query images, filtering out RGB images
+    where_clause = "photometric_interpretation != 'RGB'"
+    df = db_manager.get_images_dataframe(where_clause=where_clause)
     
     # Apply limit if specified
     if limit:
-        filtered_data = filtered_data.head(limit)
+        df = df.head(limit)
         print(f"Reached debug limit of {limit} images, stopping...")
     
     # Get image names as list
-    images = filtered_data['ImageName'].tolist()
-    print(f"Found {len(images)}")
+    images = df['image_name'].tolist()
+    print(f"Found {len(images)} images to process")
     
     return images
+
 
 def clamp_coordinates(x1, y1, x2, y2, max_width, max_height, min_x=0, min_y=0):
     """Clamp coordinates to valid image bounds."""
@@ -70,15 +79,12 @@ def clamp_coordinates(x1, y1, x2, y2, max_width, max_height, min_x=0, min_y=0):
         max(min_x, min(x2, max_width)),
         max(min_y, min(y2, max_height))
     )
-    
-    
+
 
 def clean_mask(mask_binary, min_object_area=200):
     """
     Clean binary mask by filling small holes and removing small islands.
     """
-    
-    
     # Convert to binary (0s and 1s) for scipy
     if mask_binary.dtype != np.uint8:
         mask_binary = mask_binary.astype(np.uint8)
@@ -114,7 +120,6 @@ def prepare_box_prompts(boxes, image_size, model_input_size):
         boxes: List of bounding boxes in format [x1, y1, x2, y2]
         image_size: Tuple of (width, height) of the cropped image
         model_input_size: Target size for model input (e.g., 256)
-        crop_coords: Optional crop coordinates (crop_x, crop_y, crop_w, crop_h)
     
     Returns:
         torch.Tensor: Box tensor scaled to model input size [N, 4]
@@ -140,12 +145,15 @@ def prepare_box_prompts(boxes, image_size, model_input_size):
         scaled_y2 = int(y2 * model_input_size / cropped_height)
         
         # Ensure coordinates are within model input bounds
-        scaled_x1, scaled_y1, scaled_x2, scaled_y2 = clamp_coordinates(scaled_x1, scaled_y1, scaled_x2, scaled_y2, 
-                                                                        model_input_size - 1, model_input_size - 1)
+        scaled_x1, scaled_y1, scaled_x2, scaled_y2 = clamp_coordinates(
+            scaled_x1, scaled_y1, scaled_x2, scaled_y2, 
+            model_input_size - 1, model_input_size - 1
+        )
         
         scaled_boxes.append([scaled_x1, scaled_y1, scaled_x2, scaled_y2])
     
     return torch.tensor(scaled_boxes, dtype=torch.float32)
+
 
 def detect_calipers_yolo(image, yolo_model, confidence_threshold=0.5):
     """
@@ -173,16 +181,17 @@ def detect_calipers_yolo(image, yolo_model, confidence_threshold=0.5):
     # Extract bounding boxes from results
     for result in results:
         if result.boxes is not None:
-            boxes = result.boxes.xyxy.cpu().numpy()  # Get boxes in xyxy format
+            boxes = result.boxes.xyxy.cpu().numpy()
             for box in boxes:
                 x1, y1, x2, y2 = box
                 caliper_boxes.append([int(x1), int(y1), int(x2), int(y2)])
     
     return caliper_boxes
 
+
 def load_image(image_name, image_data_row, image_dir):
-    
-    # Load the target image (always just the single image now)
+    """Load and crop image based on database row information."""
+    # Load the target image
     target_path = os.path.normpath(image_name)
     target_image_path = os.path.join(image_dir, target_path)
     target_image = read_image(target_image_path, use_pil=True)
@@ -223,15 +232,17 @@ def load_image(image_name, image_data_row, image_dir):
     target_image = target_image.crop((crop_x, crop_y, crop_x2, crop_y2))
         
     return target_image, is_caliper, (crop_x, crop_y, crop_x2, crop_y2), (img_width, img_height)
-            
-def process_single_image_pair(image_name, image_dir, image_data_row, model, yolo_model, transform, device, encoder_input_size, save_debug_images=True, use_samus_model=True):
+
+
+def process_single_image_pair(image_name, image_dir, image_data_row, model, yolo_model, 
+                              transform, device, encoder_input_size, save_debug_images=True, 
+                              use_samus_model=True):
     """
     Process a single image pair to detect calipers using YOLO and optionally compute bounding boxes with SAMUS.
     
     Args:
         use_samus_model (bool): If True, runs SAMUS segmentation model. If False, only returns YOLO bounding boxes.
     """
-    
     result = {
         'has_caliper_mask': False,
         'caliper_boxes': [],
@@ -266,7 +277,6 @@ def process_single_image_pair(image_name, image_dir, image_data_row, model, yolo
         
         # Only run SAMUS model if use_samus_model is True
         if use_samus_model and cropped_caliper_boxes:
-            
             # Prepare box prompts for the model
             cropped_width, cropped_height = target_image.size
             box_tensor = prepare_box_prompts(
@@ -290,7 +300,8 @@ def process_single_image_pair(image_name, image_dir, image_data_row, model, yolo
                     mask_binary = (mask_np > 0.5).astype(np.uint8)
                     
                     # Resize mask to match cropped image dimensions
-                    mask_resized = cv2.resize(mask_binary, (cropped_width, cropped_height), interpolation=cv2.INTER_NEAREST)
+                    mask_resized = cv2.resize(mask_binary, (cropped_width, cropped_height), 
+                                            interpolation=cv2.INTER_NEAREST)
 
                     # Clean the mask: fill holes and remove small islands
                     mask_resized = clean_mask(mask_resized)
@@ -329,7 +340,6 @@ def process_single_image_pair(image_name, image_dir, image_data_row, model, yolo
             if cropped_caliper_boxes:
                 for adjusted_bbox in cropped_caliper_boxes:
                     x1, y1, x2, y2 = adjusted_bbox
-                    # Draw bounding box
                     cv2.rectangle(debug_img, (int(x1), int(y1)), (int(x2), int(y2)), 
                                 (0, 255, 0), 2)  # Green box
 
@@ -337,9 +347,7 @@ def process_single_image_pair(image_name, image_dir, image_data_row, model, yolo
             if mask_resized is not None:
                 mask_overlay = np.zeros_like(debug_img)
                 mask_overlay[mask_resized > 0] = [0, 255, 255]  # Yellow in BGR
-                # Blend the mask with the image (30% mask opacity)
                 debug_img = cv2.addWeighted(debug_img, 0.7, mask_overlay, 0.3, 0)
-            
             
             if mask_resized is None and not is_caliper:
                 print("missing mask on clean")
@@ -352,10 +360,7 @@ def process_single_image_pair(image_name, image_dir, image_data_row, model, yolo
             save_dir = os.path.join(parent_dir, "test_images")
             
             # Determine subfolder based on whether calipers were detected
-            if is_caliper:
-                subfolder = "calipers"
-            else:
-                subfolder = "clean"
+            subfolder = "calipers" if is_caliper else "clean"
             
             # Create the full save directory path
             full_save_dir = os.path.join(save_dir, subfolder)
@@ -369,24 +374,25 @@ def process_single_image_pair(image_name, image_dir, image_data_row, model, yolo
             # Save using your save_data function
             save_data(debug_img, debug_save_path)
             
-            print(f"Debug image saved: {debug_save_path})")
+            print(f"Debug image saved: {debug_save_path}")
             
         except Exception as debug_e:
             print(f"Error saving debug image for {image_name}: {str(debug_e)}")
     
     return result
 
-def process_image_pairs_multithreading(image_names, image_dir, image_data_df, model, yolo_model, transform, 
-                                     device, encoder_input_size, save_debug_images=False, 
-                                     num_threads=6):
+
+def process_image_pairs_multithreading(image_names, image_dir, image_data_df, model, yolo_model, 
+                                      transform, device, encoder_input_size, save_debug_images=False, 
+                                      num_threads=6):
     """
     Process multiple images using multithreading with tqdm progress bar
     """
-    
     # Pre-compute lookup dictionary ONCE
     image_name_to_row = {}
     for idx, row in image_data_df.iterrows():
-        image_name_to_row[row['ImageName']] = row
+        # Use 'image_name' (the database column name)
+        image_name_to_row[row['image_name']] = row
     
     def worker(image_with_index):
         image_index, image_name = image_with_index
@@ -397,9 +403,9 @@ def process_image_pairs_multithreading(image_names, image_dir, image_data_df, mo
             image_name, image_dir, image_data_row, 
             model, yolo_model, transform, device, encoder_input_size, save_debug_images
         )
-        return image_index, result  # Return both index and result
+        return image_index, result
     
-    results = [None] * len(image_names)  # Pre-allocate results array
+    results = [None] * len(image_names)
     with ThreadPoolExecutor(max_workers=num_threads) as executor:
         # Submit all tasks with their indices
         futures = {
@@ -422,7 +428,19 @@ def process_image_pairs_multithreading(image_names, image_dir, image_data_df, mo
     
     return results
 
-def Locate_Lesions(csv_file_path, image_dir, save_debug_images=False):
+
+def Locate_Lesions(image_dir, save_debug_images=False):
+    """
+    Locate lesions using YOLO-based caliper detection and SAMUS segmentation.
+    
+    Args:
+        database_path: Path to the database directory
+        image_dir: Directory containing images
+        save_debug_images: Whether to save debug visualization images
+    
+    Returns:
+        None (updates database directly)
+    """
     print("Starting lesion location using YOLO-based caliper detection...")
     
     # Load YOLO model
@@ -434,126 +452,130 @@ def Locate_Lesions(csv_file_path, image_dir, save_debug_images=False):
         print(f"Failed to load YOLO model: {e}")
         return None
     
-    # Load image data
-    image_data = read_csv(csv_file_path)
-    
-    # Add new columns if they don't exist
-    for col in ["caliper_pairs", "caliper_boxes"]:
-        image_data[col] = ""
-            
-    # Initialize has_caliper_mask to False for ALL rows
-    if "has_caliper_mask" not in image_data.columns:
-        image_data["has_caliper_mask"] = False
-    else:
-        # If column exists, ensure all values are False initially
+    # Connect to database
+    with DatabaseManager() as db:
+        # Load image data from database
+        image_data = db.get_images_dataframe()
+        
+        # Add columns to dataframe if they don't exist (for in-memory processing)
+        for col in ["caliper_boxes", "has_caliper_mask"]:
+            if col not in image_data.columns:
+                image_data[col] = "" if col == "caliper_boxes" else False
+        
+        # Initialize has_caliper_mask to False for ALL rows
         image_data["has_caliper_mask"] = False
         
-    
-    # Set up parameters
-    encoder_input_size = 256
-    low_image_size = 128
-    modelname = 'SAMUS'
-    checkpoint_path = os.path.join(env, 'models', 'SAMUS.pth')
-    
-    # Set up config
-    opt = Config_BUSI
-    opt.modelname = modelname
-    device = torch.device(opt.device)
-    
-    # Load SAMUS model
-    class Args:
-        def __init__(self):
-            self.modelname = modelname
-            self.encoder_input_size = encoder_input_size
-            self.low_image_size = low_image_size
-            self.vit_name = 'vit_b'
-            self.sam_ckpt = checkpoint_path
-            self.batch_size = 1
-            self.n_gpu = 1
-            self.base_lr = 0.0001
-            self.warmup = False
-            self.warmup_period = 250
-            self.keep_log = False
-    
-    args = Args()
-    
-    model = get_model(modelname, args=args, opt=opt)
-    model.to(device)
-    
-    # Load checkpoint
-    checkpoint = torch.load(checkpoint_path)
-    new_state_dict = {}
-    for k, v in checkpoint.items():
-        if k[:7] == 'module.':
-            new_state_dict[k[7:]] = v
-        else:
-            new_state_dict[k] = v
-    model.load_state_dict(new_state_dict)
-    model.eval()
-    
-    # Transform for preprocessing images
-    transform = transforms.Compose([
-        transforms.Resize((encoder_input_size, encoder_input_size)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.5], std=[0.5])
-    ])
-    
-    # Get image pairs for mask-based detection
-    image_names = get_target_data(csv_file_path)
+        # Set up parameters
+        encoder_input_size = 256
+        low_image_size = 128
+        modelname = 'SAMUS'
+        checkpoint_path = os.path.join(env, 'models', 'SAMUS.pth')
+        
+        # Set up config
+        opt = Config_BUSI
+        opt.modelname = modelname
+        device = torch.device(opt.device)
+        
+        # Load SAMUS model
+        class Args:
+            def __init__(self):
+                self.modelname = modelname
+                self.encoder_input_size = encoder_input_size
+                self.low_image_size = low_image_size
+                self.vit_name = 'vit_b'
+                self.sam_ckpt = checkpoint_path
+                self.batch_size = 1
+                self.n_gpu = 1
+                self.base_lr = 0.0001
+                self.warmup = False
+                self.warmup_period = 250
+                self.keep_log = False
+        
+        args = Args()
+        
+        model = get_model(modelname, args=args, opt=opt)
+        model.to(device)
+        
+        # Load checkpoint
+        checkpoint = torch.load(checkpoint_path)
+        new_state_dict = {}
+        for k, v in checkpoint.items():
+            if k[:7] == 'module.':
+                new_state_dict[k[7:]] = v
+            else:
+                new_state_dict[k] = v
+        model.load_state_dict(new_state_dict)
+        model.eval()
+        
+        # Transform for preprocessing images
+        transform = transforms.Compose([
+            transforms.Resize((encoder_input_size, encoder_input_size)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.5], std=[0.5])
+        ])
+        
+        # Get image names to process
+        image_names = get_target_data(db)
 
-    if not image_names:
-        print("No images found for mask-based detection.")
-        return None
+        if not image_names:
+            print("No images found for mask-based detection.")
+            return None
 
-    # Create a mapping from ImageName to row index for faster lookup
-    image_name_to_idx = {row['ImageName']: idx for idx, row in image_data.iterrows()}
+        # Create a mapping from image_name to row index for faster lookup
+        image_name_to_idx = {row['image_name']: idx for idx, row in image_data.iterrows()}
 
-    # Prepare valid image names with their corresponding rows
-    valid_images = []
-    image_to_clean_idx = {}  # Map to track which dataframe row each result corresponds to
+        # Prepare valid image names with their corresponding rows
+        valid_images = []
+        image_to_clean_idx = {}
 
-    for image_name in image_names:
-        if image_name in image_name_to_idx:
-            clean_idx = image_name_to_idx[image_name]
-            valid_images.append(image_name)
-            image_to_clean_idx[len(valid_images) - 1] = clean_idx  # Map result index to dataframe index
-        else:
-            print(f"Warning: Image '{image_name}' not found in CSV data")
+        for image_name in image_names:
+            if image_name in image_name_to_idx:
+                clean_idx = image_name_to_idx[image_name]
+                valid_images.append(image_name)
+                image_to_clean_idx[len(valid_images) - 1] = clean_idx
+            else:
+                print(f"Warning: Image '{image_name}' not found in database")
 
-    if not valid_images:
-        print("No valid images found.")
-        return image_data
+        if not valid_images:
+            print("No valid images found.")
+            return
 
-    print(f"Processing {len(valid_images)} images...")
+        print(f"Processing {len(valid_images)} images...")
 
-    results = process_image_pairs_multithreading(
-        image_names=valid_images,
-        image_dir=image_dir,
-        image_data_df=image_data,
-        model=model,
-        yolo_model=yolo_model,
-        transform=transform,
-        device=device,
-        encoder_input_size=encoder_input_size,
-        save_debug_images=save_debug_images,
-    )
+        results = process_image_pairs_multithreading(
+            image_names=valid_images,
+            image_dir=image_dir,
+            image_data_df=image_data,
+            model=model,
+            yolo_model=yolo_model,
+            transform=transform,
+            device=device,
+            encoder_input_size=encoder_input_size,
+            save_debug_images=save_debug_images,
+        )
 
-    # Update the dataframe with results
-    processed_count = 0
-    for i, result in enumerate(results):
-        if result is not None:
-            clean_idx = image_to_clean_idx[i]
-            
-            # Store both pieces of information
-            image_data.at[clean_idx, "caliper_boxes"] = result['caliper_boxes']
-            image_data.at[clean_idx, "has_caliper_mask"] = result['has_caliper_mask']
-            
-            processed_count += 1
-        else:
-            print(f"Warning: Failed to process image {i}")
+        # Update the database with results
+        cursor = db.conn.cursor()
+        processed_count = 0
+        
+        for i, result in enumerate(results):
+            if result is not None:
+                clean_idx = image_to_clean_idx[i]
+                image_name = valid_images[i]
+                
+                # Update database directly
+                cursor.execute("""
+                    UPDATE Images
+                    SET caliper_boxes = ?,
+                        has_caliper_mask = ?
+                    WHERE image_name = ?
+                """, (result['caliper_boxes'], 
+                      1 if result['has_caliper_mask'] else 0,
+                      image_name))
+                
+                processed_count += 1
+            else:
+                print(f"Warning: Failed to process image {i}")
 
-    # Save updated CSV
-    save_data(image_data, csv_file_path)
-
-    print(f"Processed {processed_count} images with YOLO-based caliper detection")
-    return image_data
+        db.conn.commit()
+        print(f"Processed {processed_count} images with YOLO-based caliper detection")
