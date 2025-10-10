@@ -119,7 +119,6 @@ def Inpaint_Dataset_N2N(input_folder):
                 new_row['image_name'] = new_filename
                 new_row['inpainted_from'] = original_filename
                 new_row['has_calipers'] = 0
-                new_row['is_labeled'] = 1
                 new_rows.append(new_row)
         
         # Insert new rows into database using batch insert

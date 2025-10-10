@@ -67,6 +67,16 @@ CONFIG = {
 ## Usage
 The pipeline is operated through a single command-line interface in main.py, which provides several functions. For general purpose, you should perform these commands in this order: 
 
+```
+python main.py --query [optional: --limit=N]
+python main.py --deploy
+python main.py --cleanup
+python main.py --database
+python main.py --export
+```
+
+
+
 ### Querying Data
 
 To query breast imaging data:
@@ -136,11 +146,7 @@ This will:
     - `/database/LossLabeling/`: Contains all images for Label Box labeling. (Labeling instance labels)
     - `/database/LossLabelingReferences.csv`: LabelBox image data structure for retrieving and cross referencing data.
         - This is database specific! You must build and retrieve labels from Label Box using the same database. 
-    - `/database/CaseStudyData.csv`: Study Based data.
-    - `/database/ImageData.csv`: Image Based data.
-    - `/database/VideoData.csv`: Video Based data.
-    - `/database/IndexCounter.txt`: Index tracker for reading and appending new dicom data to the database.
-    - `/database/ParsedFiles.txt`: List of dicom files that were already processed.
+    - `/database/database.db`: SQLite metadata database
 
 ### Labeled Data
 - The labeled data will be held in the specified `LABELBOX_LABELS` folder with this internal layout:

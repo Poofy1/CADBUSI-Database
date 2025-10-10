@@ -537,16 +537,24 @@ def parse_files(CONFIG, dcm_files_list, database_path, batch_size=100):
     return df
 
 def to_snake_case(name):
-    """Convert any naming convention to snake_case"""
+    """Convert any naming convention to snake_case (hyphens become underscores)"""
+    # Replace hyphens with underscores first
+    name = name.replace('-', '_')
+    
     # Handle UPPERCASE -> snake_case
     if name.isupper():
         return name.lower()
+    
+    # If already contains underscores, just lowercase it
+    if '_' in name:
+        return name.lower()
+    
     # Handle CamelCase/PascalCase -> snake_case
     s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
     return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
 
 
-def parse_anon_file(anon_location, database_path, image_df):
+def parse_anon_file(anon_location, image_df):
     
     # Convert all DataFrame columns to snake_case immediately
     image_df.columns = [to_snake_case(col) for col in image_df.columns]
@@ -579,6 +587,8 @@ def parse_anon_file(anon_location, database_path, image_df):
     # Convert to str (no more manual renaming needed!)
     image_df[['patient_id', 'accession_number']] = image_df[['patient_id', 'accession_number']].astype(str)
     breast_csv[['patient_id', 'accession_number']] = breast_csv[['patient_id', 'accession_number']].astype(str)
+    if not video_df.empty:
+        video_df[['patient_id', 'accession_number']] = video_df[['patient_id', 'accession_number']].astype(str)
 
     # Filter to only keep rows where accession_number exists in both datasets
     image_accession_numbers = set(image_df['accession_number'].unique())
@@ -589,6 +599,8 @@ def parse_anon_file(anon_location, database_path, image_df):
 
     image_df = image_df[image_df['accession_number'].isin(matching_accession_numbers)]
     breast_csv = breast_csv[breast_csv['accession_number'].isin(matching_accession_numbers)]
+    if not video_df.empty:
+        video_df = video_df[video_df['accession_number'].isin(matching_accession_numbers)]
 
     total_breast_accessions = len(breast_accession_numbers)
     non_matching_breast_accessions = len(breast_accession_numbers - matching_accession_numbers)
@@ -714,7 +726,7 @@ def Parse_Dicom_Files(CONFIG, anon_location, lesion_anon_file, raw_storage_datab
     append_audit("dicom_parsing.missing_ID_removed", removed_rows)
     
     # Parse and insert study/image/video data
-    parse_anon_file(anon_location, database_path, image_df)
+    parse_anon_file(anon_location, image_df)
 
     # Insert lesion/pathology data into database
     print("Inserting lesion/pathology data")

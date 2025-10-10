@@ -42,6 +42,10 @@ def download_models():
     for model_name, model_info in models.items():
         model_path = model_dir / model_info["filename"]
         
+        # Check if file already exists
+        if model_path.exists():
+            continue
+        
         print(f"\nDownloading {model_info['filename']} from Hugging Face...")
         
         try:
@@ -70,5 +74,3 @@ def download_models():
             if model_path.exists():
                 model_path.unlink()
             raise
-    
-    print("\nAll models ready!")

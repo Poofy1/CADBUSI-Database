@@ -330,12 +330,6 @@ def extract_rad_impression(text):
 def remove_outside_records(radiology_df):
     """
     Remove rows where 'OUTSIDE' appears in the TEST_DESCRIPTION column
-    
-    Args:
-        radiology_df: DataFrame containing radiology data
-        
-    Returns:
-        DataFrame with outside records removed
     """
     initial_row_count = len(radiology_df)
     
@@ -354,6 +348,24 @@ def remove_outside_records(radiology_df):
     # Calculate how many rows were removed
     removed_count = initial_row_count - len(filtered_df)
     print(f"Removed {removed_count} outside records")
+    
+    return filtered_df
+
+
+def remove_axilla_records(radiology_df):
+    """
+    Remove rows where 'AXILLA' appears in the TEST_DESCRIPTION column
+    """
+    initial_row_count = len(radiology_df)
+    filtered_df = radiology_df.copy()
+    
+    if 'TEST_DESCRIPTION' in filtered_df.columns:
+        mask = ~filtered_df['TEST_DESCRIPTION'].fillna('').str.upper().str.contains('AXILLA')
+        filtered_df = filtered_df[mask]
+    
+    removed_count = initial_row_count - len(filtered_df)
+    print(f"Removed {removed_count} axilla records")
+    append_audit("query_clean_rad.axilla_removed", removed_count)
     
     return filtered_df
 
@@ -551,6 +563,9 @@ def filter_rad_data(radiology_df, output_path):
     radiology_df = remove_outside_records(radiology_df)
     outside_removed = count_before - len(radiology_df)
     append_audit("query_clean_rad.outside_removed", outside_removed)
+    
+    # Remove axilla records
+    radiology_df = remove_axilla_records(radiology_df)
     
     # Apply the extraction functions and create new columns
     radiology_df['Density_Desc'] = radiology_df['RADIOLOGY_REPORT'].apply(extract_density)

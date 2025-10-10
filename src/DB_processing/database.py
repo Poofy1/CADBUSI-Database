@@ -53,19 +53,30 @@ class DatabaseManager:
                 accession_number TEXT PRIMARY KEY,
                 patient_id TEXT NOT NULL,
                 study_laterality TEXT,
-                study_date TEXT,
+                birth_date TEXT,
+                test_description TEXT,
                 has_malignant INTEGER DEFAULT 0,
                 has_benign INTEGER DEFAULT 0,
+                is_biopsy INTEGER DEFAULT 0,
+                is_us_biopsy INTEGER DEFAULT 0,
                 final_interpretation TEXT,
                 findings TEXT,
                 synoptic_report TEXT,
+                description TEXT,
+                us_core_birthsex TEXT,
+                radiology_review_dtm TEXT,
+                death_date TEXT,
+                density_desc TEXT,
+                rad_pathology_txt TEXT,
+                rad_impression TEXT,
+                date TEXT,
                 bi_rads TEXT,
+                biopsy TEXT,
                 modality TEXT,
                 age_at_event INTEGER,
                 ethnicity TEXT,
                 race TEXT,
                 zipcode TEXT,
-                split INTEGER,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -104,12 +115,12 @@ class DatabaseManager:
                 caliper_boxes TEXT,
                 has_caliper_mask INTEGER DEFAULT 0,
                 darkness REAL,
-                is_labeled INTEGER DEFAULT 1,
                 label INTEGER DEFAULT 1,
                 region_count INTEGER DEFAULT 1,
                 closest_fn TEXT,
                 distance REAL DEFAULT 99999,
                 file_name TEXT,
+                inpainted_from TEXT,
                 software_versions TEXT,
                 manufacturer_model_name TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -143,29 +154,17 @@ class DatabaseManager:
                 columns INTEGER,
                 physical_delta_x REAL,
                 file_name TEXT,
-                label INTEGER DEFAULT 1,
                 software_versions TEXT,
                 manufacturer_model_name TEXT,
+                nipple_dist REAL,
+                orientation TEXT,
+                clock_pos INTEGER,
+                area REAL,
+                description TEXT,
+                processed INTEGER,
+                crop_aspect_ratio REAL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (accession_number) REFERENCES StudyCases(accession_number) ON DELETE CASCADE
-            )
-        """)
-
-        # Lesions table (Cropped lesion data)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS Lesions (
-                lesion_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                source_image_name TEXT NOT NULL,
-                image_name TEXT UNIQUE NOT NULL,
-                accession_number TEXT,
-                patient_id TEXT,
-                crop_x INTEGER,
-                crop_y INTEGER,
-                crop_w INTEGER,
-                crop_h INTEGER,
-                has_mask INTEGER DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (source_image_name) REFERENCES Images(image_name) ON DELETE CASCADE
             )
         """)
 
@@ -175,9 +174,7 @@ class DatabaseManager:
                 path_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 patient_id TEXT NOT NULL,
                 accession_number TEXT,
-                specimen_date TEXT,
-                laterality TEXT,
-                interpretation TEXT,
+                date TEXT,
                 lesion_diag TEXT,
                 cancer_type TEXT,
                 synoptic_report TEXT,
@@ -190,7 +187,6 @@ class DatabaseManager:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_images_patient ON Images(patient_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_images_dicom_hash ON Images(dicom_hash)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_images_laterality ON Images(laterality)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_images_labeled ON Images(is_labeled)")
 
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_videos_accession ON Videos(accession_number)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_videos_patient ON Videos(patient_id)")
@@ -198,16 +194,11 @@ class DatabaseManager:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_studies_patient ON StudyCases(patient_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_studies_laterality ON StudyCases(study_laterality)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_studies_malignant ON StudyCases(has_malignant)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_studies_split ON StudyCases(split)")
-
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_lesions_source ON Lesions(source_image_name)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_lesions_accession ON Lesions(accession_number)")
 
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_path_patient ON Pathology(patient_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_path_accession ON Pathology(accession_number)")
 
         self.conn.commit()
-        print("Database schema created successfully")
 
     def insert_images_batch(self, image_data: List[Dict[str, Any]], upsert: bool = False, update_only: bool = False) -> int:
         """
@@ -228,13 +219,13 @@ class DatabaseManager:
         all_columns = [
             'accession_number', 'patient_id', 'image_name', 'dicom_hash',
             'laterality', 'area', 'orientation', 'clock_pos', 'nipple_dist', 'description',
-            'region_spatial_format', 'region_data_type',
+            'region_spatial_format', 'region_data_type', 'inpainted_from',
             'region_location_min_x0', 'region_location_min_y0',
             'region_location_max_x1', 'region_location_max_y1',
             'crop_x', 'crop_y', 'crop_w', 'crop_h', 'crop_aspect_ratio',
             'photometric_interpretation', 'rows', 'columns', 'physical_delta_x',
             'has_calipers', 'has_calipers_prediction', 'caliper_boxes', 'has_caliper_mask',
-            'darkness', 'is_labeled', 'label', 'region_count', 'closest_fn', 'distance',
+            'darkness', 'label', 'region_count', 'closest_fn', 'distance',
             'file_name', 'software_versions', 'manufacturer_model_name'
         ]
         
@@ -256,7 +247,7 @@ class DatabaseManager:
             rows_to_update = [
                 tuple(
                     # Handle boolean conversions
-                    [(1 if row.get(col) else 0) if col in ['has_calipers', 'has_caliper_mask', 'is_labeled', 'label']
+                    [(1 if row.get(col) else 0) if col in ['has_calipers', 'has_caliper_mask', 'label']
                     else str(row.get(col, '')) if col in ['caliper_boxes']
                     else row.get(col)
                     for col in update_cols] +
@@ -292,7 +283,7 @@ class DatabaseManager:
         rows_to_insert = [
             tuple(
                 # Handle boolean conversions
-                (1 if row.get(col) else 0) if col in ['has_calipers', 'has_caliper_mask', 'is_labeled', 'label']
+                (1 if row.get(col) else 0) if col in ['has_calipers', 'has_caliper_mask', 'label']
                 else str(row.get(col, '')) if col in ['accession_number', 'patient_id', 'image_name', 'dicom_hash', 'caliper_boxes']
                 else row.get(col)
                 for col in present_columns
@@ -306,39 +297,43 @@ class DatabaseManager:
 
     def insert_videos_batch(self, video_data: List[Dict[str, Any]]) -> int:
         """Insert multiple videos in a single transaction."""
+        if not video_data:
+            return 0
+        
         cursor = self.conn.cursor()
         
-        insert_query = """
-            INSERT OR IGNORE INTO Videos (
-                accession_number, patient_id, images_path, dicom_hash, saved_frames,
-                region_spatial_format, region_data_type,
-                region_location_min_x0, region_location_min_y0,
-                region_location_max_x1, region_location_max_y1,
-                photometric_interpretation, rows, columns, physical_delta_x,
-                file_name, software_versions, manufacturer_model_name
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        # All possible columns
+        all_columns = [
+            'accession_number', 'patient_id', 'images_path', 'dicom_hash', 'laterality',
+            'saved_frames', 'region_spatial_format', 'region_data_type',
+            'region_location_min_x0', 'region_location_min_y0',
+            'region_location_max_x1', 'region_location_max_y1',
+            'crop_x', 'crop_y', 'crop_w', 'crop_h',
+            'photometric_interpretation', 'rows', 'columns', 'physical_delta_x',
+            'file_name', 'software_versions', 'manufacturer_model_name',
+            'nipple_dist', 'orientation', 'clock_pos', 'area', 'description',
+            'processed', 'crop_aspect_ratio'
+        ]
+        
+        # Find present columns
+        first_row = video_data[0]
+        present_columns = [col for col in all_columns if col in first_row]
+        
+        # Build dynamic query
+        placeholders = ', '.join(['?' for _ in present_columns])
+        columns_str = ', '.join(present_columns)
+        
+        insert_query = f"""
+            INSERT OR IGNORE INTO Videos ({columns_str})
+            VALUES ({placeholders})
         """
         
+        # Extract values
         rows_to_insert = [
-            (
-                str(row.get('accession_number', '')),
-                str(row.get('patient_id', '')),
-                str(row.get('images_path', '')),
-                str(row.get('dicom_hash', '')),
-                row.get('saved_frames'),
-                row.get('region_spatial_format'),
-                row.get('region_data_type'),
-                row.get('region_location_min_x0'),
-                row.get('region_location_min_y0'),
-                row.get('region_location_max_x1'),
-                row.get('region_location_max_y1'),
-                row.get('photometric_interpretation'),
-                row.get('rows'),
-                row.get('columns'),
-                row.get('physical_delta_x'),
-                row.get('file_name'),
-                row.get('software_versions'),
-                row.get('manufacturer_model_name')
+            tuple(
+                str(row.get(col, '')) if col in ['accession_number', 'patient_id', 'images_path', 'dicom_hash']
+                else row.get(col)
+                for col in present_columns
             )
             for row in video_data
         ]
@@ -347,36 +342,46 @@ class DatabaseManager:
         self.conn.commit()
         return cursor.rowcount
 
+
     def insert_study_cases_batch(self, study_data: List[Dict[str, Any]]) -> int:
         """Insert multiple study cases in a single transaction."""
+        if not study_data:
+            return 0
+        
         cursor = self.conn.cursor()
         
-        insert_query = """
-            INSERT OR REPLACE INTO StudyCases (
-                accession_number, patient_id, study_laterality, study_date,
-                has_malignant, has_benign, final_interpretation,
-                findings, synoptic_report, bi_rads, modality, age_at_event,
-                ethnicity, race, zipcode
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        # All possible columns (matching the schema)
+        all_columns = [
+            'accession_number', 'patient_id', 'study_laterality',
+            'birth_date', 'test_description', 'has_malignant', 'has_benign', 
+            'is_biopsy', 'is_us_biopsy', 'final_interpretation', 'findings', 
+            'synoptic_report', 'description', 'us_core_birthsex', 
+            'radiology_review_dtm', 'death_date', 'density_desc', 
+            'rad_pathology_txt', 'rad_impression', 'date',
+            'bi_rads', 'biopsy', 'modality', 'age_at_event',
+            'ethnicity', 'race', 'zipcode'
+        ]
+        
+        # Find present columns
+        first_row = study_data[0]
+        present_columns = [col for col in all_columns if col in first_row]
+        
+        # Build dynamic query
+        placeholders = ', '.join(['?' for _ in present_columns])
+        columns_str = ', '.join(present_columns)
+        
+        insert_query = f"""
+            INSERT OR REPLACE INTO StudyCases ({columns_str})
+            VALUES ({placeholders})
         """
         
+        # Extract values
         rows_to_insert = [
-            (
-                str(row.get('accession_number', '')),
-                str(row.get('patient_id', '')),
-                row.get('study_laterality'),
-                row.get('study_date'),
-                1 if row.get('has_malignant') else 0,
-                1 if row.get('has_benign') else 0,
-                row.get('final_interpretation'),
-                row.get('findings'),
-                row.get('synoptic_report'),
-                row.get('bi_rads'),
-                row.get('modality'),
-                row.get('age_at_event'),
-                row.get('ethnicity'),
-                row.get('race'),
-                row.get('zipcode')
+            tuple(
+                (1 if row.get(col) else 0) if col in ['has_malignant', 'has_benign', 'is_biopsy', 'is_us_biopsy']
+                else str(row.get(col, '')) if col in ['accession_number', 'patient_id']
+                else row.get(col)
+                for col in present_columns
             )
             for row in study_data
         ]
@@ -385,6 +390,33 @@ class DatabaseManager:
         self.conn.commit()
         return cursor.rowcount
 
+    def insert_pathology_batch(self, pathology_data: List[Dict[str, Any]]) -> int:
+        """Insert multiple pathology/lesion records in a single transaction."""
+        cursor = self.conn.cursor()
+
+        insert_query = """
+            INSERT OR REPLACE INTO Pathology (
+                patient_id, accession_number, date,
+                lesion_diag, synoptic_report, cancer_type
+            ) VALUES (?, ?, ?, ?, ?, ?)
+        """
+
+        rows_to_insert = [
+            (
+                str(row.get('patient_id', '')), 
+                str(row.get('accession_number', '')), 
+                str(row.get('date', '')),
+                str(row.get('lesion_diag', '')),
+                str(row.get('synoptic_report', '')),
+                str(row.get('cancer_type', ''))
+            )
+            for row in pathology_data
+        ]
+
+        cursor.executemany(insert_query, rows_to_insert)
+        self.conn.commit()
+        return cursor.rowcount
+    
     def get_images_dataframe(self, where_clause: str = "", params: tuple = ()) -> pd.DataFrame:
         """
         Get images as a pandas DataFrame with optional filtering.
@@ -431,34 +463,6 @@ class DatabaseManager:
         cursor = self.conn.cursor()
         cursor.execute("SELECT DISTINCT patient_id FROM Images")
         return {row[0] for row in cursor.fetchall()}
-
-    def insert_pathology_batch(self, pathology_data: List[Dict[str, Any]]) -> int:
-        """Insert multiple pathology/lesion records in a single transaction."""
-        cursor = self.conn.cursor()
-
-        insert_query = """
-            INSERT OR REPLACE INTO Pathology (
-                patient_id, accession_number, specimen_date,
-                lesion_diag, synoptic_report, cancer_type
-            ) VALUES (?, ?, ?, ?, ?, ?)
-        """
-
-        # Change this part - use snake_case
-        rows_to_insert = [
-            (
-                str(row.get('patient_id', '')), 
-                str(row.get('accession_number', '')), 
-                str(row.get('specimen_date', '')),
-                str(row.get('lesion_diag', '')),
-                str(row.get('synoptic_report', '')),
-                str(row.get('cancer_type', ''))
-            )
-            for row in pathology_data
-        ]
-
-        cursor.executemany(insert_query, rows_to_insert)
-        self.conn.commit()
-        return cursor.rowcount
 
     def update_image_metadata_from_studies(self):
         """Update image laterality and area from StudyCases where missing."""
