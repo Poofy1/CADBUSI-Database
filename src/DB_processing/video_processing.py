@@ -1,6 +1,6 @@
 from src.DB_processing.image_processing import *
 from src.DB_processing.database import DatabaseManager
-
+import numpy as np
 
 def modify_keys(dictionary):
     # Create a new dictionary with modified keys
@@ -60,19 +60,7 @@ def ProcessVideoData(database_path):
         if len(video_df) == 0:
             print("No videos to process")
             return
-
-        # Prepare column mapping for database field names
-        video_df = video_df.rename(columns={
-            'images_path': 'ImagesPath',
-            'accession_number': 'Accession_Number',
-            'patient_id': 'Patient_ID'
-        })
-
-        breast_df = breast_df.rename(columns={
-            'accession_number': 'Accession_Number',
-            'study_laterality': 'Study_Laterality'
-        })
-
+        
         db_to_process = video_df
         append_audit("video_processing.input_videos", len(db_to_process))
 
@@ -101,7 +89,7 @@ def ProcessVideoData(database_path):
         print("Finding Image Masks")
         first_images = get_first_image_in_each_folder(video_folder_path)
         # Filter first_images to only include those from db_to_process
-        images_to_process = set(db_to_process['ImagesPath'].tolist())
+        images_to_process = set(db_to_process['images_path'].tolist())
         filtered_first_images = [img for img in first_images
                                 if img.split('/')[0] in images_to_process]
         image_masks_dict = get_video_ultrasound_region(video_folder_path, filtered_first_images)
@@ -112,21 +100,21 @@ def ProcessVideoData(database_path):
         image_masks_dict = modify_keys(image_masks_dict)
 
         # Initialize with defaults
-        matched_descriptions = sum(1 for key in db_to_process['ImagesPath'] if key in descriptions)
-        matched_masks = sum(1 for key in db_to_process['ImagesPath'] if key in image_masks_dict)
+        matched_descriptions = sum(1 for key in db_to_process['images_path'] if key in descriptions)
+        matched_masks = sum(1 for key in db_to_process['images_path'] if key in image_masks_dict)
         db_to_process['description'] = None
         db_to_process['bounding_box'] = None
 
         # Map descriptions and masks
         if matched_descriptions > 0:
             desc_series = pd.Series(descriptions)
-            mask = db_to_process['ImagesPath'].isin(descriptions.keys())
-            db_to_process.loc[mask, 'description'] = db_to_process.loc[mask, 'ImagesPath'].map(desc_series)
+            mask = db_to_process['images_path'].isin(descriptions.keys())
+            db_to_process.loc[mask, 'description'] = db_to_process.loc[mask, 'images_path'].map(desc_series)
 
         if matched_masks > 0:
             mask_series = pd.Series(image_masks_dict)
-            mask = db_to_process['ImagesPath'].isin(image_masks_dict.keys())
-            db_to_process.loc[mask, 'bounding_box'] = db_to_process.loc[mask, 'ImagesPath'].map(mask_series)
+            mask = db_to_process['images_path'].isin(image_masks_dict.keys())
+            db_to_process.loc[mask, 'bounding_box'] = db_to_process.loc[mask, 'images_path'].map(mask_series)
 
         # Handle bounding box extraction safely, row by row
         db_to_process['crop_x'] = None
@@ -145,6 +133,14 @@ def ProcessVideoData(database_path):
                 except (IndexError, TypeError, ValueError) as e:
                     print(f"Failed to extract bbox for row {idx}: {e}")
 
+        
+        # Calculate crop aspect ratio
+        db_to_process['crop_aspect_ratio'] = None
+        mask = (db_to_process['crop_w'].notna()) & (db_to_process['crop_h'].notna()) & (db_to_process['crop_h'] != 0)
+        if mask.any():
+            aspect_ratios = db_to_process.loc[mask, 'crop_w'].astype(float) / db_to_process.loc[mask, 'crop_h'].astype(float)
+            db_to_process.loc[mask, 'crop_aspect_ratio'] = np.round(aspect_ratios, 2)
+        
         # Handle feature extraction safely, row by row
         feature_columns = ['area', 'laterality', 'orientation', 'clock_pos', 'nipple_dist']
 
@@ -165,11 +161,11 @@ def ProcessVideoData(database_path):
                     print(f"Failed to extract features for row {idx}: {e}")
 
         # Overwrite non bilateral cases with known lateralities
-        laterality_mapping = breast_df[breast_df['Study_Laterality'].isin(['LEFT', 'RIGHT'])].set_index('Accession_Number')['Study_Laterality'].to_dict()
+        laterality_mapping = breast_df[breast_df['study_laterality'].isin(['LEFT', 'RIGHT'])].set_index('accession_number')['study_laterality'].to_dict()
 
         db_to_process['laterality'] = db_to_process.apply(
-            lambda row: laterality_mapping.get(row['Accession_Number']).lower()
-            if row['Accession_Number'] in laterality_mapping
+            lambda row: laterality_mapping.get(row['accession_number']).lower()
+            if row['accession_number'] in laterality_mapping
             else row['laterality'],
             axis=1
         )
@@ -178,25 +174,12 @@ def ProcessVideoData(database_path):
         unknown_lateralities = db_to_process[db_to_process['laterality'] == 'unknown'].shape[0]
         append_audit("video_processing.bilateral_with_unknown_lat", unknown_lateralities)
 
-        # Update database with processed results
-        cursor = db.conn.cursor()
-
-        for _, row in db_to_process.iterrows():
-            cursor.execute("""
-                UPDATE Videos
-                SET crop_x = ?, crop_y = ?, crop_w = ?, crop_h = ?,
-                    laterality = ?, area = ?, orientation = ?
-                WHERE images_path = ?
-            """, (
-                row.get('crop_x'),
-                row.get('crop_y'),
-                row.get('crop_w'),
-                row.get('crop_h'),
-                row.get('laterality'),
-                row.get('area'),
-                row.get('orientation'),
-                row['ImagesPath']
-            ))
-
-        db.conn.commit()
-        print(f"Updated {len(db_to_process)} videos in database")
+        # Update database with processed results using batch method
+        update_data = db_to_process[[
+            'images_path', 'crop_x', 'crop_y', 'crop_w', 'crop_h', 
+            'crop_aspect_ratio', 'clock_pos', 'nipple_dist',
+            'laterality', 'area', 'orientation', 'description'
+        ]].to_dict('records')
+        
+        rows_updated = db.insert_videos_batch(update_data, update_only=True)
+        print(f"Updated {rows_updated} videos in database")

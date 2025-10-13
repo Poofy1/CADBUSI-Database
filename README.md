@@ -1,6 +1,6 @@
 # CADBUSI-Database
 
-Custom database manager that is designed to process breast ultrasound data from Mayo Clinic and store it in a structured format, making it easy to anonymize, manipulate, label, analyze, and prepare for ML research.
+SQLite database manager that is designed to process breast ultrasound data from Mayo Clinic and store it in a structured format, making it easy to anonymize, manipulate, label, analyze, and prepare for ML research.
 
 ## Setup
 

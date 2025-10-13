@@ -161,7 +161,6 @@ class DatabaseManager:
                 clock_pos INTEGER,
                 area REAL,
                 description TEXT,
-                processed INTEGER,
                 crop_aspect_ratio REAL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (accession_number) REFERENCES StudyCases(accession_number) ON DELETE CASCADE
@@ -200,22 +199,119 @@ class DatabaseManager:
 
         self.conn.commit()
 
-    def insert_images_batch(self, image_data: List[Dict[str, Any]], upsert: bool = False, update_only: bool = False) -> int:
+    def _batch_upsert_helper(
+        self,
+        table_name: str,
+        data: List[Dict[str, Any]],
+        all_columns: List[str],
+        unique_key: str,
+        string_columns: List[str] = None,
+        boolean_columns: List[str] = None,
+        upsert: bool = False,
+        update_only: bool = False
+    ) -> int:
         """
-        Insert multiple images in a single transaction.
-        Only inserts columns that are present in the data.
+        Generic helper for batch insert/update operations.
         
         Args:
-            image_data: List of dictionaries with image data
-            upsert: If True, updates existing records. If False, ignores duplicates.
-            update_only: If True, only updates existing records (no insert attempt). Requires 'image_name' in data.
+            table_name: Name of the database table
+            data: List of dictionaries with row data
+            all_columns: List of all possible column names for the table
+            unique_key: Column name used as unique identifier (for conflicts/updates)
+            string_columns: Columns that should always be converted to strings
+            boolean_columns: Columns that should be converted to 0/1 integers
+            upsert: If True, updates existing records on conflict
+            update_only: If True, only updates existing records
+        
+        Returns:
+            Number of rows affected
         """
-        if not image_data:
+        if not data:
             return 0
+        
+        string_columns = string_columns or []
+        boolean_columns = boolean_columns or []
         
         cursor = self.conn.cursor()
         
-        # Get all possible columns (excluding auto-increment and timestamp)
+        # Find which columns are present in the data
+        first_row = data[0]
+        present_columns = [col for col in all_columns if col in first_row]
+        
+        # Handle UPDATE-only mode
+        if update_only:
+            if unique_key not in present_columns:
+                raise ValueError(f"update_only mode requires '{unique_key}' in data")
+            
+            # Build UPDATE query
+            update_cols = [col for col in present_columns if col != unique_key]
+            if not update_cols:
+                return 0
+                
+            set_clause = ', '.join([f"{col} = ?" for col in update_cols])
+            update_query = f"UPDATE {table_name} SET {set_clause} WHERE {unique_key} = ?"
+            
+            # Extract values for UPDATE
+            rows_to_update = []
+            for row in data:
+                values = []
+                for col in update_cols:
+                    val = row.get(col)
+                    if col in boolean_columns:
+                        values.append(1 if val else 0)
+                    elif col in string_columns:
+                        values.append(str(val) if val is not None else '')
+                    else:
+                        values.append(val)
+                # Add unique key for WHERE clause
+                unique_val = row.get(unique_key)
+                values.append(str(unique_val) if unique_val is not None else '')
+                rows_to_update.append(tuple(values))
+            
+            cursor.executemany(update_query, rows_to_update)
+            self.conn.commit()
+            return cursor.rowcount
+        
+        # Build INSERT query
+        placeholders = ', '.join(['?' for _ in present_columns])
+        columns_str = ', '.join(present_columns)
+        
+        if upsert:
+            # Update all columns except unique keys on conflict
+            update_cols = [col for col in present_columns if col != unique_key]
+            update_str = ', '.join([f"{col} = excluded.{col}" for col in update_cols])
+            insert_query = f"""
+                INSERT INTO {table_name} ({columns_str})
+                VALUES ({placeholders})
+                ON CONFLICT({unique_key}) DO UPDATE SET {update_str}
+            """
+        else:
+            insert_query = f"""
+                INSERT OR IGNORE INTO {table_name} ({columns_str})
+                VALUES ({placeholders})
+            """
+        
+        # Extract values with type conversions
+        rows_to_insert = []
+        for row in data:
+            values = []
+            for col in present_columns:
+                val = row.get(col)
+                if col in boolean_columns:
+                    values.append(1 if val else 0)
+                elif col in string_columns:
+                    values.append(str(val) if val is not None else '')
+                else:
+                    values.append(val)
+            rows_to_insert.append(tuple(values))
+        
+        cursor.executemany(insert_query, rows_to_insert)
+        self.conn.commit()
+        return cursor.rowcount
+
+
+    def insert_images_batch(self, image_data: List[Dict[str, Any]], upsert: bool = False, update_only: bool = False) -> int:
+        """Insert multiple images in a single transaction."""
         all_columns = [
             'accession_number', 'patient_id', 'image_name', 'dicom_hash',
             'laterality', 'area', 'orientation', 'clock_pos', 'nipple_dist', 'description',
@@ -229,80 +325,23 @@ class DatabaseManager:
             'file_name', 'software_versions', 'manufacturer_model_name'
         ]
         
-        # Find which columns are actually present in the data
-        first_row = image_data[0]
-        present_columns = [col for col in all_columns if col in first_row]
+        string_columns = ['accession_number', 'patient_id', 'image_name', 'dicom_hash', 'caliper_boxes']
+        boolean_columns = ['has_calipers', 'has_caliper_mask', 'label']
         
-        # Handle UPDATE-only mode
-        if update_only:
-            if 'image_name' not in present_columns:
-                raise ValueError("update_only mode requires 'image_name' in data")
-            
-            # Build UPDATE query
-            update_cols = [col for col in present_columns if col != 'image_name']
-            set_clause = ', '.join([f"{col} = ?" for col in update_cols])
-            update_query = f"UPDATE Images SET {set_clause} WHERE image_name = ?"
-            
-            # Extract values for UPDATE (excluding image_name, which goes at the end)
-            rows_to_update = [
-                tuple(
-                    # Handle boolean conversions
-                    [(1 if row.get(col) else 0) if col in ['has_calipers', 'has_caliper_mask', 'label']
-                    else str(row.get(col, '')) if col in ['caliper_boxes']
-                    else row.get(col)
-                    for col in update_cols] +
-                    [str(row.get('image_name', ''))]  # image_name for WHERE clause
-                )
-                for row in image_data
-            ]
-            
-            cursor.executemany(update_query, rows_to_update)
-            self.conn.commit()
-            return cursor.rowcount
-        
-        # Original INSERT logic for non-update_only mode
-        placeholders = ', '.join(['?' for _ in present_columns])
-        columns_str = ', '.join(present_columns)
-        
-        if upsert:
-            # Update all columns except the primary key on conflict
-            update_cols = [col for col in present_columns if col not in ['image_name', 'dicom_hash']]
-            update_str = ', '.join([f"{col} = excluded.{col}" for col in update_cols])
-            insert_query = f"""
-                INSERT INTO Images ({columns_str})
-                VALUES ({placeholders})
-                ON CONFLICT(image_name) DO UPDATE SET {update_str}
-            """
-        else:
-            insert_query = f"""
-                INSERT OR IGNORE INTO Images ({columns_str})
-                VALUES ({placeholders})
-            """
-        
-        # Extract values in the same order as present_columns
-        rows_to_insert = [
-            tuple(
-                # Handle boolean conversions
-                (1 if row.get(col) else 0) if col in ['has_calipers', 'has_caliper_mask', 'label']
-                else str(row.get(col, '')) if col in ['accession_number', 'patient_id', 'image_name', 'dicom_hash', 'caliper_boxes']
-                else row.get(col)
-                for col in present_columns
-            )
-            for row in image_data
-        ]
-                
-        cursor.executemany(insert_query, rows_to_insert)
-        self.conn.commit()
-        return cursor.rowcount
+        return self._batch_upsert_helper(
+            table_name='Images',
+            data=image_data,
+            all_columns=all_columns,
+            unique_key='image_name',
+            string_columns=string_columns,
+            boolean_columns=boolean_columns,
+            upsert=upsert,
+            update_only=update_only
+        )
 
-    def insert_videos_batch(self, video_data: List[Dict[str, Any]]) -> int:
+
+    def insert_videos_batch(self, video_data: List[Dict[str, Any]], upsert: bool = False, update_only: bool = False) -> int:
         """Insert multiple videos in a single transaction."""
-        if not video_data:
-            return 0
-        
-        cursor = self.conn.cursor()
-        
-        # All possible columns
         all_columns = [
             'accession_number', 'patient_id', 'images_path', 'dicom_hash', 'laterality',
             'saved_frames', 'region_spatial_format', 'region_data_type',
@@ -311,46 +350,26 @@ class DatabaseManager:
             'crop_x', 'crop_y', 'crop_w', 'crop_h',
             'photometric_interpretation', 'rows', 'columns', 'physical_delta_x',
             'file_name', 'software_versions', 'manufacturer_model_name',
-            'nipple_dist', 'orientation', 'clock_pos', 'area', 'description',
-            'processed', 'crop_aspect_ratio'
+            'nipple_dist', 'orientation', 'clock_pos', 'area', 'description', 'crop_aspect_ratio'
         ]
         
-        # Find present columns
-        first_row = video_data[0]
-        present_columns = [col for col in all_columns if col in first_row]
+        string_columns = ['accession_number', 'patient_id', 'images_path', 'dicom_hash']
+        boolean_columns = []  # No boolean columns in Videos table
         
-        # Build dynamic query
-        placeholders = ', '.join(['?' for _ in present_columns])
-        columns_str = ', '.join(present_columns)
-        
-        insert_query = f"""
-            INSERT OR IGNORE INTO Videos ({columns_str})
-            VALUES ({placeholders})
-        """
-        
-        # Extract values
-        rows_to_insert = [
-            tuple(
-                str(row.get(col, '')) if col in ['accession_number', 'patient_id', 'images_path', 'dicom_hash']
-                else row.get(col)
-                for col in present_columns
-            )
-            for row in video_data
-        ]
-        
-        cursor.executemany(insert_query, rows_to_insert)
-        self.conn.commit()
-        return cursor.rowcount
+        return self._batch_upsert_helper(
+            table_name='Videos',
+            data=video_data,
+            all_columns=all_columns,
+            unique_key='images_path',
+            string_columns=string_columns,
+            boolean_columns=boolean_columns,
+            upsert=upsert,
+            update_only=update_only
+        )
 
 
-    def insert_study_cases_batch(self, study_data: List[Dict[str, Any]]) -> int:
+    def insert_study_cases_batch(self, study_data: List[Dict[str, Any]], upsert: bool = True, update_only: bool = False) -> int:
         """Insert multiple study cases in a single transaction."""
-        if not study_data:
-            return 0
-        
-        cursor = self.conn.cursor()
-        
-        # All possible columns (matching the schema)
         all_columns = [
             'accession_number', 'patient_id', 'study_laterality',
             'birth_date', 'test_description', 'has_malignant', 'has_benign', 
@@ -362,33 +381,19 @@ class DatabaseManager:
             'ethnicity', 'race', 'zipcode'
         ]
         
-        # Find present columns
-        first_row = study_data[0]
-        present_columns = [col for col in all_columns if col in first_row]
+        string_columns = ['accession_number', 'patient_id']
+        boolean_columns = ['has_malignant', 'has_benign', 'is_biopsy', 'is_us_biopsy']
         
-        # Build dynamic query
-        placeholders = ', '.join(['?' for _ in present_columns])
-        columns_str = ', '.join(present_columns)
-        
-        insert_query = f"""
-            INSERT OR REPLACE INTO StudyCases ({columns_str})
-            VALUES ({placeholders})
-        """
-        
-        # Extract values
-        rows_to_insert = [
-            tuple(
-                (1 if row.get(col) else 0) if col in ['has_malignant', 'has_benign', 'is_biopsy', 'is_us_biopsy']
-                else str(row.get(col, '')) if col in ['accession_number', 'patient_id']
-                else row.get(col)
-                for col in present_columns
-            )
-            for row in study_data
-        ]
-        
-        cursor.executemany(insert_query, rows_to_insert)
-        self.conn.commit()
-        return cursor.rowcount
+        return self._batch_upsert_helper(
+            table_name='StudyCases',
+            data=study_data,
+            all_columns=all_columns,
+            unique_key='accession_number',
+            string_columns=string_columns,
+            boolean_columns=boolean_columns,
+            upsert=upsert,
+            update_only=update_only
+        )
 
     def insert_pathology_batch(self, pathology_data: List[Dict[str, Any]]) -> int:
         """Insert multiple pathology/lesion records in a single transaction."""
@@ -418,16 +423,7 @@ class DatabaseManager:
         return cursor.rowcount
     
     def get_images_dataframe(self, where_clause: str = "", params: tuple = ()) -> pd.DataFrame:
-        """
-        Get images as a pandas DataFrame with optional filtering.
-
-        Args:
-            where_clause: Optional SQL WHERE clause (without 'WHERE' keyword)
-            params: Parameters for the WHERE clause
-
-        Returns:
-            DataFrame with image data
-        """
+        """Get images as a pandas DataFrame with optional filtering."""
         query = "SELECT * FROM Images"
         if where_clause:
             query += f" WHERE {where_clause}"
@@ -455,7 +451,6 @@ class DatabaseManager:
         query = "SELECT * FROM Pathology"
         if where_clause:
             query += f" WHERE {where_clause}"
-
         return pd.read_sql_query(query, self.conn, params=params)
 
     def check_existing_patient_ids(self) -> set:

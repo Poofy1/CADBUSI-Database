@@ -26,19 +26,7 @@ import sys
 
 env = os.path.dirname(os.path.abspath(__file__))
 
-def upload_database(local_db_path, gcp_destination_path):
-    """Upload SQLite database file to GCP bucket"""
-    storage = StorageClient.get_instance()
-    
-    if storage.is_gcp:
-        blob = storage._bucket.blob(gcp_destination_path.replace('//', '/').rstrip('/'))
-        
-        # Read from local filesystem and upload
-        local_full_path = os.path.join(storage.windir, local_db_path) if storage.windir else local_db_path
-        blob.upload_from_filename(local_full_path)
-        print(f"Database uploaded to {gcp_destination_path}")
-    else:
-        print("Not in GCP mode, skipping upload")
+
 
 def parse_arguments():
     """Parse command line arguments."""
@@ -64,7 +52,7 @@ def parse_arguments():
 
 def main():
     # Determine storage client
-    StorageClient.get_instance(CONFIG["WINDIR"], CONFIG["BUCKET"])
+    storage = StorageClient.get_instance(CONFIG["WINDIR"], CONFIG["BUCKET"])
     
     # Main entry point for the script
     args = parse_arguments()
@@ -138,7 +126,16 @@ def main():
         print("Step 5/5: Processing video data...")
         ProcessVideoData(CONFIG["DATABASE_DIR"])
         
-        upload_database('data/cadbusi.db', f'{CONFIG["DATABASE_DIR"]}/cadbusi.db')
+        #Upload Database
+        if storage.is_gcp:
+            gcp_path = f'{CONFIG["DATABASE_DIR"]}/cadbusi.db'
+            local_path = f'{env}/data/cadbusi.db'
+            blob = storage._bucket.blob(gcp_path.replace('//', '/').rstrip('/'))
+            
+            # Read from local filesystem and upload
+            local_full_path = os.path.join(storage.windir, local_path) if storage.windir else local_path
+            blob.upload_from_filename(local_full_path)
+            print('Database uploaded')
 
     elif args.export:
         if args.limit:
