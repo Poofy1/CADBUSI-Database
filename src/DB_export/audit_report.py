@@ -4,16 +4,16 @@ from src.DB_processing.tools import append_audit
 
 def calculate_patient_stats(breast_df):
     """Calculate and log patient-related statistics."""
-    unique_patients = breast_df['Patient_ID'].nunique()
+    unique_patients = breast_df['patient_id'].nunique()
     append_audit("export.num_patients", unique_patients)
     
     # Year range
-    breast_df['study_date'] = pd.to_datetime(breast_df['study_date'], errors='coerce')
-    append_audit("export.year_range_start", int(breast_df['study_date'].dt.year.min()))
-    append_audit("export.year_range_end", int(breast_df['study_date'].dt.year.max()))
+    breast_df['date'] = pd.to_datetime(breast_df['date'], errors='coerce')
+    append_audit("export.year_range_start", int(breast_df['date'].dt.year.min()))
+    append_audit("export.year_range_end", int(breast_df['date'].dt.year.max()))
     
     # Age statistics
-    valid_ages = pd.to_numeric(breast_df['AGE_AT_EVENT'], errors='coerce').dropna()
+    valid_ages = pd.to_numeric(breast_df['age_at_event'], errors='coerce').dropna()
     append_audit("export.min_patient_age", float(valid_ages.min()))
     append_audit("export.max_patient_age", float(valid_ages.max()))
     append_audit("export.avg_patient_age", float(valid_ages.mean()))
@@ -22,7 +22,7 @@ def calculate_patient_stats(breast_df):
 def calculate_image_stats(image_df):
     """Calculate and log image-related statistics."""
     # Images per exam
-    exam_counts = image_df.groupby('Accession_Number').size()
+    exam_counts = image_df.groupby('accession_number').size()
     append_audit("export.min_images_per_exam", int(exam_counts.min()))
     append_audit("export.max_images_per_exam", int(exam_counts.max()))
     append_audit("export.avg_images_per_exam", float(exam_counts.mean()))
@@ -32,7 +32,7 @@ def calculate_image_stats(image_df):
     append_audit("export.avg_image_height", float(image_df['crop_h'].mean()))
     
     # Per-case counts
-    case_counts = image_df.groupby('Accession_Number').size().tolist()
+    case_counts = image_df.groupby('accession_number').size().tolist()
     append_audit("export.img_per_case", case_counts)
 
 
@@ -46,7 +46,7 @@ def calculate_video_stats(video_df, video_images_df=None):
         return
     
     # Videos per exam
-    exam_counts = video_df.groupby('Accession_Number').size()
+    exam_counts = video_df.groupby('accession_number').size()
     append_audit("export.min_videos_per_exam", int(exam_counts.min()))
     append_audit("export.max_videos_per_exam", int(exam_counts.max()))
     append_audit("export.avg_videos_per_exam", float(exam_counts.mean()))
@@ -65,13 +65,13 @@ def calculate_video_stats(video_df, video_images_df=None):
         append_audit("export.max_video_frames", int(frame_counts.max()))
     
     # Per-case counts
-    case_counts = video_df.groupby('Accession_Number').size().tolist()
+    case_counts = video_df.groupby('accession_number').size().tolist()
     append_audit("export.vid_per_case", case_counts)
 
 
 def calculate_laterality_stats(breast_df):
     """Calculate and log laterality distribution."""
-    laterality_counts = breast_df['Study_Laterality'].value_counts()
+    laterality_counts = breast_df['study_laterality'].value_counts()
     append_audit("export.num_left_breasts", int(laterality_counts.get('LEFT', 0)))
     append_audit("export.num_right_breasts", int(laterality_counts.get('RIGHT', 0)))
     append_audit("export.num_bilateral_breasts", int(laterality_counts.get('BILATERAL', 0)))
@@ -86,14 +86,14 @@ def calculate_split_diagnosis_stats(breast_df):
     }
     
     for split_num in [0, 1, 2]:
-        split_data = breast_df[breast_df['Valid'] == split_num]
+        split_data = breast_df[breast_df['valid'] == split_num]
         
         for laterality in ['RIGHT', 'LEFT']:
             for diagnosis in ['MALIGNANT', 'BENIGN']:
                 condition = split_data['final_interpretation'].isin([diagnosis])
                 key = f"{laterality.lower()}_{diagnosis.lower()}"
                 breast_counts[key][split_num] = len(
-                    split_data[(split_data['Study_Laterality'] == laterality) & condition]
+                    split_data[(split_data['study_laterality'] == laterality) & condition]
                 )
     
     for key, counts in breast_counts.items():
@@ -102,13 +102,13 @@ def calculate_split_diagnosis_stats(breast_df):
 
 def calculate_machine_model_stats(image_df, breast_df):
     """Calculate and log machine model distribution by split."""
-    if 'ManufacturerModelName' not in image_df.columns:
+    if 'manufacturer_model_name' not in image_df.columns:
         append_audit("export.machine_models", "Column not found")
         return
     
     model_df = image_df.merge(
-        breast_df[['Patient_ID', 'Accession_Number', 'Valid']], 
-        on=['Patient_ID', 'Accession_Number'],
+        breast_df[['patient_id', 'accession_number', 'valid']], 
+        on=['patient_id', 'accession_number'],
         how='left'
     )
     
@@ -116,12 +116,12 @@ def calculate_machine_model_stats(image_df, breast_df):
     val_models = {}
     test_models = {}
     
-    for model in model_df['ManufacturerModelName'].unique():
+    for model in model_df['manufacturer_model_name'].unique():
         safe_model = str(model).replace(' ', '_').replace('-', '_').replace('.', '_').replace("'", "")
         
         for split_num, models_dict in [(0, train_models), (1, val_models), (2, test_models)]:
-            count = len(model_df[(model_df['Valid'] == split_num) & 
-                                (model_df['ManufacturerModelName'] == model)])
+            count = len(model_df[(model_df['valid'] == split_num) & 
+                                (model_df['manufacturer_model_name'] == model)])
             if count > 0:
                 models_dict[safe_model] = count
     
@@ -132,7 +132,7 @@ def calculate_machine_model_stats(image_df, breast_df):
 
 def calculate_density_stats(breast_df):
     """Calculate and log breast density distribution by split."""
-    if 'Density_Desc' not in breast_df.columns:
+    if 'density_desc' not in breast_df.columns:
         append_audit("export.breast_densities", "Column not found")
         return
     
@@ -153,22 +153,22 @@ def calculate_density_stats(breast_df):
                 return category
         return 'unknown'
     
-    breast_df['density_category'] = breast_df['Density_Desc'].apply(classify_density)
+    breast_df['density_category'] = breast_df['density_desc'].apply(classify_density)
     
     for split_num, split_name in [(0, 'train'), (1, 'val'), (2, 'test')]:
-        split_data = breast_df[breast_df['Valid'] == split_num]
+        split_data = breast_df[breast_df['valid'] == split_num]
         density_counts = split_data['density_category'].value_counts().to_dict()
         densities = {cat: density_counts.get(cat, 0) for cat in density_keywords.keys()}
         append_audit(f"export.{split_name}_breast_densities", densities)
 
 
 def calculate_birads_stats(breast_df):
-    """Calculate and log BI-RADS distribution by split."""
+    """Calculate and log bi_rads distribution by split."""
     birad_values = ['0', '1', '2', '3', '4', '4A', '4B', '4C', '5', '6']
     
     for birad in birad_values:
         counts = [
-            len(breast_df[(breast_df['Valid'] == split) & (breast_df['BI-RADS'] == birad)])
+            len(breast_df[(breast_df['valid'] == split) & (breast_df['bi_rads'] == birad)])
             for split in [0, 1, 2]
         ]
         safe_birad = birad.replace('-', '_').replace('/', '_')
@@ -178,12 +178,12 @@ def calculate_birads_stats(breast_df):
 def calculate_split_image_stats(image_df, breast_df):
     """Calculate and log image counts per split."""
     merged_df = image_df.merge(
-        breast_df[['Patient_ID', 'Accession_Number', 'Study_Laterality', 'Valid']], 
-        on=['Patient_ID', 'Accession_Number'],
+        breast_df[['patient_id', 'accession_number', 'study_laterality', 'valid']], 
+        on=['patient_id', 'accession_number'],
         how='left'
     )
     
-    valid_counts = merged_df.groupby('Valid').size()
+    valid_counts = merged_df.groupby('valid').size()
     
     for split_code, split_name in [(0, 'train'), (1, 'val'), (2, 'test')]:
         count = int(valid_counts.get(split_code, 0))

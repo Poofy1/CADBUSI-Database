@@ -260,7 +260,7 @@ def process_single_mask(args):
     idx, row, image_dir, mask_dir, output_dir, debug_enabled, debug_dir = args
     
     try:
-        image_name = row['ImageName']
+        image_name = row['image_name']
         
         # Construct paths and fix double slashes
         image_path = os.path.join(image_dir, image_name).replace('//', '/')
@@ -377,7 +377,7 @@ def process_single_mask(args):
         return {
             'idx': idx,
             'success': False,
-            'error': f"Error processing {row['ImageName']}: {str(e)}",
+            'error': f"Error processing {row['image_name']}: {str(e)}",
             'lesion_images': "",
             'image_w': "",
             'image_h': "",
@@ -386,7 +386,7 @@ def process_single_mask(args):
 
 def Mask_Lesions(database_path, max_workers=None, debug=False):
     """
-    Multithreaded version of Mask_Lesions that creates lesion records in the database.
+    Multithreaded version of Mask_Lesions that creates lesion records.
 
     Args:
         database_path: Path to the database directory
@@ -394,7 +394,7 @@ def Mask_Lesions(database_path, max_workers=None, debug=False):
         debug: Boolean flag to enable debug image saving
 
     Returns:
-        Number of lesion records created
+        pd.DataFrame: DataFrame with lesion information matching database schema
     """
     with DatabaseManager() as db:
         # Load image data from database
@@ -402,9 +402,9 @@ def Mask_Lesions(database_path, max_workers=None, debug=False):
 
         # Prepare column mapping
         image_data = image_data.rename(columns={
-            'image_name': 'ImageName',
-            'accession_number': 'Accession_Number',
-            'patient_id': 'Patient_ID'
+            'image_name': 'image_name',
+            'accession_number': 'accession_number',
+            'patient_id': 'patient_id'
         })
 
         image_dir = f"{database_path}/images/"
@@ -419,7 +419,6 @@ def Mask_Lesions(database_path, max_workers=None, debug=False):
             print(f"Debug mode enabled. Debug images will be saved to: {debug_dir}")
 
         # Filter for rows where has_caliper_mask = True
-        # Note: This field might not exist in the database yet, so we'll check
         if 'has_caliper_mask' in image_data.columns:
             masked_images = image_data[image_data['has_caliper_mask'] == True]
         else:
@@ -429,7 +428,7 @@ def Mask_Lesions(database_path, max_workers=None, debug=False):
 
         if len(masked_images) == 0:
             print("No images found with masks")
-            return 0
+            return pd.DataFrame(columns=['image_source', 'image_name', 'accession_number', 'patient_id', 'crop_w', 'crop_h'])
 
         print(f"Found {len(masked_images)} images to process")
 
@@ -442,6 +441,7 @@ def Mask_Lesions(database_path, max_workers=None, debug=False):
         processed_count = 0
         failed_count = 0
         total_lesions_created = 0
+        failed_images = []
 
         # Store results for creating new rows
         processing_results = {}
@@ -467,67 +467,64 @@ def Mask_Lesions(database_path, max_workers=None, debug=False):
                         processed_count += 1
                         total_lesions_created += result['lesions_created']
                     else:
-                        print(result['error'])
+                        failed_images.append(result['error'])
                         failed_count += 1
 
                     pbar.update(1)
 
-        # Insert lesion records into database
-        cursor = db.conn.cursor()
-        lesion_records_inserted = 0
-
-        for idx, row in masked_images.iterrows():
-            if idx in processing_results and processing_results[idx]['success']:
-                result = processing_results[idx]
-
-                # Store the original image name
-                original_image_name = row['ImageName']
-
-                # Parse lesion images (comma-separated)
-                lesion_images_str = result['lesion_images']
-                if lesion_images_str:
-                    lesion_images = [img.strip() for img in lesion_images_str.split(',') if img.strip()]
-
-                    # Parse dimensions
-                    image_w_str = result['image_w']
-                    image_h_str = result['image_h']
-
-                    if '; ' in image_w_str:
-                        # Multiple dimensions
-                        widths = [w.strip() for w in image_w_str.split(';')]
-                        heights = [h.strip() for h in image_h_str.split(';')]
-                    else:
-                        # Single dimension or empty
-                        widths = [image_w_str] * len(lesion_images)
-                        heights = [image_h_str] * len(lesion_images)
-
-                    # Create a lesion record for each lesion image
-                    for i, lesion_img in enumerate(lesion_images):
-                        crop_w = int(widths[i]) if i < len(widths) and widths[i] else 0
-                        crop_h = int(heights[i]) if i < len(heights) and heights[i] else 0
-
-                        cursor.execute("""
-                            INSERT OR REPLACE INTO Lesions (
-                                source_image_name, image_name, accession_number, patient_id,
-                                crop_w, crop_h, has_mask
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                        """, (
-                            original_image_name,
-                            lesion_img,
-                            row.get('Accession_Number'),
-                            row.get('Patient_ID'),
-                            crop_w,
-                            crop_h,
-                            1  # has_mask = True since we created it from a mask
-                        ))
-                        lesion_records_inserted += 1
-
-        db.conn.commit()
+        # Print errors at the end
+        if failed_images:
+            print("\nFailed masks and errors:")
+            for error in failed_images:
+                print(error)
 
         print(f"Successfully processed: {processed_count} images | Failed: {failed_count} | Total lesions created: {total_lesions_created}")
-        print(f"Original rows with masks: {len(masked_images)} | Lesion records inserted: {lesion_records_inserted}")
 
         if debug:
             print(f"Debug images saved to: {debug_dir}")
 
-        return lesion_records_inserted
+        # Convert processing_results to DataFrame
+        lesion_records = []
+        
+        for idx, result in processing_results.items():
+            if result['success'] and result['lesions_created'] > 0:
+                # Get the original image row
+                original_row = masked_images.loc[idx]
+                source_image_name = original_row['image_name']
+                patient_id = original_row['patient_id']
+                accession_number = original_row['accession_number']
+                
+                # Parse lesion images (comma-separated)
+                lesion_images_str = result['lesion_images']
+                lesion_images = [img.strip() for img in lesion_images_str.split(',') if img.strip()]
+                
+                # Parse dimensions
+                image_w_str = result['image_w']
+                image_h_str = result['image_h']
+                
+                if '; ' in image_w_str:
+                    # Multiple dimensions
+                    widths = [int(w.strip()) for w in image_w_str.split(';')]
+                    heights = [int(h.strip()) for h in image_h_str.split(';')]
+                else:
+                    # Single dimension
+                    widths = [int(image_w_str)] if image_w_str else [0]
+                    heights = [int(image_h_str)] if image_h_str else [0]
+                
+                # Create a record for each lesion image
+                for i, lesion_img in enumerate(lesion_images):
+                    crop_w = widths[i] if i < len(widths) else 0
+                    crop_h = heights[i] if i < len(heights) else 0
+                    
+                    lesion_records.append({
+                        'image_source': source_image_name,
+                        'image_name': lesion_img,
+                        'accession_number': accession_number,
+                        'patient_id': patient_id,
+                        'crop_w': crop_w,
+                        'crop_h': crop_h
+                    })
+        
+        lesion_df = pd.DataFrame(lesion_records)
+        
+        return lesion_df

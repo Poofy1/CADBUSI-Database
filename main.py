@@ -56,9 +56,11 @@ def main():
     
     # Main entry point for the script
     args = parse_arguments()
+    OUTPUT_PATH = os.path.join(env, "data")
+    DICOM_QUERY_PATH = os.path.join(OUTPUT_PATH, 'endpoint_data.csv')
+    DATABASE_LOCAL_PATH = os.path.join(OUTPUT_PATH, 'cadbusi.db')
+    DATABASE_GCP_PATH = f'{CONFIG["DATABASE_DIR"]}/cadbusi.db'
     
-    dicom_query_file = f'{env}/data/endpoint_data.csv'
-    output_path = os.path.join(env, "data")
     
     # Handle query command
     if args.query:
@@ -78,14 +80,14 @@ def main():
         rad_df, path_df = run_breast_imaging_query(limit=limit)
 
         # Parse that data
-        rad_df = filter_rad_data(rad_df, output_path)
-        path_df = filter_path_data(path_df, output_path)
+        rad_df = filter_rad_data(rad_df, OUTPUT_PATH)
+        path_df = filter_path_data(path_df, OUTPUT_PATH)
         
         # Filter data
-        create_final_dataset(rad_df, path_df, output_path)
+        create_final_dataset(rad_df, path_df, OUTPUT_PATH)
     
     elif args.deploy or args.cleanup or args.rerun:
-        dicom_download_remote_start(dicom_query_file, args.deploy, args.cleanup)
+        dicom_download_remote_start(DICOM_QUERY_PATH, args.deploy, args.cleanup)
         
     elif args.database:
         lesion_pathology = f'{env}/data/lesion_pathology.csv'
@@ -99,7 +101,7 @@ def main():
 
         # Step 1: Encrypt IDs
         print("Step 1/5: Encrypting IDs...")
-        key = encrypt_ids(dicom_query_file, anon_file, key_output)
+        key = encrypt_ids(DICOM_QUERY_PATH, anon_file, key_output)
         key = encrypt_ids(lesion_pathology, lesion_anon_file, key_output)
         
         # Step 2: Parse DICOM files
@@ -128,16 +130,25 @@ def main():
         
         #Upload Database
         if storage.is_gcp:
-            gcp_path = f'{CONFIG["DATABASE_DIR"]}/cadbusi.db'
-            local_path = f'{env}/data/cadbusi.db'
-            blob = storage._bucket.blob(gcp_path.replace('//', '/').rstrip('/'))
-            
-            # Read from local filesystem and upload
-            local_full_path = os.path.join(storage.windir, local_path) if storage.windir else local_path
+            blob = storage._bucket.blob(DATABASE_GCP_PATH.replace('//', '/').rstrip('/'))
+            local_full_path = os.path.join(storage.windir, DATABASE_LOCAL_PATH) if storage.windir else DATABASE_LOCAL_PATH
             blob.upload_from_filename(local_full_path)
             print('Database uploaded')
 
     elif args.export:
+        #Download Database
+        if storage.is_gcp:
+            # Delete local database if it exists
+            local_full_path = os.path.join(storage.windir, DATABASE_LOCAL_PATH) if storage.windir else DATABASE_LOCAL_PATH
+            if os.path.exists(local_full_path):
+                os.remove(local_full_path)
+            
+            # Download from GCP
+            blob = storage._bucket.blob(DATABASE_GCP_PATH.replace('//', '/').rstrip('/'))
+            os.makedirs(os.path.dirname(local_full_path), exist_ok=True)
+            blob.download_to_filename(local_full_path)
+            print(f'Database downloaded to {local_full_path}')
+            
         if args.limit:
             print(f"Exporting with limit: {args.limit}")
         Export_Database(CONFIG, limit=args.limit)

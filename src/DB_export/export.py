@@ -21,7 +21,7 @@ labeled_data_dir = f'{env}/labeled_data_archive/'
 
 def process_single_image(row, image_folder_path, image_output, mask_folder_input, mask_folder_output):
     try:
-        image_name = row['ImageName']
+        image_name = row['image_name']
         image_path = os.path.join(image_folder_path, image_name)
         mask_path = os.path.join(mask_folder_input, 'mask_' + image_name)
         
@@ -69,9 +69,9 @@ def process_single_image(row, image_folder_path, image_output, mask_folder_input
         return "Success"
         
     except Exception as e:
-        return f"Error: Unexpected error processing {row.get('ImageName', 'unknown')} - {str(e)}"
+        return f"Error: Unexpected error processing {row.get('image_name', 'unknown')} - {str(e)}"
 
-def Crop_Images(df, input_dir, output_dir):
+def Crop_images(df, input_dir, output_dir):
     image_output = f"{output_dir}/images/"
     mask_folder_output = f"{output_dir}/masks/"
     make_dirs(image_output)
@@ -122,7 +122,7 @@ def Crop_Images(df, input_dir, output_dir):
                 
 def process_single_video(row, video_folder_path, output_dir):
     # Get the folder name and crop data
-    folder_name = row['ImagesPath']
+    folder_name = row['images_path']
     crop_y = int(row['crop_y'])
     crop_x = int(row['crop_x'])
     crop_w = int(row['crop_w'])
@@ -181,11 +181,11 @@ def PerformSplit(CONFIG, df):
     val_split = CONFIG["VAL_SPLIT"]
     test_split = CONFIG["TEST_SPLIT"]
     
-    if 'Valid' not in df.columns:
-        df['Valid'] = None
+    if 'valid' not in df.columns:
+        df['valid'] = None
     
-    # Get unique patient IDs
-    unique_patients = df['Patient_ID'].unique()
+    # Get unique patient ids
+    unique_patients = df['patient_id'].unique()
     total_patients = len(unique_patients)
     
     # Calculate how many patients should be in each set
@@ -193,28 +193,28 @@ def PerformSplit(CONFIG, df):
     num_val_patients = int(total_patients * val_split)
     num_train_patients = total_patients - num_val_patients - num_test_patients
     
-    # Randomly shuffle the patient IDs
+    # Randomly shuffle the patient ids
     np.random.shuffle(unique_patients)
     
     # Split into three groups
     test_patients = unique_patients[:num_test_patients]
     val_patients = unique_patients[num_test_patients:num_test_patients + num_val_patients]
     
-    # Assign split status based on patient ID (0=train, 1=val, 2=test)
+    # Assign split status based on patient id (0=train, 1=val, 2=test)
     def assign_split(patient_id):
         if patient_id in test_patients:
             return 2  # Test
         elif patient_id in val_patients:
-            return 1  # Validation
+            return 1  # validation
         else:
             return 0  # Training
     
-    df['Valid'] = df['Patient_ID'].apply(assign_split)
+    df['valid'] = df['patient_id'].apply(assign_split)
     
     # Count samples in each split
-    train_samples = (df['Valid'] == 0).sum()
-    val_samples = (df['Valid'] == 1).sum()
-    test_samples = (df['Valid'] == 2).sum()
+    train_samples = (df['valid'] == 0).sum()
+    val_samples = (df['valid'] == 1).sum()
+    test_samples = (df['valid'] == 2).sum()
     
     # Print split statistics
     print(f"Split completed: {train_samples} training, {val_samples} validation, {test_samples} test samples")
@@ -230,7 +230,7 @@ def PerformSplit(CONFIG, df):
 def create_train_set(breast_data, image_data, lesion_df=None):
     # Join breast_data and image_data
     data = pd.merge(breast_data, image_data, 
-                    on=['Accession_Number'], 
+                    on=['accession_number'], 
                     suffixes=('', '_image_data'))
 
     # Remove duplicate columns
@@ -238,25 +238,25 @@ def create_train_set(breast_data, image_data, lesion_df=None):
         if col + '_image_data' in data.columns:
             data.drop(col + '_image_data', axis=1, inplace=True)
     
-    columns_to_keep = ['Patient_ID', 'Accession_Number', 'Study_Laterality', 
-                       'Has_Malignant', 'Has_Benign', 'Valid', 'AGE_AT_EVENT', 
-                       'ImageName']
+    columns_to_keep = ['patient_id', 'accession_number', 'study_laterality', 
+                       'has_malignant', 'has_benign', 'valid', 'age_at_event', 
+                       'image_name']
     
     data = data[columns_to_keep]
     
     # Aggregation dictionary
     agg_dict = {
-        'Patient_ID': 'first',
-        'Study_Laterality': 'first',
-        'Has_Malignant': 'first', 
-        'Has_Benign': 'first',
-        'Valid': 'first',
-        'AGE_AT_EVENT': 'first',
-        'ImageName': lambda x: list(x)
+        'patient_id': 'first',
+        'study_laterality': 'first',
+        'has_malignant': 'first', 
+        'has_benign': 'first',
+        'valid': 'first',
+        'age_at_event': 'first',
+        'image_name': lambda x: list(x)
     }
     
     data = data.reset_index(drop=True)
-    data = data.groupby('Accession_Number').agg(agg_dict).reset_index()
+    data = data.groupby('accession_number').agg(agg_dict).reset_index()
     
     # Clean original images
     def clean_list(img_list):
@@ -264,39 +264,39 @@ def create_train_set(breast_data, image_data, lesion_df=None):
             return []
         return [str(img).strip() for img in img_list if img and str(img).strip()]
     
-    data['Images'] = data['ImageName'].apply(clean_list)
-    data.drop(['ImageName'], axis=1, inplace=True)
+    data['images'] = data['image_name'].apply(clean_list)
+    data.drop(['image_name'], axis=1, inplace=True)
     
     # Add lesion images if lesion_df is provided
-    if lesion_df is not None and not lesion_df.empty and 'ImageName' in lesion_df.columns:
-        # Group lesions by Accession_Number
-        lesion_grouped = lesion_df.groupby('Accession_Number')['ImageName'].apply(list).reset_index()
-        lesion_grouped.columns = ['Accession_Number', 'LesionImages']
+    if lesion_df is not None and not lesion_df.empty and 'image_name' in lesion_df.columns:
+        # Group lesions by accession_number
+        lesion_grouped = lesion_df.groupby('accession_number')['image_name'].apply(list).reset_index()
+        lesion_grouped.columns = ['accession_number', 'lesion_images']
         
         # Merge lesion data with main data
-        data = data.merge(lesion_grouped, on='Accession_Number', how='left')
+        data = data.merge(lesion_grouped, on='accession_number', how='left')
         
         # Clean lesion images list - handle NaN values properly
-        data['LesionImages'] = data['LesionImages'].apply(
+        data['lesion_images'] = data['lesion_images'].apply(
             lambda x: clean_list(x) if isinstance(x, list) else []
         )
     else:
         # No lesion data available
-        data['LesionImages'] = [[] for _ in range(len(data))]
+        data['lesion_images'] = [[] for _ in range(len(data))]
     
-    # Filter out rows with empty Images
+    # Filter out rows with empty images
     data = data.reset_index(drop=True)
     initial_count = len(data)
-    has_images_mask = data['Images'].apply(lambda x: isinstance(x, list) and len(x) > 0)
+    has_images_mask = data['images'].apply(lambda x: isinstance(x, list) and len(x) > 0)
     data = data[has_images_mask].reset_index(drop=True)
     
     removed_count = initial_count - len(data)
     if removed_count > 0:
         print(f"Removed {removed_count} rows with no valid images")
     
-    data.drop(['Patient_ID'], axis=1, inplace=True)
-    data['ID'] = range(len(data))
-    columns = ['ID'] + [col for col in data.columns if col != 'ID']
+    data.drop(['patient_id'], axis=1, inplace=True)
+    data['id'] = range(len(data))
+    columns = ['id'] + [col for col in data.columns if col != 'id']
     data = data[columns]
 
     return data
@@ -309,14 +309,14 @@ def generate_video_images_csv(video_df, root_dir):
     video_image_data = []
     
     for _, row in tqdm(video_df.iterrows(), total=len(video_df), desc="Processing video folders"):
-        video_folder = row['ImagesPath']
+        video_folder = row['images_path']
         video_dir = os.path.join(root_dir, 'videos', video_folder).replace('\\', '/')
         
         video_files = list_files(video_dir) 
         
         if video_files:
             video_image_data.append({
-                'accession_number': row['Accession_Number'],
+                'accession_number': row['accession_number'],
                 'video_name': video_folder,
                 'images': video_files
             })
@@ -346,21 +346,21 @@ def map_breast_data_to_instances(instance_data, image_df, breast_df, column_mapp
         return instance_data  # No columns to map
     
     # Prepare the merge columns
-    merge_columns = ['Patient_ID', 'Accession_Number', 'Study_Laterality'] + available_columns
+    merge_columns = ['patient_id', 'accession_number', 'study_laterality'] + available_columns
     
     # Perform the merge
-    merged_data = image_df[['ImageName', 'Patient_ID', 'Accession_Number', 'laterality']].merge(
+    merged_data = image_df[['image_name', 'patient_id', 'accession_number', 'laterality']].merge(
         breast_df[merge_columns],
-        left_on=['Patient_ID', 'Accession_Number', 'laterality'],
-        right_on=['Patient_ID', 'Accession_Number', 'Study_Laterality'],
+        left_on=['patient_id', 'accession_number', 'laterality'],
+        right_on=['patient_id', 'accession_number', 'study_laterality'],
         how='left'
     )
     
     # Create mappings and add to instance_data
     for breast_col, instance_col in column_mapping.items():
         if breast_col in available_columns:
-            image_to_value_map = dict(zip(merged_data['ImageName'], merged_data[breast_col]))
-            instance_data[instance_col] = instance_data['ImageName'].map(image_to_value_map)
+            image_to_value_map = dict(zip(merged_data['image_name'], merged_data[breast_col]))
+            instance_data[instance_col] = instance_data['image_name'].map(image_to_value_map)
     
     return instance_data
         
@@ -380,17 +380,17 @@ def apply_filters(image_df, video_df, breast_df, CONFIG):
     
     # Remove bilateral cases
     before_bilateral_count = len(breast_df)
-    breast_df = breast_df[breast_df['Study_Laterality'] != 'BILATERAL']
+    breast_df = breast_df[breast_df['study_laterality'] != 'BILATERAL']
     audit_stats['bilateral_removed'] = before_bilateral_count - len(breast_df)
     
     # Only labeled images
     image_df = image_df[image_df['label'] == True]
     image_df = image_df.drop(['label', 'area'], axis=1)
     
-    # Only images/videos with valid patient IDs (from filtered breast_df)
-    valid_patient_ids = breast_df['Patient_ID'].unique()
-    image_df = image_df[image_df['Patient_ID'].isin(valid_patient_ids)]
-    video_df = video_df[video_df['Patient_ID'].isin(valid_patient_ids)]
+    # Only images/videos with valid patient ids (from filtered breast_df)
+    valid_patient_ids = breast_df['patient_id'].unique()
+    image_df = image_df[image_df['patient_id'].isin(valid_patient_ids)]
+    video_df = video_df[video_df['patient_id'].isin(valid_patient_ids)]
     
     # Remove bad aspect ratios
     min_aspect_ratio = CONFIG.get('MIN_ASPECT_RATIO', 0.5)
@@ -427,23 +427,23 @@ def apply_reject_system(image_df, instance_labels_csv_file, use_reject_system):
         
         instance_data = instance_data.merge(
             labelbox_instance_data, 
-            on='DicomHash', 
+            on='dicom_hash', 
             how='left',
             suffixes=('', '_labelbox')
         )
         
-        if 'ImageName_labelbox' in instance_data.columns:
-            instance_data.drop(columns=['ImageName_labelbox'], inplace=True)
+        if 'image_name_labelbox' in instance_data.columns:
+            instance_data.drop(columns=['image_name_labelbox'], inplace=True)
         
-        instance_data = instance_data[instance_data['DicomHash'].isin(image_df['DicomHash'])]
+        instance_data = instance_data[instance_data['dicom_hash'].isin(image_df['dicom_hash'])]
         
         # Handle reject system
         if 'Reject Image' in instance_data.columns:
             if use_reject_system:
                 before_count = len(image_df)
-                rejected_images = instance_data[instance_data['Reject Image'] == True][['DicomHash', 'ImageName']]
+                rejected_images = instance_data[instance_data['Reject Image'] == True][['dicom_hash', 'image_name']]
                 instance_data = instance_data[instance_data['Reject Image'] != True]
-                image_df = image_df[~image_df['DicomHash'].isin(rejected_images['DicomHash'])]
+                image_df = image_df[~image_df['dicom_hash'].isin(rejected_images['dicom_hash'])]
                 
                 removed_count = before_count - len(image_df)
                 append_audit("export.labeled_reject_removed", removed_count)
@@ -462,29 +462,29 @@ def build_instance_data(image_df, breast_df):
         tuple: (instance_data, image_df) - image_df may be filtered if reject system is used
     """
     # Create base instance_data
-    instance_data = image_df[['DicomHash', 'ImageName']].copy()
+    instance_data = image_df[['dicom_hash', 'image_name']].copy()
     
     # Map breast data columns
     column_mappings = {
-        'SYNOPTIC_REPORT': 'SYNOPTIC_REPORT',
-        'FINDINGS': 'FINDINGS', 
-        'AGE_AT_EVENT': 'Age'
+        'synoptic_report': 'synoptic_report',
+        'findings': 'findings', 
+        'age_at_event': 'Age'
     }
     instance_data = map_breast_data_to_instances(instance_data, image_df, breast_df, column_mappings)
     
-    # Add PhysicalDeltaX
-    if 'PhysicalDeltaX' in image_df.columns:
-        image_to_physicaldelta_map = dict(zip(image_df['ImageName'], image_df['PhysicalDeltaX']))
-        instance_data['PhysicalDeltaX'] = instance_data['ImageName'].map(image_to_physicaldelta_map)
+    # Add physical_delta_x
+    if 'physical_delta_x' in image_df.columns:
+        image_to_physicaldelta_map = dict(zip(image_df['image_name'], image_df['physical_delta_x']))
+        instance_data['physical_delta_x'] = instance_data['image_name'].map(image_to_physicaldelta_map)
     
     # Add image dimensions
     if 'crop_w' in image_df.columns:
-        image_to_width_map = dict(zip(image_df['ImageName'], image_df['crop_w'].fillna(0).astype(int)))
-        instance_data['image_w'] = instance_data['ImageName'].map(image_to_width_map)
+        image_to_width_map = dict(zip(image_df['image_name'], image_df['crop_w'].fillna(0).astype(int)))
+        instance_data['image_w'] = instance_data['image_name'].map(image_to_width_map)
     
     if 'crop_h' in image_df.columns:
-        image_to_height_map = dict(zip(image_df['ImageName'], image_df['crop_h'].fillna(0).astype(int)))
-        instance_data['image_h'] = instance_data['ImageName'].map(image_to_height_map)
+        image_to_height_map = dict(zip(image_df['image_name'], image_df['crop_h'].fillna(0).astype(int)))
+        instance_data['image_h'] = instance_data['image_name'].map(image_to_height_map)
     
     return instance_data
 
@@ -499,13 +499,13 @@ def normalize_dataframes(image_df, video_df, breast_df):
     image_df['laterality'] = image_df['laterality'].str.upper()
     video_df['laterality'] = video_df['laterality'].str.upper()
     
-    # Standardize Patient_ID as string
-    image_df['Patient_ID'] = image_df['Patient_ID'].astype(int).astype(str)
-    breast_df['Patient_ID'] = breast_df['Patient_ID'].astype(int).astype(str)
+    # Standardize patient_id as string
+    image_df['patient_id'] = image_df['patient_id'].astype(int).astype(str)
+    breast_df['patient_id'] = breast_df['patient_id'].astype(int).astype(str)
     
-    # Standardize Accession_Number as string
-    image_df['Accession_Number'] = image_df['Accession_Number'].astype(str)
-    breast_df['Accession_Number'] = breast_df['Accession_Number'].astype(str)
+    # Standardize accession_number as string
+    image_df['accession_number'] = image_df['accession_number'].astype(str)
+    breast_df['accession_number'] = breast_df['accession_number'].astype(str)
     
     return image_df, video_df, breast_df
 
@@ -517,7 +517,7 @@ def add_lesions_to_instance_data(instance_data, lesion_df, image_df, breast_df):
     
     Args:
         instance_data: Existing instance_data DataFrame
-        lesion_df: DataFrame with lesion images (has ImageSource, ImageName, Patient_ID, Accession_Number)
+        lesion_df: DataFrame with lesion images (has image_source, image_name, patient_id, accession_number)
         image_df: Original image_df to get source image metadata
         breast_df: Breast data for mapping
     
@@ -528,66 +528,66 @@ def add_lesions_to_instance_data(instance_data, lesion_df, image_df, breast_df):
         return instance_data
     
     # Create base lesion instance data
-    lesion_instances = lesion_df[['ImageName']].copy()
+    lesion_instances = lesion_df[['image_name']].copy()
     
-    # Add a placeholder DicomHash (lesions don't have their own DicomHash)
-    lesion_instances['DicomHash'] = lesion_df['ImageSource']  # Use source image as reference
+    # Add a placeholder dicom_hash (lesions don't have their own dicom_hash)
+    lesion_instances['dicom_hash'] = lesion_df['image_source']  # Use source image as reference
     
-    # Map metadata from source images via ImageSource
+    # Map metadata from source images via image_source
     source_to_metadata = {}
     for _, row in image_df.iterrows():
-        source_name = row['ImageName']
+        source_name = row['image_name']
         source_to_metadata[source_name] = {
-            'Patient_ID': row['Patient_ID'],
-            'Accession_Number': row['Accession_Number'],
+            'patient_id': row['patient_id'],
+            'accession_number': row['accession_number'],
             'laterality': row['laterality'],
-            'PhysicalDeltaX': row.get('PhysicalDeltaX', None)
+            'physical_delta_x': row.get('physical_delta_x', None)
         }
     
     # Get metadata from source images
-    for col in ['Patient_ID', 'Accession_Number', 'laterality', 'PhysicalDeltaX']:
-        lesion_instances[col] = lesion_df['ImageSource'].map(
+    for col in ['patient_id', 'accession_number', 'laterality', 'physical_delta_x']:
+        lesion_instances[col] = lesion_df['image_source'].map(
             lambda x: source_to_metadata.get(x, {}).get(col)
         )
     
     # Map breast data columns (same as regular images)
     column_mappings = {
-        'SYNOPTIC_REPORT': 'SYNOPTIC_REPORT',
-        'FINDINGS': 'FINDINGS', 
-        'AGE_AT_EVENT': 'Age'
+        'synoptic_report': 'synoptic_report',
+        'findings': 'findings', 
+        'age_at_event': 'Age'
     }
     
     # Get columns that exist in breast_df
     available_columns = [col for col in column_mappings.keys() if col in breast_df.columns]
     
     if available_columns:
-        merge_columns = ['Patient_ID', 'Accession_Number', 'Study_Laterality'] + available_columns
+        merge_columns = ['patient_id', 'accession_number', 'study_laterality'] + available_columns
         
-        merged_data = lesion_instances[['ImageName', 'Patient_ID', 'Accession_Number', 'laterality']].merge(
+        merged_data = lesion_instances[['image_name', 'patient_id', 'accession_number', 'laterality']].merge(
             breast_df[merge_columns],
-            left_on=['Patient_ID', 'Accession_Number', 'laterality'],
-            right_on=['Patient_ID', 'Accession_Number', 'Study_Laterality'],
+            left_on=['patient_id', 'accession_number', 'laterality'],
+            right_on=['patient_id', 'accession_number', 'study_laterality'],
             how='left'
         )
         
         for breast_col, instance_col in column_mappings.items():
             if breast_col in available_columns:
-                image_to_value_map = dict(zip(merged_data['ImageName'], merged_data[breast_col]))
-                lesion_instances[instance_col] = lesion_instances['ImageName'].map(image_to_value_map)
+                image_to_value_map = dict(zip(merged_data['image_name'], merged_data[breast_col]))
+                lesion_instances[instance_col] = lesion_instances['image_name'].map(image_to_value_map)
     
     # Get lesion-specific dimensions from lesion_df
-    lesion_name_to_dims = dict(zip(lesion_df['ImageName'], 
+    lesion_name_to_dims = dict(zip(lesion_df['image_name'], 
                                     zip(lesion_df['crop_w'], lesion_df['crop_h'])))
     
-    lesion_instances['image_w'] = lesion_instances['ImageName'].map(
+    lesion_instances['image_w'] = lesion_instances['image_name'].map(
         lambda x: lesion_name_to_dims.get(x, (0, 0))[0]
     )
-    lesion_instances['image_h'] = lesion_instances['ImageName'].map(
+    lesion_instances['image_h'] = lesion_instances['image_name'].map(
         lambda x: lesion_name_to_dims.get(x, (0, 0))[1]
     )
     
     # Drop temporary columns
-    lesion_instances = lesion_instances.drop(['Patient_ID', 'Accession_Number', 'laterality'], axis=1, errors='ignore')
+    lesion_instances = lesion_instances.drop(['patient_id', 'accession_number', 'laterality'], axis=1, errors='ignore')
     
     # Combine with original instance_data
     combined = pd.concat([instance_data, lesion_instances], ignore_index=True)
@@ -600,8 +600,8 @@ def Export_Database(CONFIG, limit = None, reparse_images = True):
     use_reject_system = False # True = removes rejects from training
     output_dir = CONFIG["EXPORT_DIR"]
     parsed_database = CONFIG["DATABASE_DIR"]
-    labelbox_path = CONFIG["LABELBOX_LABELS"]
-
+    instance_labels_csv_file = os.path.join(CONFIG["LABELBOX_LABELS"], 'InstanceLabels.csv')
+    
     date = datetime.datetime.now().strftime("%m_%d_%Y_%H_%M_%S")
     output_dir = f'{output_dir}/export_{date}/'
     print(f"Exporting dataset to {output_dir}")
@@ -616,47 +616,16 @@ def Export_Database(CONFIG, limit = None, reparse_images = True):
         image_df = db.get_images_dataframe()
         breast_df = db.get_study_cases_dataframe()
 
-        # Rename columns to match expected format
-        image_df = image_df.rename(columns={
-            'image_name': 'ImageName',
-            'accession_number': 'Accession_Number',
-            'patient_id': 'Patient_ID',
-            'dicom_hash': 'DicomHash',
-            'physical_delta_x': 'PhysicalDeltaX',
-            'region_count': 'RegionCount'
-        })
-
-        video_df = video_df.rename(columns={
-            'images_path': 'ImagesPath',
-            'accession_number': 'Accession_Number',
-            'patient_id': 'Patient_ID'
-        })
-
-        breast_df = breast_df.rename(columns={
-            'accession_number': 'Accession_Number',
-            'patient_id': 'Patient_ID',
-            'study_laterality': 'Study_Laterality',
-            'has_malignant': 'Has_Malignant',
-            'has_benign': 'Has_Benign',
-            'age_at_event': 'AGE_AT_EVENT',
-            'synoptic_report': 'SYNOPTIC_REPORT',
-            'findings': 'FINDINGS'
-        })
-
-    instance_labels_csv_file = os.path.join(labelbox_path, 'InstanceLabels.csv')
-
     # Apply test subset early if specified
     if limit:
         # Limit breast_df first
         breast_df = breast_df.head(limit)
 
         # Filter image_df and video_df to only include patients from the subset breast_df
-        subset_patient_ids = breast_df['Patient_ID'].unique()
-        image_df = image_df[image_df['Patient_ID'].isin(subset_patient_ids)]
-        video_df = video_df[video_df['Patient_ID'].isin(subset_patient_ids)]
+        subset_patient_ids = breast_df['patient_id'].unique()
+        image_df = image_df[image_df['patient_id'].isin(subset_patient_ids)]
+        video_df = video_df[video_df['patient_id'].isin(subset_patient_ids)]
         print(f"Subset data sizes - Breast: {len(breast_df)}, Image: {len(image_df)}, Video: {len(video_df)}")
-    
-    
         
     # Normalize image_df BEFORE building instance_data
     image_df, video_df, breast_df = normalize_dataframes(image_df, video_df, breast_df)
@@ -664,21 +633,9 @@ def Export_Database(CONFIG, limit = None, reparse_images = True):
     image_df = apply_reject_system(image_df, instance_labels_csv_file, use_reject_system)
     
     # Process lesion masks and get lesion data from database
-    lesion_count = Mask_Lesions(parsed_database)
-    print(f"Processed {lesion_count} lesions from masks")
+    lesion_df = Mask_Lesions(parsed_database)
+    print(f"Processed {len(lesion_df)} lesion images from {lesion_df['image_source'].nunique() if not lesion_df.empty else 0} source images")
 
-    # Read lesion data from database
-    with DatabaseManager() as db:
-        lesion_df = pd.read_sql_query("""
-            SELECT
-                source_image_name as ImageSource,
-                image_name as ImageName,
-                accession_number as Accession_Number,
-                patient_id as Patient_ID,
-                crop_w,
-                crop_h
-            FROM Lesions
-        """, db.conn)
 
     image_df = image_df.copy()
     if not lesion_df.empty:
@@ -691,19 +648,13 @@ def Export_Database(CONFIG, limit = None, reparse_images = True):
 
     if reparse_images:   
         # Crop the images for the relevant studies
-        Crop_Images(image_df, parsed_database, output_dir)
+        Crop_images(image_df, parsed_database, output_dir)
         Crop_Videos(video_df, parsed_database, output_dir)
-    
-    #Find Image Counts (Breast Data)
-    image_counts = image_df.groupby(['Patient_ID', 'laterality']).size().reset_index(name='Image_Count')
-    breast_df = pd.merge(breast_df, image_counts, how='left', left_on=['Patient_ID', 'Study_Laterality'], right_on=['Patient_ID', 'laterality'])
-    breast_df = breast_df.drop(['laterality'], axis=1)
-    breast_df['Image_Count'] = breast_df['Image_Count'].fillna(0).astype(int)
     
     # Filter out case and breast data that isn't relevant
     initial_breast_count = len(breast_df)
-    image_patient_ids = image_df['Patient_ID'].unique()
-    breast_df = breast_df[breast_df['Patient_ID'].isin(image_patient_ids)]
+    image_patient_ids = image_df['patient_id'].unique()
+    breast_df = breast_df[breast_df['patient_id'].isin(image_patient_ids)]
     remaining_breast_count = len(breast_df)
     removed_breast_count = initial_breast_count - remaining_breast_count
     append_audit("export.breasts_no_data_removed", removed_breast_count)
@@ -715,21 +666,20 @@ def Export_Database(CONFIG, limit = None, reparse_images = True):
     # Create trainable csv data
     train_data = create_train_set(breast_df, image_df, lesion_df)
     
-    # Create a mapping of (Accession_Number, laterality) to list of ImagesPath
-    if not video_df.empty and 'ImagesPath' in video_df.columns:
-        video_paths = video_df.groupby(['Accession_Number', 'laterality'])['ImagesPath'].agg(list).to_dict()
-        train_data['VideoPaths'] = train_data.apply(lambda row: video_paths.get((row['Accession_Number'], row['Study_Laterality']), []), axis=1)
+    # Create a mapping of (accession_number, laterality) to list of images_path
+    if not video_df.empty and 'images_path' in video_df.columns:
+        video_paths = video_df.groupby(['accession_number', 'laterality'])['images_path'].agg(list).to_dict()
+        train_data['video_paths'] = train_data.apply(lambda row: video_paths.get((row['accession_number'], row['study_laterality']), []), axis=1)
         
         if reparse_images:  
             video_images_df = generate_video_images_csv(video_df, output_dir)
-            save_data(video_images_df, os.path.join(output_dir, 'VideoImages.csv'))
         else:
             video_images_df = None
     else:
         # No video data available
-        train_data['VideoPaths'] = [[] for _ in range(len(train_data))]  # Empty lists for all rows
+        train_data['video_paths'] = [[] for _ in range(len(train_data))]  # Empty lists for all rows
         video_images_df = None
-        print("No video data found - VideoPaths set to empty lists")
+        print("No video data found - video_paths set to empty lists")
 
     # Write the filtered dataframes to CSV files in the output directory
     save_data(breast_df, os.path.join(output_dir, 'BreastData.csv'))
