@@ -19,15 +19,10 @@ def Inpaint_Dataset_N2N(input_folder):
         # Load image data from database
         data = db.get_images_dataframe()
         
-        # Add 'inpainted_from' column if not present
-        if 'inpainted_from' not in data.columns:
-            data['inpainted_from'] = None
-        
         # Filter the data - only process rows that haven't been inpainted yet
         processed_data = data[
             (data['distance'] > 5) & # no clean duplicate available 
-            ((data['has_calipers'] == True) | (data['photometric_interpretation'] == 'RGB')) & 
-            (data['inpainted_from'].isna())
+            ((data['has_calipers'] == True) | (data['photometric_interpretation'] == 'RGB'))
         ]
         
         # Prepare transforms
@@ -119,6 +114,7 @@ def Inpaint_Dataset_N2N(input_folder):
                 new_row['image_name'] = new_filename
                 new_row['inpainted_from'] = original_filename
                 new_row['has_calipers'] = 0
+                new_row['dicom_hash'] = f"{row['dicom_hash']}_inpainted"
                 new_rows.append(new_row)
         
         # Insert new rows into database using batch insert

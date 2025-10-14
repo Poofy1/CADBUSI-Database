@@ -325,7 +325,7 @@ class DatabaseManager:
             'file_name', 'software_versions', 'manufacturer_model_name'
         ]
         
-        string_columns = ['accession_number', 'patient_id', 'image_name', 'dicom_hash', 'caliper_boxes']
+        string_columns = ['accession_number', 'patient_id', 'image_name', 'dicom_hash', 'caliper_boxes', 'inpainted_from']
         boolean_columns = ['has_calipers', 'has_caliper_mask', 'label']
         
         return self._batch_upsert_helper(

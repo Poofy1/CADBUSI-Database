@@ -406,7 +406,6 @@ def analyze_images(database_path):
         temp_df = image_df['description'].apply(lambda x: extract_descript_features(x, labels_dict=description_labels_dict)).apply(pd.Series)
         for column in temp_df.columns:
             image_df[column] = temp_df[column]
-        print(temp_df)
 
         # Overwrite non bilateral cases with known lateralities
         laterality_mapping = breast_df[breast_df['study_laterality'].isin(['LEFT', 'RIGHT'])].set_index('accession_number')['study_laterality'].to_dict()
