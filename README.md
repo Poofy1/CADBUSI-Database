@@ -4,14 +4,11 @@ SQLite database manager that is designed to process breast ultrasound data from 
 
 ## Setup
 
-- Create a Mayo Clinic AI Factory instance with T4 GPU
-- Install git-lfs: `sudo apt-get install git-lfs`
-- Install git-lfs: `git lfs install`
+- Create a GCP AI Factory instance with a T4 GPU
 - Clone repository: `git clone https://github.com/Poofy1/CADBUSI-Database.git`
-- Pull LFS objects: `git lfs pull`
 - Install requirements: `pip install -r requirements.txt`
 - Create/Configure: `./config.py`
-- Obtain certificate `./src/_fastapi/CertEmulationCA.crt`
+- Obtain certificate `./src/dicom_downloader/CertEmulationCA.crt`
 
 ## Configuration
 All user parameters will be controlled from a `./config.py` file, you will need to configure the following parameters:

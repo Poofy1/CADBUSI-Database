@@ -15,9 +15,11 @@
 .tmp.driveupload/*
 *.ini
 *.zip
+*.pkl
+*.pt 
+*.pth
 
 config.py
-encryption_key.pkl
 src/ML_processing/models/*
 training/model/*
 
