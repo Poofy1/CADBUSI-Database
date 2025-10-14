@@ -18,8 +18,8 @@ from src.DB_processing.tools import get_reader, reader, append_audit
 from src.DB_processing.database import DatabaseManager
 
 description_labels_dict = {
-    'area':{'breast':['breast'],
-            'axilla':['ax'],
+    'area':{'axilla':['ax'], # Order matters, axilla takes dominance 
+            'breast':['breast'],
             'supraclavicular':['superclavicular','supraclavicular'],
             'subclavicular':['subclavicular','subclavcular']},
     'laterality':{'left':['lt','left', 'eft', 'ft'],
