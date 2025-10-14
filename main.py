@@ -96,6 +96,9 @@ def main():
         key_output = f'{env}/encryption_key.pkl'
         BUCKET_PATH = f'{CONFIG["storage"]["download_path"]}/'
         
+        if os.path.exists(DATABASE_LOCAL_PATH):
+            print("WARNING: Previous database still exists, this can cause issues! Recommend rebuilding from scratch")
+        
         print(f"Starting database processing for {BUCKET_PATH}...")
         download_models() # Download all models
 
@@ -139,8 +142,7 @@ def main():
         #Download Database
         if storage.is_gcp:
             # Delete local database if it exists
-            local_full_path = os.path.join(storage.windir, DATABASE_LOCAL_PATH) if storage.windir else DATABASE_LOCAL_PATH
-            if os.path.exists(local_full_path):
+            if os.path.exists(DATABASE_LOCAL_PATH):
                 os.remove(local_full_path)
             
             # Download from GCP

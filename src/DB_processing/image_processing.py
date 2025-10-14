@@ -19,11 +19,11 @@ from src.DB_processing.database import DatabaseManager
 
 description_labels_dict = {
     'area':{'breast':['breast'],
-            'axilla':['axilla', 'axila', 'axlla'],
+            'axilla':['ax'],
             'supraclavicular':['superclavicular','supraclavicular'],
             'subclavicular':['subclavicular','subclavcular']},
-    'laterality':{'left':['lt','left', 'eft', 'ft', 'e f t'],
-                  'right':['rt','right', 'ight', 'ght', 'ht', 'r t ']},
+    'laterality':{'left':['lt','left', 'eft', 'ft'],
+                  'right':['rt','right', 'ight', 'ght', 'ht']},
     'orientation':{'long':['long', 'lon', 'ong'],
                     'trans':['trans', 'tran', 'tra', 'ans'],
                     'anti-radial':['anti-rad','anti-radial'],
@@ -40,9 +40,13 @@ def make_grayscale( img ):
     return img_gray, color
 
 def contains_substring(input_string, substring_list):
-    input_string = str(input_string).lower()  # Convert input string to lowercase
+    # Convert to lowercase, remove all spaces, and replace $ with s
+    input_string = str(input_string).lower().replace(' ', '').replace('$', 's')
+    
     for substring in substring_list:
-        if substring.lower() in input_string:  # Convert substring to lowercase
+        # Also remove spaces and replace $ with s in the substring before matching
+        normalized_substring = substring.lower().replace(' ', '').replace('$', 's')
+        if normalized_substring in input_string:
             return True
     return False
 
