@@ -86,7 +86,21 @@ def extract_birads_from_text(text):
     # Create pattern to find any of the keywords
     end_pattern = r'(?i)(' + '|'.join(end_keywords) + r')[^\w]'
     
-    patterns = [
+    # Valid BI-RADS category numbers with optional subcategories
+    birads_numbers = r'(?:0|1|2|3|4[abcABC]?|5|6)'
+    
+    # Add new patterns for standalone "Category X" without BI-RADS
+    category_patterns = [
+        # Standalone Category patterns
+        rf'\bCategory\s*(?:number|#|no\.)?[:\s]*\(?({birads_numbers})\)?(?:[:]\s*|\s+|,\s*|\s*-\s*|\s*/\s*)([^\.]+)',
+        rf'\bCategory\s*(?:number|#|no\.)?[:\s]*\(?({birads_numbers})\)?(?:\s+\(([^)]+)\))',
+        
+        # More relaxed pattern for just the category number with parenthetical description
+        rf'\bCategory\s+({birads_numbers})(?:\s*\(([^)]+)\))',
+    ]
+    
+    # Original patterns
+    original_patterns = [
         # "BI-RADS ASSESSMENT: CODE: X-DESCRIPTION" format
         r'BI-?RADS\s+ASSESSMENT:\s*CODE:\s*(\d+[a-z]?)-([^\.\s]+)',
         r'BI-?RADS:\s*Code\s*(\d+[a-z]?),\s*([^\.\s]+)',
@@ -112,8 +126,11 @@ def extract_birads_from_text(text):
         # Pattern for BI-RADS® Category with registered trademark
         r'BI-?RADS®\s*Category:\s*(\d+[a-z]?)\s*-\s*([^\.]+)',
     ]
+    
+    # Combine both sets of patterns, checking the new ones first
+    all_patterns = category_patterns + original_patterns
 
-    for pattern in patterns:
+    for pattern in all_patterns:
         match = re.search(pattern, text, re.IGNORECASE)
         if match and len(match.groups()) >= 2:
             # Special case for the "description before number" pattern
@@ -122,30 +139,39 @@ def extract_birads_from_text(text):
                 full_description = match.group(1).strip()
             else:
                 birads_category = match.group(1)
-                full_description = match.group(2).strip()
+                full_description = match.group(2).strip() if match.group(2) else None
             
             # Convert any letters in the BI-RADS category to uppercase
             if birads_category:
                 birads_category = ''.join([c.upper() if c.isalpha() else c for c in birads_category])
             
-            # Truncate description at any of the specified keywords
-            keyword_match = re.search(end_pattern, full_description + ' ')
-            if keyword_match:
-                # Get the position of the keyword plus its length
-                key_end_pos = keyword_match.end() - 1  # -1 to exclude the non-word character
-                description = full_description[:key_end_pos].strip()
+            # If we have a description, process it
+            if full_description:
+                # Truncate description at any of the specified keywords
+                keyword_match = re.search(end_pattern, full_description + ' ')
+                if keyword_match:
+                    # Get the position of the keyword plus its length
+                    key_end_pos = keyword_match.end() - 1  # -1 to exclude the non-word character
+                    description = full_description[:key_end_pos].strip()
+                else:
+                    description = full_description
             else:
-                description = full_description
+                description = None
                 
             return birads_category, description
     
     # Simpler patterns without description capturing
-    for pattern in [
+    simple_patterns = [
         r'(?:Ultrasound|US)\s+BI-?RADS:\s*\(?(\d+[a-z]?)\)?',
         r'(?:BI-?RADS|BIRADS)(?:\s*(?:Category|CATEGORY|code))?(?::|:?\s+CATEGORY)?\s*\(?(\d+[A-Za-z]?)\)?',
         r'OVERALL\s*STUDY\s*BI-?RADS:\s*\(?(\d+[A-Za-z]?)\)?',
         r'BI-?RADS\s+Category\s+No\.\s*(\d+[a-z]?)',
-    ]:
+        # New simple category pattern
+        rf'\bCategory\s*(?:number|#|no\.)?[:\s]*\(?({birads_numbers})\)?',
+        rf'\bCategory\s+({birads_numbers})\b',
+    ]
+    
+    for pattern in simple_patterns:
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
             birads_category = match.group(1)
@@ -160,7 +186,6 @@ def extract_birads_from_text(text):
         return None, pathology_match.group(1).strip()
     
     return None, None
-
 
 def extract_density(text):
     # Extract text after "DENSITY:" until next section header (WORD:)
@@ -592,16 +617,11 @@ def filter_rad_data(radiology_df, output_path):
     radiology_df['is_biopsy'] = results.str[0]
     radiology_df['is_us_biopsy'] = results.str[1]
     
-    radiology_df = add_ultrasound_classifications(radiology_df)
+    radiology_df = add_ultrasound_classifications(radiology_df, output_path)
     
     # Add previous worst MG column
     radiology_df = add_previous_worst_mg_column(radiology_df)
-    
-    pd.set_option('display.max_colwidth', None)
-    # Columns to drop
-    columns_to_drop = ['RADIOLOGY_NARRATIVE', 'PROCEDURE_CODE_TEXT', 'SERVICE_RESULT_STATUS', 'RADIOLOGY_REPORT', 'RAD_SERVICE_RESULT_STATUS']
-    radiology_df = radiology_df.drop(columns=columns_to_drop, errors='ignore')
-    
+
     # Remove bad data
     radiology_df = remove_bad_data(radiology_df, output_path)
     

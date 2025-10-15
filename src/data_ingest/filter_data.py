@@ -663,6 +663,9 @@ def prepare_dataframes(rad_df, path_df):
     path_df['DATE'] = pd.to_datetime(path_df['SPECIMEN_RECEIVED_DTM'], errors='coerce')
     
     # Drop columns more efficiently (in-place)
+    # Columns to drop
+    columns_to_drop = ['RADIOLOGY_NARRATIVE', 'PROCEDURE_CODE_TEXT', 'SERVICE_RESULT_STATUS', 'RADIOLOGY_REPORT', 'RAD_SERVICE_RESULT_STATUS']
+    rad_df = rad_df.drop(columns=columns_to_drop, errors='ignore')
     rad_df.drop('RADIOLOGY_DTM', axis=1, inplace=True)
     path_df.drop('SPECIMEN_RECEIVED_DTM', axis=1, inplace=True)
     
