@@ -22,7 +22,7 @@ def append_audit(key, value, new_file=False):
         new_file (bool): If True, create a new JSON file instead of updating
     """
     # Create the fixed path for the JSON file
-    json_file_path = os.path.join(parent_dir, "raw_data", "audit.json")
+    json_file_path = os.path.join(parent_dir, "data", "audit.json")
     
     # Create directory if it doesn't exist
     os.makedirs(os.path.dirname(json_file_path), exist_ok=True)
