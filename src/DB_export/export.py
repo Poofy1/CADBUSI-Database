@@ -599,7 +599,7 @@ def Export_Database(CONFIG, limit = None, reparse_images = True):
 
     use_reject_system = False # True = removes rejects from training
     output_dir = CONFIG["EXPORT_DIR"]
-    parsed_database = CONFIG["DATABASE_DIR"]
+    database_dir = CONFIG["DATABASE_DIR"]
     instance_labels_csv_file = os.path.join(CONFIG["LABELBOX_LABELS"], 'InstanceLabels.csv')
     
     date = datetime.datetime.now().strftime("%m_%d_%Y_%H_%M_%S")
@@ -633,7 +633,7 @@ def Export_Database(CONFIG, limit = None, reparse_images = True):
     image_df = apply_reject_system(image_df, instance_labels_csv_file, use_reject_system)
     
     # Process lesion masks and get lesion data from database
-    lesion_df = Mask_Lesions(parsed_database)
+    lesion_df = Mask_Lesions(database_dir, output_dir)
     print(f"Processed {len(lesion_df)} lesion images from {lesion_df['image_source'].nunique() if not lesion_df.empty else 0} source images")
 
 
@@ -648,8 +648,8 @@ def Export_Database(CONFIG, limit = None, reparse_images = True):
 
     if reparse_images:   
         # Crop the images for the relevant studies
-        Crop_images(image_df, parsed_database, output_dir)
-        Crop_Videos(video_df, parsed_database, output_dir)
+        Crop_images(image_df, database_dir, output_dir)
+        Crop_Videos(video_df, database_dir, output_dir)
     
     # Filter out case and breast data that isn't relevant
     initial_breast_count = len(breast_df)

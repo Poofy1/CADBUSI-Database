@@ -141,6 +141,7 @@ def main():
     elif args.export:
         #Download Database
         if storage.is_gcp:
+            local_full_path = os.path.join(storage.windir, DATABASE_LOCAL_PATH) if storage.windir else DATABASE_LOCAL_PATH
             # Delete local database if it exists
             if os.path.exists(DATABASE_LOCAL_PATH):
                 os.remove(local_full_path)

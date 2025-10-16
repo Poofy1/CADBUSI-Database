@@ -314,11 +314,12 @@ def process_single_mask(args):
         created_lesion_files = []
         image_dimensions = []
         lesions_created = 0
-        
+
         # If no caliper boxes, save the full masked image
         if not caliper_boxes:
             output_filename = f"{base_name}.png"
             output_path = os.path.join(output_dir, output_filename).replace('//', '/')
+
             result_pil = Image.fromarray(result_image, mode='L')
             save_data(result_pil, output_path)
             lesions_created += 1
@@ -341,9 +342,8 @@ def process_single_mask(args):
                 # Generate output filename with index if multiple boxes
                 output_filename = f"{base_name}_{box_idx}.png"
                 created_lesion_files.append(output_filename)
-                
                 output_path = os.path.join(output_dir, output_filename).replace('//', '/')
-                
+
                 # Convert numpy array back to PIL for saving
                 result_pil = Image.fromarray(cropped_image, mode='L')  # 'L' for grayscale
                 save_data(result_pil, output_path)
@@ -374,6 +374,7 @@ def process_single_mask(args):
         }
         
     except Exception as e:
+        print(e)
         return {
             'idx': idx,
             'success': False,
@@ -384,7 +385,7 @@ def process_single_mask(args):
             'lesions_created': 0
         }
 
-def Mask_Lesions(database_path, max_workers=None, debug=False):
+def Mask_Lesions(database_path, output_dir, max_workers=None, debug=False):
     """
     Multithreaded version of Mask_Lesions that creates lesion records.
 
@@ -409,7 +410,7 @@ def Mask_Lesions(database_path, max_workers=None, debug=False):
 
         image_dir = f"{database_path}/images/"
         mask_dir = f"{database_path}/lesion_masks/"
-        lesion_output_dir = f"{database_path}/lesions/"
+        lesion_output_dir = f"{output_dir}/lesions/"
 
         # Create debug directory if debug is enabled
         debug_dir = None
