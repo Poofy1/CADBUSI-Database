@@ -1,7 +1,8 @@
 import pandas as pd
 import json
-import uuid
+import os
 import re
+env = os.path.dirname(os.path.abspath(__file__))
 
 def anonymize_dates_times_and_names(text):
     """
@@ -90,7 +91,7 @@ SAMPLE_SIZE = 10000  # Default sample size, set to None to use all data
 
 # Read the CSV file
 print("Reading CSV file...")
-df = pd.read_csv('parsed_radiology.csv')
+df = pd.read_csv(f'{env}/parsed_radiology.csv')
 
 # Filter for rows that have data in FINDINGS column AND exclude BILATERAL laterality
 print("Applying filters...")
@@ -99,7 +100,9 @@ df_filtered = df[
     (df['FINDINGS'].str.strip() != '') &
     (df['Study_Laterality'] != 'BILATERAL') &
     (df['MODALITY'] == 'US') &
-    (df['is_biopsy'] != 'T')
+    (df['is_biopsy'] != 'T') & 
+    (df['BI-RADS'].notna()) &
+    (df['BI-RADS'].astype(str).str.strip() != '')
 ]
 
 print(f"Total rows: {len(df)}")
@@ -119,7 +122,7 @@ df_filtered['FINDINGS_ANON'] = df_filtered['FINDINGS'].apply(anonymize_dates_tim
 
 # Debug: Save anonymized CSV
 debug_csv_filename = 'anonymized_findings_debug.csv'
-df_filtered[['FINDINGS_ANON']].to_csv(debug_csv_filename, index=False)
+df_filtered.to_csv(debug_csv_filename, index=False)
 print(f"Debug CSV saved: {debug_csv_filename}")
 
 # Create Labelbox format from anonymized data

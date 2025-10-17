@@ -1,5 +1,7 @@
 import pandas as pd
 from tqdm import tqdm
+from concurrent.futures import ThreadPoolExecutor
+import concurrent.futures
 from src.DB_processing.tools import append_audit
 
 
@@ -24,7 +26,7 @@ def check_assumed_benign(final_df):
     # Create a dictionary to store final interpretation updates
     updates = {}
     
-    for patient_id in tqdm(patient_ids, desc="Checking benign based on followup"):
+    for patient_id in patient_ids:
         # Get all records for this patient once and sort them
         patient_records = final_df[final_df['PATIENT_ID'] == patient_id].sort_values('DATE')
         
@@ -66,7 +68,11 @@ def check_assumed_benign(final_df):
             
             # Check for non-benign BI-RADS in follow-up period efficiently
             if 'BI-RADS' in followup_records.columns:
-                non_benign_mask = followup_records['BI-RADS'].notna() & ~followup_records['BI-RADS'].isin(['1', '2'])
+                non_benign_mask = (
+                    followup_records['BI-RADS'].notna() & 
+                    (followup_records['BI-RADS'] != '') &
+                    ~followup_records['BI-RADS'].isin(['1', '2'])
+                )
                 if non_benign_mask.any():
                     continue
             
@@ -120,7 +126,7 @@ def check_assumed_benign_birads3(final_df):
     # Create a dictionary to store final interpretation updates
     updates = {}
     
-    for patient_id in tqdm(patient_ids, desc="Checking benign based on BI-RADS 3 followup"):
+    for patient_id in patient_ids:
         # Get all records for this patient once and sort them
         patient_records = final_df[final_df['PATIENT_ID'] == patient_id].sort_values('DATE')
         
@@ -164,15 +170,22 @@ def check_assumed_benign_birads3(final_df):
 
             if len(followup_us_records) > 0 and 'BI-RADS' in followup_us_records.columns:
                 # FIRST CHECK: if all future US exams have BI-RADS null, 1, or 2
-                valid_birads_first_check = followup_us_records['BI-RADS'].isnull() | followup_us_records['BI-RADS'].isin(['1', '2'])
+                valid_birads_first_check = (
+                    followup_us_records['BI-RADS'].notna() & 
+                    (followup_us_records['BI-RADS'] != '') &
+                    followup_us_records['BI-RADS'].isin(['1', '2'])
+                )
                 
                 if valid_birads_first_check.all():
                     pass  # First check passes, continue with remaining checks
                 else:
                     # SECOND CHECK: if first check fails, verify if all are null, 0, 1, or 3
                     # AND at least one exam is ≥24 months after initial exam
-                    valid_birads_second_check = followup_us_records['BI-RADS'].isnull() | followup_us_records['BI-RADS'].isin(['1', '2', '3'])
-                    
+                    valid_birads_second_check = (
+                        followup_us_records['BI-RADS'].notna() & 
+                        (followup_us_records['BI-RADS'] != '') &
+                        followup_us_records['BI-RADS'].isin(['1', '2', '3'])
+                    )
                     if not valid_birads_second_check.all():
                         continue  # Neither check passes, skip this record
                     
@@ -223,9 +236,7 @@ def check_malignant_from_biopsy(final_df):
     updates = {}
     
     # Process each patient separately
-    for patient_id in tqdm(final_df['PATIENT_ID'].unique(), 
-                           desc="Processing patients", 
-                           unit="patient"):
+    for patient_id in final_df['PATIENT_ID'].unique():
         # Get all records for this patient
         patient_records = final_df[final_df['PATIENT_ID'] == patient_id]
         
@@ -279,7 +290,7 @@ def check_from_next_diagnosis(final_df, days=240):
     target_birads_benign = set(['1', '2', '3', '4', '4A', '4B'])
     updates = {}
     
-    for patient_id in tqdm(final_df['PATIENT_ID'].unique(), desc="Checking diagnosis from next record"):
+    for patient_id in final_df['PATIENT_ID'].unique():
         patient_mask = final_df['PATIENT_ID'] == patient_id
         patient_records = final_df[patient_mask].copy().sort_values('DATE')
         
@@ -355,22 +366,77 @@ def check_from_next_diagnosis(final_df, days=240):
     return final_df
 
 
-def determine_final_interpretation(final_df):
-    """
-    Determine final_interpretation for each patient based on specified rules.
-    """
-    # Identify BENIGN1 cases based on follow-up period
-    final_df = check_assumed_benign(final_df)
-    
-    # Identify BENIGN3 cases based on follow-up period (Birads 3)
-    final_df = check_assumed_benign_birads3(final_df)
-    
-    # Identify MALIGNANT1 cases from biopsy results for remaining cases
-    final_df = check_malignant_from_biopsy(final_df)
-    
-    # Identify BENIGN2 cases and MALIGNANT2 based on next chronological path_interpretation
-    final_df = check_from_next_diagnosis(final_df)
-    
+
+def determine_final_interpretation(final_df, batch_size=100, max_workers=None):
+
+    if 'final_interpretation' not in final_df.columns:
+        final_df['final_interpretation'] = None
+   
+    if 'BI-RADS' in final_df.columns:
+        # Convert to string, remove .0, and replace 'nan' with empty string
+        final_df['BI-RADS'] = (
+            final_df['BI-RADS']
+            .astype(str)
+            .str.replace('.0', '', regex=False)
+            .str.replace('nan', '', regex=False)
+        )
+        
+    # Get unique patients
+    unique_patients = final_df['PATIENT_ID'].unique()
+   
+    # Split patients into batches of size batch_size
+    patient_batches = [
+        unique_patients[i:i + batch_size]
+        for i in range(0, len(unique_patients), batch_size)
+    ]
+   
+    # Define worker function to process a batch of patients through all four methods
+    def process_patient_batch(patient_ids):
+        # Create a DEEP copy of patient records
+        batch_df = final_df[final_df['PATIENT_ID'].isin(patient_ids)].copy(deep=True)
+       
+        # Process locally without touching final_df
+        batch_df = check_assumed_benign(batch_df)
+        batch_df = check_assumed_benign_birads3(batch_df)
+        batch_df = check_malignant_from_biopsy(batch_df)
+        batch_df = check_from_next_diagnosis(batch_df)
+       
+        # Only return rows that were actually modified
+        modified_mask = batch_df['final_interpretation'].notna()
+        return batch_df.loc[modified_mask, ['PATIENT_ID', 'ACCESSION_NUMBER', 'final_interpretation']]
+   
+    # Use ThreadPoolExecutor to process batches in parallel
+    results = []
+   
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all batches for processing and capture futures
+        futures = {
+            executor.submit(process_patient_batch, batch): batch
+            for batch in patient_batches
+        }
+       
+        # Process results as they complete
+        for future in tqdm(
+            concurrent.futures.as_completed(futures),
+            total=len(futures),
+            desc="Determining classifications"
+        ):
+            try:
+                batch_result = future.result()
+                results.append(batch_result)
+            except Exception as e:
+                print(f"Error processing batch: {e}")
+   
+    if not results:
+        return final_df
+   
+    # Combine all results
+    combined_results = pd.concat(results)
+   
+    # Update the original dataframe with the processed results
+    # We only update the 'final_interpretation' column
+    final_df.update(combined_results)
+   
     return final_df
 
 

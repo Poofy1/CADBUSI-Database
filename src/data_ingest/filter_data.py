@@ -1,14 +1,15 @@
 import os
 import pandas as pd
 from tqdm import tqdm
-import re
-from src.DB_processing.tools import append_audit
-from src.data_ingest.classification import determine_final_interpretation, audit_interpretations
+import re, sys
+
 # Get the current script directory and go back one directory
 env = os.path.dirname(os.path.abspath(__file__))
 env = os.path.dirname(env)  # Go back one directory
 env = os.path.dirname(env)  # Go back one directory
-
+sys.path.insert(0, env)
+from src.DB_processing.tools import append_audit
+from src.data_ingest.classification import determine_final_interpretation, audit_interpretations
 
 def extract_cancer_type(text):
     if pd.isna(text):
@@ -404,7 +405,12 @@ def create_final_dataset(rad_df, path_df, output_path):
     # Combine dataframes
     final_df = combine_dataframes(rad_df, path_df)
     
-    final_df = fill_pathology_accession_numbers(final_df)
+    #final_df = fill_pathology_accession_numbers(final_df)
+    unique_patients = final_df['PATIENT_ID'].unique()
+    unique_patients = sorted(unique_patients)[:10000]
+
+    # Filter dataframe to only include rows for these patients
+    final_df = final_df[final_df['PATIENT_ID'].isin(unique_patients)]
     
     # Determine final interpretation
     final_df = determine_final_interpretation(final_df)
