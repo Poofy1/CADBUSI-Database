@@ -217,28 +217,43 @@ def check_malignant_from_biopsy(final_df):
     """
     Check for malignancy indicators by marking rows as MALIGNANT1 
     if BI-RADS = 6 and MODALITY is 'US', for cases without interpretation,
-    but only if there exists at least one 'MALIGNANT' in path_interpretation.
+    but only if there exists at least one 'MALIGNANT' in path_interpretation
+    FOR THAT PATIENT.
     """
-    # First, check if any path_interpretation contains 'MALIGNANT'
-    has_malignant = any(
-        isinstance(interp, str) and 'MALIGNANT' in interp 
-        for interp in final_df['path_interpretation'] 
-        if pd.notna(interp)
-    )
+    updates = {}
     
-    # Only proceed if there's at least one 'MALIGNANT' in path_interpretation
-    if has_malignant:
-        us_birads6_rows = final_df[
-            (pd.notna(final_df.get('MODALITY'))) & 
-            (final_df['MODALITY'] == 'US') & 
-            (pd.notna(final_df.get('BI-RADS'))) & 
-            (final_df['BI-RADS'] == '6')
-        ].index
+    # Process each patient separately
+    for patient_id in tqdm(final_df['PATIENT_ID'].unique(), 
+                           desc="Processing patients", 
+                           unit="patient"):
+        # Get all records for this patient
+        patient_records = final_df[final_df['PATIENT_ID'] == patient_id]
         
-        for idx in tqdm(us_birads6_rows, desc="Checking BI-RADS 6 cases"):
-            row = final_df.loc[idx]
-            if pd.isna(row['final_interpretation']) or row['final_interpretation'] == '':
-                final_df.at[idx, 'final_interpretation'] = 'MALIGNANT1'
+        # Check if any path_interpretation for this patient contains 'MALIGNANT'
+        has_malignant = any(
+            isinstance(interp, str) and 'MALIGNANT' in interp 
+            for interp in patient_records['path_interpretation'] 
+            if pd.notna(interp)
+        )
+        
+        # Only proceed if there's at least one 'MALIGNANT' in path_interpretation for this patient
+        if has_malignant:
+            # Find BI-RADS 6 US rows for this patient
+            us_birads6_rows = patient_records[
+                (pd.notna(patient_records.get('MODALITY'))) & 
+                (patient_records['MODALITY'] == 'US') & 
+                (pd.notna(patient_records.get('BI-RADS'))) & 
+                (patient_records['BI-RADS'] == '6')
+            ].index
+            
+            for idx in us_birads6_rows:
+                row = final_df.loc[idx]
+                if pd.isna(row['final_interpretation']) or row['final_interpretation'] == '':
+                    updates[idx] = 'MALIGNANT1'
+    
+    # Apply all updates at once
+    for idx, value in updates.items():
+        final_df.at[idx, 'final_interpretation'] = value
     
     return final_df
 
