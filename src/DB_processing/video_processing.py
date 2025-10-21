@@ -64,14 +64,14 @@ def ProcessVideoData(database_path):
         db_to_process = video_df
         append_audit("video_processing.input_videos", len(db_to_process))
 
-        print("Finding OCR Masks")
+        # Finding OCR Masks
         _, description_masks = find_masks(video_folder_path, 'mask_model', db_to_process, 1920, 1080, video_format=True)
         append_audit("video_processing.extracted_description_masks", len(description_masks))
 
-        print("Performing OCR")
+        # Performing OCR
         with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
             futures = {executor.submit(ocr_image, image_file, description_mask, video_folder_path): image_file for image_file, description_mask in description_masks}
-            progress = tqdm(total=len(futures), desc='')
+            progress = tqdm(total=len(futures), desc='Performing OCR')
 
             # Initialize dictionary to store descriptions
             descriptions = {}

@@ -516,7 +516,7 @@ def parse_files(CONFIG, dcm_files_list, database_path, batch_size=100):
     with ProcessPoolExecutor(max_workers=num_workers) as executor:
         futures = {executor.submit(process_batch, batch): batch for batch in batches}
         
-        for future in tqdm(as_completed(futures), total=len(futures), desc="Processing batches"):
+        for future in tqdm(as_completed(futures), total=len(futures), desc="Processing DICOM files"):
             try:
                 batch_results = future.result()
                 data_list.extend(batch_results)

@@ -262,7 +262,7 @@ def process_images_combined(image_folder_path, image_df):
         futures = {executor.submit(process_single_image_combined, row, image_folder_path): row 
                   for _, row in image_df.iterrows()}
         
-        with tqdm(total=len(futures), miniters=50) as pbar:
+        with tqdm(total=len(futures), desc='Finding Crop Region / Darkness', miniters=50) as pbar:
             for future in as_completed(futures):
                 result = future.result()
                 if result is not None:
@@ -334,7 +334,7 @@ def get_OCR(image_folder_path, description_masks):
         # Pass basename to the future, but also provide a way to access the full path inside ocr_image
         futures = {executor.submit(ocr_image, basename, description_mask, image_folder_path): 
                   basename for basename, description_mask in basename_description_masks}
-        progress = tqdm(total=len(futures), desc='')
+        progress = tqdm(total=len(futures), desc='Performing OCR')
 
         # Initialize dictionary to store descriptions
         descriptions = {}
@@ -366,21 +366,21 @@ def analyze_images(database_path):
 
         append_audit("image_processing.input_images", len(image_df))
 
-        print("Finding OCR Masks")
+        # Finding OCR Masks
         _, description_masks = find_masks(image_folder_path, 'mask_model', image_df, 1920, 1080)
         append_audit("image_processing.extracted_description_masks", len(description_masks))
 
-        print("Performing OCR")
+        # Performing OCR
         descriptions = get_OCR(image_folder_path, description_masks)
         valid_descriptions = sum(1 for desc in descriptions.values() if desc)
         append_audit("image_processing.extracted_ocr_descriptions", valid_descriptions)
 
-        print("Finding Darkness and Image Masks")
+        # Finding Darkness and Image Masks
         image_masks, darknesses = process_images_combined(image_folder_path, image_df)
         append_audit("image_processing.extracted_crop_regions", len(image_masks))
         append_audit("image_processing.extracted_darkness_measurements", len(darknesses))
 
-        print("Finding Calipers")
+        # Finding Calipers
         caliper_results = find_calipers(image_folder_path, image_df)
         caliper_count = sum(1 for _, bool_val, _ in caliper_results if bool_val)
         append_audit("image_processing.images_with_calipers", caliper_count)

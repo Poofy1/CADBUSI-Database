@@ -121,7 +121,7 @@ def find_calipers(images_dir, db_to_process, image_size=256):
         dataloader = DataLoader(dataset, batch_size=64, num_workers=8, pin_memory=True)
         
         with torch.no_grad():
-            for images, filenames in tqdm(dataloader, total=len(dataloader), desc="Processing non-RGB images"):
+            for images, filenames in tqdm(dataloader, total=len(dataloader), desc="Finding Caliper Images"):
                 images = images.to(device)
                 with autocast('cuda'):
                     has_calipers_pred = model(images)

@@ -13,7 +13,6 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 env = os.path.dirname(os.path.abspath(__file__))
 
 def Inpaint_Dataset_N2N(input_folder):
-    print("Inpainting and Evaluating Caliper Images")
     
     with DatabaseManager() as db:
         # Load image data from database
@@ -39,7 +38,7 @@ def Inpaint_Dataset_N2N(input_folder):
         new_rows = []
         
         with torch.no_grad():
-            for index, row in tqdm(processed_data.iterrows(), total=len(processed_data)):
+            for index, row in tqdm(processed_data.iterrows(), total=len(processed_data), desc="Inpainting Images"):
                 # Load and process input image
                 input_image_path = os.path.join(input_folder, row['image_name'])
                 input_image_path = os.path.normpath(input_image_path)

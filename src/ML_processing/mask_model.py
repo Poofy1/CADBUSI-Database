@@ -169,7 +169,7 @@ def find_masks(images_dir, model_name, db_to_process, max_width, max_height,
 
     # Run inference
     with torch.no_grad():
-        for images, filenames in tqdm(dataloader, total=len(dataloader)):
+        for images, filenames in tqdm(dataloader, total=len(dataloader), desc='Finding OCR Masks'):
             images = images.to(device, non_blocking=True)
             with autocast('cuda'):
                 output = model(images)

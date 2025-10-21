@@ -325,14 +325,13 @@ def Select_Data(database_path, only_labels):
             db_to_process = db_out
             columns_to_update = ['image_name', 'label', 'crop_aspect_ratio', 'closest_fn', 'distance']
 
-            print("Finding Similar Images")
             accession_ids = db_to_process['accession_number'].unique()
 
-            db_to_process['closest_fn'] = ''
+            db_to_process['closest_fn'] = '' 
             db_to_process['distance'] = 99999
 
             # 1 worker is the fastest for GCP, do not change
-            with ThreadPoolExecutor(max_workers=1) as executor, tqdm(total=len(accession_ids), desc='') as progress:
+            with ThreadPoolExecutor(max_workers=1) as executor, tqdm(total=len(accession_ids), desc='Finding Similar Images') as progress:
                 futures = {executor.submit(process_nearest_given_ids, pid, db_to_process, image_folder_path): pid for pid in accession_ids}
 
                 for future in as_completed(futures):
