@@ -24,4 +24,5 @@ ultralytics
 python-bidi
 pylibjpeg>=2.0
 pylibjpeg-libjpeg>=2.1
+einops
 git+https://github.com/Poofy1/storage-adapter.git

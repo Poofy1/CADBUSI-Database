@@ -6,6 +6,7 @@ SQLite database manager that is designed to process breast ultrasound data from 
 
 - Create a GCP AI Factory instance with a T4 GPU
 - Clone repository: `git clone https://github.com/Poofy1/CADBUSI-Database.git`
+- Go into dir: `cd CADBUSI-Database`
 - Install requirements: `pip install -r requirements.txt`
 - Create/Configure: `./config.py`
 - Obtain certificate `./src/dicom_downloader/CertEmulationCA.crt`
