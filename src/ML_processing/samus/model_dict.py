@@ -98,14 +98,6 @@ def load_samus_model(env, device='cuda', encoder_input_size=256, low_image_size=
             new_state_dict[k] = v
     model.load_state_dict(new_state_dict)
     model.eval()
-    
-    try:
-        print("Compiling model with torch.compile...")
-        model = torch.compile(model, mode='reduce-overhead')
-        print("Model compiled successfully")
-    except Exception as e:
-        print(f"Could not compile model: {e}")
-        print("Continuing without compilation...")
         
     # Create preprocessing transform
     transform = transforms.Compose([
