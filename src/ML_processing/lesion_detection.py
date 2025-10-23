@@ -9,6 +9,7 @@ import pandas as pd
 from tqdm import tqdm
 from scipy import ndimage
 from storage_adapter import *
+from torch.cuda.amp import autocast
 from src.DB_processing.database import DatabaseManager
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from ultralytics import YOLO
@@ -45,16 +46,15 @@ def clean_mask(mask_binary, min_object_area=200):
     Clean binary mask by filling small holes and removing small islands.
     """
     # Convert to binary (0s and 1s) for scipy
-    if mask_binary.dtype != np.uint8:
-        mask_binary = mask_binary.astype(np.uint8)
+    if mask_binary.dtype == np.uint8:
+        binary_mask = mask_binary > 0
+    else:
+        binary_mask = mask_binary.astype(bool)
     
     binary_mask = mask_binary > 0
     
     # Fill holes using scipy (much better than morphological closing)
-    mask_filled = ndimage.binary_fill_holes(binary_mask)
-    
-    # Convert back to uint8 (0s and 255s)
-    mask_filled = mask_filled.astype(np.uint8) * 255
+    mask_filled = ndimage.binary_fill_holes(binary_mask).astype(np.uint8) * 255
     
     # Remove small islands using connected component analysis
     num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask_filled, connectivity=8)
@@ -194,9 +194,6 @@ def save_debug_image(image_name, image_dir, target_image, cropped_caliper_boxes,
         mask_resized: Optional binary mask to overlay (same size as target_image)
     """
     try:
-        # Create debug image using CROPPED image as base
-        debug_img = target_image.copy()
-        
         # Convert PIL Image to numpy array and ensure RGB format
         if isinstance(debug_img, Image.Image):
             if debug_img.mode != 'RGB':
@@ -280,8 +277,7 @@ def process_single_image(image_name, image_dir, image_data_row, model, yolo_mode
             full_image_caliper_boxes.append(full_bbox)
 
         # Store caliper boxes in result format (using full image coordinates)
-        bbox_strings = [f"[{bbox[0]}, {bbox[1]}, {bbox[2]}, {bbox[3]}]" for bbox in full_image_caliper_boxes]
-        result['caliper_boxes'] = "; ".join(bbox_strings)
+        result['caliper_boxes'] = "; ".join(f"[{b[0]}, {b[1]}, {b[2]}, {b[3]}]" for b in full_image_caliper_boxes)
         
         # Only run SAMUS model if use_samus_model is True
         if use_samus_model and cropped_caliper_boxes:
@@ -299,7 +295,8 @@ def process_single_image(image_name, image_dir, image_data_row, model, yolo_mode
                 box_tensor = box_tensor.to(device)
                 
                 with torch.no_grad():
-                    outputs = model(image_tensor, bbox=box_tensor.unsqueeze(0))
+                    with autocast():
+                        outputs = model(image_tensor, bbox=box_tensor.unsqueeze(0))
                     mask = outputs['masks']
                         
                     # Convert mask to numpy for visualization
