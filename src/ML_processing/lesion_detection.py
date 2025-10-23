@@ -3,8 +3,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = '0'
 import torch
 import numpy as np
 from PIL import Image
-import torchvision.transforms as transforms
-from src.ML_processing.samus.model_dict import get_model
+from src.ML_processing.samus.model_dict import load_samus_model
 import cv2
 import pandas as pd
 from tqdm import tqdm
@@ -12,51 +11,13 @@ from scipy import ndimage
 from storage_adapter import *
 from src.DB_processing.database import DatabaseManager
 from concurrent.futures import ThreadPoolExecutor, as_completed
-
-# Add YOLO import
 from ultralytics import YOLO
-
 env = os.path.dirname(os.path.abspath(__file__))
 
-
-class Config_BUSI:
-    workers = 1
-    epochs = 400
-    batch_size = 8
-    learning_rate = 1e-4
-    momentum = 0.9
-    classes = 2
-    img_size = 256
-    train_split = "train-Breast-BUSI"
-    val_split = "val-Breast-BUSI"
-    test_split = "test-Breast-BUSI"
-    crop = None
-    eval_freq = 1
-    save_freq = 2000
-    device = "cuda"
-    cuda = "on"
-    gray = "yes"
-    img_channel = 1
-    eval_mode = "mask_slice"
-    pre_trained = False
-    mode = "val"
-    visual = True
-    modelname = "SAM"
-
-
 def get_target_data(db_manager, limit=None):
-    """
-    Get target images from database.
-    
-    Args:
-        db_manager: DatabaseManager instance
-        limit: Optional limit on number of images to process
-    
-    Returns:
-        List of image names to process
-    """
+    """Get target images from database."""
     # Query images, filtering out RGB images
-    where_clause = "photometric_interpretation != 'RGB'"
+    where_clause = "photometric_interpretation != 'RGB' AND label = 1"
     df = db_manager.get_images_dataframe(where_clause=where_clause)
     
     # Apply limit if specified
@@ -70,7 +31,6 @@ def get_target_data(db_manager, limit=None):
     
     return images
 
-
 def clamp_coordinates(x1, y1, x2, y2, max_width, max_height, min_x=0, min_y=0):
     """Clamp coordinates to valid image bounds."""
     return (
@@ -79,7 +39,6 @@ def clamp_coordinates(x1, y1, x2, y2, max_width, max_height, min_x=0, min_y=0):
         max(min_x, min(x2, max_width)),
         max(min_y, min(y2, max_height))
     )
-
 
 def clean_mask(mask_binary, min_object_area=200):
     """
@@ -110,7 +69,6 @@ def clean_mask(mask_binary, min_object_area=200):
             cleaned_mask[labels == i] = 255
     
     return cleaned_mask
-
 
 def prepare_box_prompts(boxes, image_size, model_input_size):
     """
@@ -154,15 +112,9 @@ def prepare_box_prompts(boxes, image_size, model_input_size):
     
     return torch.tensor(scaled_boxes, dtype=torch.float32)
 
-
-def detect_calipers_yolo(image, yolo_model, confidence_threshold=0.5):
+def detect_calipers_yolo(image, yolo_model, confidence_threshold):
     """
     Use YOLO model to detect calipers in the image
-    
-    Args:
-        image: PIL Image or numpy array
-        yolo_model: Loaded YOLO model
-        confidence_threshold: Minimum confidence for detections
     
     Returns:
         List of bounding boxes in format [x1, y1, x2, y2]
@@ -188,7 +140,6 @@ def detect_calipers_yolo(image, yolo_model, confidence_threshold=0.5):
     
     return caliper_boxes
 
-
 def load_image(image_name, image_data_row, image_dir):
     """Load and crop image based on database row information."""
     # Load the target image
@@ -198,9 +149,6 @@ def load_image(image_name, image_data_row, image_dir):
         
     if target_image.mode != 'RGB':
         target_image = target_image.convert('RGB')
-    
-    # Determine if this image has calipers based on the data
-    is_caliper = image_data_row.get('has_calipers', False)
         
     # Extract crop parameters from the data row
     crop_x = image_data_row.get('crop_x', None)
@@ -231,10 +179,70 @@ def load_image(image_name, image_data_row, image_dir):
     # Crop and return the target image
     target_image = target_image.crop((crop_x, crop_y, crop_x2, crop_y2))
         
-    return target_image, is_caliper, (crop_x, crop_y, crop_x2, crop_y2), (img_width, img_height)
+    return target_image, (crop_x, crop_y, crop_x2, crop_y2), (img_width, img_height)
 
 
-def process_single_image_pair(image_name, image_dir, image_data_row, model, yolo_model, 
+def save_debug_image(image_name, image_dir, target_image, cropped_caliper_boxes, mask_resized=None):
+    """
+    Save a debug visualization image with bounding boxes and optional mask overlay.
+    
+    Args:
+        image_name: Name of the image file
+        image_dir: Directory containing the original images
+        target_image: PIL Image or numpy array (cropped image)
+        cropped_caliper_boxes: List of bounding boxes in cropped image coordinates
+        mask_resized: Optional binary mask to overlay (same size as target_image)
+    """
+    try:
+        # Create debug image using CROPPED image as base
+        debug_img = target_image.copy()
+        
+        # Convert PIL Image to numpy array and ensure RGB format
+        if isinstance(debug_img, Image.Image):
+            if debug_img.mode != 'RGB':
+                debug_img = debug_img.convert('RGB')
+            debug_img = np.array(debug_img)
+            debug_img = cv2.cvtColor(debug_img, cv2.COLOR_RGB2BGR)
+
+        # Draw bounding boxes if they exist
+        if cropped_caliper_boxes:
+            for adjusted_bbox in cropped_caliper_boxes:
+                x1, y1, x2, y2 = adjusted_bbox
+                cv2.rectangle(debug_img, (int(x1), int(y1)), (int(x2), int(y2)), 
+                            (0, 255, 0), 2)  # Green box
+
+        # Add mask overlay if mask exists
+        if mask_resized is not None:
+            mask_overlay = np.zeros_like(debug_img)
+            mask_overlay[mask_resized > 0] = [0, 255, 255]  # Yellow in BGR
+            debug_img = cv2.addWeighted(debug_img, 0.7, mask_overlay, 0.3, 0)
+        else: 
+            print(f"No mask available for {image_name}")
+            
+        # Convert back to RGB for saving
+        debug_img = cv2.cvtColor(debug_img, cv2.COLOR_BGR2RGB)
+        
+        # Save the debug image with organized folder structure
+        parent_dir = os.path.dirname(os.path.normpath(image_dir))
+        save_dir = os.path.join(parent_dir, "test_images")
+        
+        os.makedirs(save_dir, exist_ok=True)
+        
+        # Use the clean image name as the base for filename
+        base_name = image_name.replace('.png', '').replace('.jpg', '').replace('.jpeg', '')
+        debug_filename = f"{base_name}.png"
+        debug_save_path = os.path.join(save_dir, debug_filename)
+        
+        # Save using your save_data function
+        save_data(debug_img, debug_save_path)
+        
+        print(f"Debug image saved: {debug_save_path}")
+        
+    except Exception as debug_e:
+        print(f"Error saving debug image for {image_name}: {str(debug_e)}")
+
+
+def process_single_image(image_name, image_dir, image_data_row, model, yolo_model, 
                               transform, device, encoder_input_size, save_debug_images=True, 
                               use_samus_model=True):
     """
@@ -251,10 +259,10 @@ def process_single_image_pair(image_name, image_dir, image_data_row, model, yolo
     # Initialize variables for debug saving
     target_image = None
     mask_resized = None
-    is_caliper = False
+    cropped_caliper_boxes = []
     
     try:
-        target_image, is_caliper, crops, dim = load_image(image_name, image_data_row, image_dir)
+        target_image, crops, dim = load_image(image_name, image_data_row, image_dir)
         crop_x, crop_y, crop_x2, crop_y2 = crops
         img_width, img_height = dim
 
@@ -325,64 +333,12 @@ def process_single_image_pair(image_name, image_dir, image_data_row, model, yolo
     
     # Save debug images for ALL images when requested
     if save_debug_images and target_image is not None:
-        try:
-            # Create debug image using CROPPED image as base
-            debug_img = target_image.copy()
-            
-            # Convert PIL Image to numpy array and ensure RGB format
-            if isinstance(debug_img, Image.Image):
-                if debug_img.mode != 'RGB':
-                    debug_img = debug_img.convert('RGB')
-                debug_img = np.array(debug_img)
-                debug_img = cv2.cvtColor(debug_img, cv2.COLOR_RGB2BGR)
-
-            # Draw bounding boxes if they exist
-            if cropped_caliper_boxes:
-                for adjusted_bbox in cropped_caliper_boxes:
-                    x1, y1, x2, y2 = adjusted_bbox
-                    cv2.rectangle(debug_img, (int(x1), int(y1)), (int(x2), int(y2)), 
-                                (0, 255, 0), 2)  # Green box
-
-            # Add mask overlay if mask exists
-            if mask_resized is not None:
-                mask_overlay = np.zeros_like(debug_img)
-                mask_overlay[mask_resized > 0] = [0, 255, 255]  # Yellow in BGR
-                debug_img = cv2.addWeighted(debug_img, 0.7, mask_overlay, 0.3, 0)
-            
-            if mask_resized is None and not is_caliper:
-                print("missing mask on clean")
-                
-            # Convert back to RGB for saving
-            debug_img = cv2.cvtColor(debug_img, cv2.COLOR_BGR2RGB)
-            
-            # Save the debug image with organized folder structure
-            parent_dir = os.path.dirname(os.path.normpath(image_dir))
-            save_dir = os.path.join(parent_dir, "test_images")
-            
-            # Determine subfolder based on whether calipers were detected
-            subfolder = "calipers" if is_caliper else "clean"
-            
-            # Create the full save directory path
-            full_save_dir = os.path.join(save_dir, subfolder)
-            os.makedirs(full_save_dir, exist_ok=True)
-            
-            # Use the clean image name as the base for filename
-            base_name = image_name.replace('.png', '').replace('.jpg', '').replace('.jpeg', '')
-            debug_filename = f"{base_name}.png"
-            debug_save_path = os.path.join(full_save_dir, debug_filename)
-            
-            # Save using your save_data function
-            save_data(debug_img, debug_save_path)
-            
-            print(f"Debug image saved: {debug_save_path}")
-            
-        except Exception as debug_e:
-            print(f"Error saving debug image for {image_name}: {str(debug_e)}")
+        save_debug_image(image_name, image_dir, target_image, cropped_caliper_boxes, mask_resized)
     
     return result
 
 
-def process_image_pairs_multithreading(image_names, image_dir, image_data_df, model, yolo_model, 
+def process_image_multithreading(image_names, image_dir, image_data_df, model, yolo_model, 
                                       transform, device, encoder_input_size, save_debug_images=False, 
                                       num_threads=6):
     """
@@ -399,7 +355,7 @@ def process_image_pairs_multithreading(image_names, image_dir, image_data_df, mo
         # O(1) dictionary lookup
         image_data_row = image_name_to_row[image_name]
         
-        result = process_single_image_pair(
+        result = process_single_image(
             image_name, image_dir, image_data_row, 
             model, yolo_model, transform, device, encoder_input_size, save_debug_images
         )
@@ -414,7 +370,7 @@ def process_image_pairs_multithreading(image_names, image_dir, image_data_df, mo
         }
         
         # Collect results with tqdm progress bar
-        with tqdm(total=len(image_names), desc="Processing images") as pbar:
+        with tqdm(total=len(image_names), desc="Cropping lesions") as pbar:
             for future in as_completed(futures):
                 try:
                     image_index, result = future.result()
@@ -427,6 +383,7 @@ def process_image_pairs_multithreading(image_names, image_dir, image_data_df, mo
                 pbar.update(1)
     
     return results
+
 
 
 def Locate_Lesions(image_dir, save_debug_images=False):
@@ -452,6 +409,15 @@ def Locate_Lesions(image_dir, save_debug_images=False):
         print(f"Failed to load YOLO model: {e}")
         return None
     
+    # Load SAMUS model
+    encoder_input_size = 256
+    model, transform, device = load_samus_model(
+        env,
+        device='cuda',
+        encoder_input_size=encoder_input_size,
+        low_image_size=128
+    )
+    
     # Connect to database
     with DatabaseManager() as db:
         # Load image data from database
@@ -464,55 +430,6 @@ def Locate_Lesions(image_dir, save_debug_images=False):
         
         # Initialize has_caliper_mask to False for ALL rows
         image_data["has_caliper_mask"] = False
-        
-        # Set up parameters
-        encoder_input_size = 256
-        low_image_size = 128
-        modelname = 'SAMUS'
-        checkpoint_path = os.path.join(env, 'models', 'SAMUS.pth')
-        
-        # Set up config
-        opt = Config_BUSI
-        opt.modelname = modelname
-        device = torch.device(opt.device)
-        
-        # Load SAMUS model
-        class Args:
-            def __init__(self):
-                self.modelname = modelname
-                self.encoder_input_size = encoder_input_size
-                self.low_image_size = low_image_size
-                self.vit_name = 'vit_b'
-                self.sam_ckpt = checkpoint_path
-                self.batch_size = 1
-                self.n_gpu = 1
-                self.base_lr = 0.0001
-                self.warmup = False
-                self.warmup_period = 250
-                self.keep_log = False
-        
-        args = Args()
-        
-        model = get_model(modelname, args=args, opt=opt)
-        model.to(device)
-        
-        # Load checkpoint
-        checkpoint = torch.load(checkpoint_path)
-        new_state_dict = {}
-        for k, v in checkpoint.items():
-            if k[:7] == 'module.':
-                new_state_dict[k[7:]] = v
-            else:
-                new_state_dict[k] = v
-        model.load_state_dict(new_state_dict)
-        model.eval()
-        
-        # Transform for preprocessing images
-        transform = transforms.Compose([
-            transforms.Resize((encoder_input_size, encoder_input_size)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.5], std=[0.5])
-        ])
         
         # Get image names to process
         image_names = get_target_data(db)
@@ -540,9 +457,7 @@ def Locate_Lesions(image_dir, save_debug_images=False):
             print("No valid images found.")
             return
 
-        print(f"Processing {len(valid_images)} images...")
-
-        results = process_image_pairs_multithreading(
+        results = process_image_multithreading(
             image_names=valid_images,
             image_dir=image_dir,
             image_data_df=image_data,

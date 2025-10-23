@@ -2,6 +2,7 @@ import os
 import torch
 from functools import partial
 from src.ML_processing.samus.samus import Samus
+import torchvision.transforms as transforms
 from src.ML_processing.samus.transformer import TwoWayTransformer
 from src.ML_processing.samus.image_encoder import ImageEncoderViT
 from src.ML_processing.samus.mask_decoder import MaskDecoder
@@ -15,6 +16,98 @@ def get_model(modelname="SAM", args=None, opt=None):
     else:
         raise RuntimeError("Could not find the model:", modelname)
     return model
+
+def load_samus_model(env, device='cuda', encoder_input_size=256, low_image_size=128):
+    """
+    Load and initialize the SAMUS segmentation model.
+    
+    Args:
+        device: Device to load model on ('cuda' or 'cpu')
+        encoder_input_size: Input size for the encoder (default: 256)
+        low_image_size: Low resolution image size (default: 128)
+    
+    Returns:
+        tuple: (model, transform, device)
+            - model: Loaded SAMUS model ready for inference
+            - transform: Preprocessing transform for input images
+            - device: torch.device object
+    """
+    print("Loading SAMUS model...")
+    
+    class Config_BUSI:
+        workers = 1
+        epochs = 400
+        batch_size = 8
+        learning_rate = 1e-4
+        momentum = 0.9
+        classes = 2
+        img_size = 256
+        train_split = "train-Breast-BUSI"
+        val_split = "val-Breast-BUSI"
+        test_split = "test-Breast-BUSI"
+        crop = None
+        eval_freq = 1
+        save_freq = 2000
+        device = "cuda"
+        cuda = "on"
+        gray = "yes"
+        img_channel = 1
+        eval_mode = "mask_slice"
+        pre_trained = False
+        mode = "val"
+        visual = True
+        modelname = "SAM"
+    
+    # Set up parameters
+    modelname = 'SAMUS'
+    checkpoint_path = os.path.join(env, 'models', 'SAMUS.pth')
+    
+    # Set up config
+    opt = Config_BUSI
+    opt.modelname = modelname
+    device = torch.device(device)
+    
+    # Create Args class for model initialization
+    class Args:
+        def __init__(self):
+            self.modelname = modelname
+            self.encoder_input_size = encoder_input_size
+            self.low_image_size = low_image_size
+            self.vit_name = 'vit_b'
+            self.sam_ckpt = checkpoint_path
+            self.batch_size = 1
+            self.n_gpu = 1
+            self.base_lr = 0.0001
+            self.warmup = False
+            self.warmup_period = 250
+            self.keep_log = False
+    
+    args = Args()
+    
+    # Initialize model
+    model = get_model(modelname, args=args, opt=opt)
+    model.to(device)
+    
+    # Load checkpoint
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    new_state_dict = {}
+    for k, v in checkpoint.items():
+        if k[:7] == 'module.':
+            new_state_dict[k[7:]] = v
+        else:
+            new_state_dict[k] = v
+    model.load_state_dict(new_state_dict)
+    model.eval()
+    
+    # Create preprocessing transform
+    transform = transforms.Compose([
+        transforms.Resize((encoder_input_size, encoder_input_size)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.5], std=[0.5])
+    ])
+    
+    print("SAMUS model loaded successfully")
+    return model, transform, device
 
 
 def build_samus_vit_h(args, checkpoint=None):

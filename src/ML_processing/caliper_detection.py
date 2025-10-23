@@ -45,8 +45,7 @@ class MyDataset(Dataset):
         
         # Filter to only include images that:
         # 1. Are in the database
-        # 2. Exist in the file system
-        # 3. Have complete crop information
+        # 2. Have complete crop information
         all_potential_images = [os.path.basename(file_dict[img_name]) 
                                for img_name in db_to_process['image_name'].values 
                                if img_name in file_dict]
