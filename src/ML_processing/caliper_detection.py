@@ -150,7 +150,7 @@ def find_calipers(images_dir, db_to_process, image_masks, image_size=256):
                 with autocast('cuda'):
                     has_calipers_pred = model(images)
                 raw_predictions = has_calipers_pred.cpu().view(-1).tolist()
-                boolean_predictions = (has_calipers_pred > 0.4).cpu().view(-1).tolist()
+                boolean_predictions = (has_calipers_pred > 0.5).cpu().view(-1).tolist()
                 
                 # Pair each filename with both its boolean prediction and raw prediction value
                 result_triplets = list(zip(filenames, boolean_predictions, raw_predictions))

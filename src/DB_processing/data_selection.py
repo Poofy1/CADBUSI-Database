@@ -9,7 +9,7 @@ def choose_images_to_label(db):
     db['label'] = True
     
     #Remove images that are too dark
-    darkness_thresh = 65
+    darkness_thresh = 75
     # Extract all darkness values rounded to 2 decimals
     darkness_values = db['darkness'].round(2).tolist()
     append_audit("image_processing.darkness_values", darkness_values)
