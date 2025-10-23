@@ -1,6 +1,7 @@
 from src.DB_processing.image_processing import *
 from src.DB_processing.tools import append_audit
 from src.DB_processing.database import DatabaseManager
+from scipy.spatial.distance import cdist
 import concurrent.futures
 from functools import partial
 tqdm.pandas()
@@ -79,7 +80,8 @@ def find_nearest_images(subset, image_folder_path):
     image_pairs_checked = set()
 
     # All regions have same coordinates - get them once
-    coord_cols = ['region_location_min_x0', 'region_location_min_y0', 'region_location_max_x1', 'region_location_max_y1']
+    coord_cols = ['region_location_min_x0', 'region_location_min_y0', 
+                  'region_location_max_x1', 'region_location_max_y1']
     x, y, x1, y1 = subset.iloc[0][coord_cols].astype(int)
     w, h = x1 - x, y1 - y
 
@@ -93,7 +95,6 @@ def find_nearest_images(subset, image_folder_path):
         if len(img.shape) == 3:
             img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
         
-        # Crop once
         rows, cols = img.shape[:2]
         if rows >= y + h and cols >= x + w:
             cropped = img[y:y+h, x:x+w]
@@ -102,25 +103,22 @@ def find_nearest_images(subset, image_folder_path):
         
         cropped_images[image_id] = cropped.flatten()
 
-    # Convert to matrix for vectorized operations
     image_ids = list(cropped_images.keys())
     image_matrix = np.array([cropped_images[id] for id in image_ids], dtype=np.uint8)
     
-    # Vectorized distance computation
+    # scipy's cdist is highly optimized - FASTEST OPTION
+    distances = cdist(image_matrix, image_matrix, metric='cityblock') / image_matrix.shape[1]
+    np.fill_diagonal(distances, 1000)
+    
+    # Find nearest neighbors
     for j, current_id in enumerate(image_ids):
         if current_id in image_pairs_checked:
             continue
         
-        # Compute distances to all images at once
-        current_img = image_matrix[j:j+1]  # Keep 2D for broadcasting
-        distances = np.mean(np.abs(image_matrix - current_img), axis=1)
-        distances[j] = 1000  # Exclude self
-        
-        sister_idx = np.argmin(distances)
+        sister_idx = np.argmin(distances[j])
         sister_id = image_ids[sister_idx]
-        distance = distances[sister_idx]
+        distance = distances[j, sister_idx]
         
-        # Store results for both images
         result[current_id] = {
             'image_filename': subset.at[current_id, 'image_name'],
             'sister_filename': subset.at[sister_id, 'image_name'],
@@ -156,42 +154,44 @@ def process_nearest_given_ids(pid, db_out, image_folder_path):
         subset = subset[~invalid_coords]
     
     # Early termination if no valid images
-    if len(subset) == 0:
+    if len(subset) < 2:
         return subset
     
     # Group by crop coordinates
     coord_cols = ['region_location_min_x0', 'region_location_min_y0', 'region_location_max_x1', 'region_location_max_y1']
     
     # Create coordinate groups
-    subset['coord_key'] = subset[coord_cols].apply(lambda row: tuple(row), axis=1)
+    subset['coord_key'] = list(zip(
+        subset[coord_cols[0]], 
+        subset[coord_cols[1]], 
+        subset[coord_cols[2]], 
+        subset[coord_cols[3]]
+    ))
     coordinate_groups = subset.groupby('coord_key')
     
     #print(f"Accession {pid}: {len(subset)} regions split into {len(coordinate_groups)} coordinate groups")
     
-    # Process each coordinate group separately
-    all_results = {}
+    # Collect all updates
+    closest_fn_updates = {}
+    distance_updates = {}
     
     for coord_key, group_subset in coordinate_groups:
-        # Check if group has multiple images AND at least one has calipers
         has_calipers_in_group = group_subset['has_calipers'].any()
         
         if len(group_subset) >= 2 and has_calipers_in_group:
             group_result = find_nearest_images(group_subset, image_folder_path)
-            all_results.update(group_result)
-        else:
-            # Single image in group - no comparison possible
-            single_idx = group_subset.index[0]
-            subset.at[single_idx, 'closest_fn'] = ''
-            subset.at[single_idx, 'distance'] = 99999
+            
+            # Collect updates instead of applying immediately
+            for i, result in group_result.items():
+                closest_fn_updates[i] = result['sister_filename']
+                distance_updates[i] = result['distance']
     
-    # Apply all results back to subset
-    for i in all_results.keys():
-        subset.at[i, 'closest_fn'] = all_results[i]['sister_filename']
-        subset.at[i, 'distance'] = all_results[i]['distance']
+    # Apply all updates at once
+    if closest_fn_updates:
+        subset.loc[list(closest_fn_updates.keys()), 'closest_fn'] = list(closest_fn_updates.values())
+        subset.loc[list(distance_updates.keys()), 'distance'] = list(distance_updates.values())
     
-    # Clean up the temporary coordinate key column
     subset = subset.drop('coord_key', axis=1)
-    
     return subset
 
 
@@ -331,8 +331,7 @@ def Select_Data(database_path, only_labels):
             db_to_process['closest_fn'] = '' 
             db_to_process['distance'] = 99999
 
-            # 1 worker is the fastest for GCP, do not change
-            with ThreadPoolExecutor(max_workers=1) as executor, tqdm(total=len(accession_ids), desc='Finding Similar Images') as progress:
+            with ThreadPoolExecutor(max_workers=4) as executor, tqdm(total=len(accession_ids), desc='Finding Similar Images') as progress:
                 futures = {executor.submit(process_nearest_given_ids, pid, db_to_process, image_folder_path): pid for pid in accession_ids}
 
                 for future in as_completed(futures):
