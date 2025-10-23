@@ -90,7 +90,8 @@ def find_nearest_images(subset, image_folder_path):
         full_filename = os.path.join(image_folder_path, file_name)
         img = read_image(full_filename, use_pil=True)
         img = np.array(img).astype(np.uint8)
-        img, _ = make_grayscale(img)
+        if len(img.shape) == 3:
+            img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
         
         # Crop once
         rows, cols = img.shape[:2]

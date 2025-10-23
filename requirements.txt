@@ -9,8 +9,8 @@ easyocr
 python-gdcm
 #labelbox # wont work in GCP
 requests
-torch>=1.13.0,<2.1.0
-torchvision>=0.14.0,<0.16.0
+torch==2.7.1
+torchvision==0.22.1
 segmentation-models-pytorch
 google-cloud-storage
 google-cloud-pubsub

@@ -31,14 +31,6 @@ description_labels_dict = {
                     'oblique':['oblique']}
 }
 
-def make_grayscale( img ):
-    color = len(img.shape) > 2 # True if C > 1, False if Array is 2D or C = 1  
-    if color:
-        img_gray = cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
-    else:
-        img_gray = img
-    return img_gray, color
-
 def contains_substring(input_string, substring_list):
     # Convert to lowercase, remove all spaces, and replace $ with s
     input_string = str(input_string).lower().replace(' ', '').replace('$', 's')
@@ -207,23 +199,12 @@ def process_darkness(image, row):
     except KeyError:
         return None
 
-    # Convert to PIL Image for consistent resizing
-    pil_image = Image.fromarray(image)
-    new_size = (800, 600)
-    pil_image = pil_image.resize(new_size)
+    # Extract region directly from original image (most efficient)
+    img_us = image[region_y:region_y+region_h, region_x:region_x+region_w]
     
-    # Calculate scaled coordinates
-    scaled_x = int(region_x * new_size[0] / pil_image.size[0])
-    scaled_y = int(region_y * new_size[1] / pil_image.size[1])
-    scaled_w = int(region_w * new_size[0] / pil_image.size[0])
-    scaled_h = int(region_h * new_size[1] / pil_image.size[1])
-
-    # Convert back to numpy for darkness calculation
-    image_np = np.array(pil_image)
-    img_us = image_np[scaled_y:scaled_y+scaled_h, scaled_x:scaled_x+scaled_w]
-    img_us_gray, _ = make_grayscale(img_us)
-    _, img_us_bw = cv2.threshold(img_us_gray, 20, 255, cv2.THRESH_BINARY)
-    darkness = 100 * np.sum(img_us_bw == 0) / (scaled_w * scaled_h)
+    # Threshold and calculate darkness
+    _, img_us_bw = cv2.threshold(img_us, 20, 255, cv2.THRESH_BINARY)
+    darkness = 100 * np.sum(img_us_bw == 0) / (region_w * region_h)
     
     return darkness
 
@@ -262,7 +243,7 @@ def process_images_combined(image_folder_path, image_df):
         futures = {executor.submit(process_single_image_combined, row, image_folder_path): row 
                   for _, row in image_df.iterrows()}
         
-        with tqdm(total=len(futures), desc='Finding Crop Region / Darkness', miniters=50) as pbar:
+        with tqdm(total=len(futures), desc='Finding Crop Region / Darkness') as pbar:
             for future in as_completed(futures):
                 result = future.result()
                 if result is not None:
@@ -381,7 +362,7 @@ def analyze_images(database_path):
         append_audit("image_processing.extracted_darkness_measurements", len(darknesses))
 
         # Finding Calipers
-        caliper_results = find_calipers(image_folder_path, image_df)
+        caliper_results = find_calipers(image_folder_path, image_df, image_masks)
         caliper_count = sum(1 for _, bool_val, _ in caliper_results if bool_val)
         append_audit("image_processing.images_with_calipers", caliper_count)
 
