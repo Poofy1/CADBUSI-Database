@@ -95,7 +95,7 @@ def Crop_images(df, input_dir, output_dir):
             ): index for index, row in df.iterrows()
         }
         
-        with tqdm(total=len(futures)) as pbar:
+        with tqdm(total=len(futures), desc="Cropping US images") as pbar:
             for future in as_completed(futures):
                 result = future.result()
                 if result == "Success":
@@ -165,7 +165,7 @@ def Crop_Videos(df, input_dir, output_dir):
 
     with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
         futures = {executor.submit(process_single_video, row, video_folder_path, video_output): index for index, row in df.iterrows()}
-        with tqdm(total=len(futures)) as pbar:
+        with tqdm(total=len(futures), desc="Cropping US videos") as pbar:
             for future in as_completed(futures):
                 pbar.update()
                 try:
@@ -453,7 +453,29 @@ def apply_reject_system(image_df, instance_labels_csv_file, use_reject_system):
                 
                 
     return image_df
+
+
+def normalize_dataframes(image_df, video_df, breast_df):
+    """
+    Standardize data types and formats across all dataframes.
     
+    Returns:
+        tuple: (image_df, video_df, breast_df)
+    """
+    # Normalize laterality to uppercase (do once for each df)
+    image_df['laterality'] = image_df['laterality'].str.upper()
+    video_df['laterality'] = video_df['laterality'].str.upper()
+    
+    # Standardize patient_id as string
+    image_df['patient_id'] = image_df['patient_id'].astype(int).astype(str)
+    breast_df['patient_id'] = breast_df['patient_id'].astype(int).astype(str)
+    
+    # Standardize accession_number as string
+    image_df['accession_number'] = image_df['accession_number'].astype(str)
+    breast_df['accession_number'] = breast_df['accession_number'].astype(str)
+    
+    return image_df, video_df, breast_df
+
 def build_instance_data(image_df, breast_df):
     """
     Build and enrich instance_data with all necessary fields from image_df, breast_df, and labelbox.
@@ -487,27 +509,6 @@ def build_instance_data(image_df, breast_df):
         instance_data['image_h'] = instance_data['image_name'].map(image_to_height_map)
     
     return instance_data
-
-def normalize_dataframes(image_df, video_df, breast_df):
-    """
-    Standardize data types and formats across all dataframes.
-    
-    Returns:
-        tuple: (image_df, video_df, breast_df)
-    """
-    # Normalize laterality to uppercase (do once for each df)
-    image_df['laterality'] = image_df['laterality'].str.upper()
-    video_df['laterality'] = video_df['laterality'].str.upper()
-    
-    # Standardize patient_id as string
-    image_df['patient_id'] = image_df['patient_id'].astype(int).astype(str)
-    breast_df['patient_id'] = breast_df['patient_id'].astype(int).astype(str)
-    
-    # Standardize accession_number as string
-    image_df['accession_number'] = image_df['accession_number'].astype(str)
-    breast_df['accession_number'] = breast_df['accession_number'].astype(str)
-    
-    return image_df, video_df, breast_df
 
 
 def add_lesions_to_instance_data(instance_data, lesion_df, image_df, breast_df):
@@ -636,15 +637,9 @@ def Export_Database(CONFIG, limit = None, reparse_images = True):
     lesion_df = Mask_Lesions(database_dir, output_dir)
     print(f"Processed {len(lesion_df)} lesion images from {lesion_df['image_source'].nunique() if not lesion_df.empty else 0} source images")
 
-
-    image_df = image_df.copy()
-    if not lesion_df.empty:
-        image_df_with_lesions = pd.concat([image_df, lesion_df], ignore_index=True)
-    else:
-        image_df_with_lesions = image_df
     
-    instance_data = build_instance_data(image_df_with_lesions, breast_df)
-    instance_data = add_lesions_to_instance_data(instance_data, lesion_df, image_df_with_lesions, breast_df)
+    instance_data = build_instance_data(image_df, breast_df)
+    instance_data = add_lesions_to_instance_data(instance_data, lesion_df, image_df, breast_df)
 
     if reparse_images:   
         # Crop the images for the relevant studies
@@ -682,9 +677,7 @@ def Export_Database(CONFIG, limit = None, reparse_images = True):
         print("No video data found - video_paths set to empty lists")
 
     # Write the filtered dataframes to CSV files in the output directory
-    save_data(breast_df, os.path.join(output_dir, 'BreastData.csv'))
     save_data(video_df, os.path.join(output_dir, 'VideoData.csv'))
-    save_data(image_df, os.path.join(output_dir, 'ImageData.csv'))
     save_data(train_data, os.path.join(output_dir, 'TrainData.csv'))
     save_data(lesion_df, os.path.join(output_dir, 'LesionLink.csv'))
     if instance_data is not None:
