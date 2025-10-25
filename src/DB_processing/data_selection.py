@@ -138,10 +138,7 @@ def find_nearest_images(subset, image_folder_path):
     return result
 
 
-def process_nearest_given_ids(pid, db_out, image_folder_path):
-    # Filter by accession number first
-    subset = db_out[db_out['accession_number'] == pid]
-    
+def process_nearest_given_ids(pid, subset, image_folder_path):
     # EARLY EXIT:
     subset = subset[subset['photometric_interpretation'] != 'RGB']
     
@@ -305,7 +302,7 @@ def create_caliper_file(database_path, image_df, breast_df, max_workers=None):
     return caliper_df
 
 
-def Select_Data(database_path, only_labels):
+def Select_Data(database_path):
     with DatabaseManager() as db:
         image_folder_path = f"{database_path}/images/"
 
@@ -319,26 +316,37 @@ def Select_Data(database_path, only_labels):
         rows_after = len(db_out)
         append_audit("image_processing.missing_crop_removed", rows_before - rows_after)
 
-        if only_labels:
-            db_to_process = db_out
-            columns_to_update = ['image_name', 'label', 'crop_aspect_ratio']
-        else:
-            db_to_process = db_out
-            columns_to_update = ['image_name', 'label', 'crop_aspect_ratio', 'closest_fn', 'distance']
+        db_to_process = db_out
+        columns_to_update = ['image_name', 'label', 'crop_aspect_ratio', 'closest_fn', 'distance']
+        accession_ids = db_to_process['accession_number'].unique()
 
-            accession_ids = db_to_process['accession_number'].unique()
+        db_to_process['closest_fn'] = '' 
+        db_to_process['distance'] = 99999
 
-            db_to_process['closest_fn'] = '' 
-            db_to_process['distance'] = 99999
+        grouped_by_accession = db_to_process.groupby('accession_number')
+        all_results = []
+        
+        with ThreadPoolExecutor(max_workers=4) as executor, tqdm(total=len(accession_ids)) as progress:
+            futures = {
+                executor.submit(
+                    process_nearest_given_ids, 
+                    pid, 
+                    grouped_by_accession.get_group(pid),  # Pass pre-filtered subset
+                    image_folder_path
+                ): pid for pid in accession_ids
+            }
 
-            with ThreadPoolExecutor(max_workers=4) as executor, tqdm(total=len(accession_ids), desc='Finding Similar Images') as progress:
-                futures = {executor.submit(process_nearest_given_ids, pid, db_to_process, image_folder_path): pid for pid in accession_ids}
+            # Collect results instead of updating immediately
+            for future in as_completed(futures):
+                result = future.result()
+                if result is not None and not result.empty:
+                    all_results.append(result)  # Add to list
+                progress.update()
 
-                for future in as_completed(futures):
-                    result = future.result()
-                    if result is not None and not result.empty:
-                        db_to_process.update(result)
-                    progress.update()
+        # Update once after all processing is complete
+        if all_results:
+            updated_df = pd.concat(all_results, ignore_index=False)
+            db_to_process.update(updated_df)
 
         db_to_process = choose_images_to_label(db_to_process)
 
