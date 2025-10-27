@@ -32,6 +32,7 @@ class UltrasoundNegationParser:
         
         # Terminators that end negation scope
         self.terminators = [
+            r'\.',
             r'\bbut\b',
             r'\bhowever\b',
             r'\balthough\b',
@@ -43,18 +44,17 @@ class UltrasoundNegationParser:
         # Feature patterns
         self.feature_patterns = {
             'margin': [
-                (r'\bcircumscribed\b', 'circumscribed'),
+                (r'\bcircumscribed\b', 'circumscribed or not circumscribed'),
                 (r'\b(?:macro|macrolobulated)\b', 'macrolobulated'),
                 (r'\b(?:micro|microlobulated)\b', 'microlobulated'),
                 (r'\bindistinct\b', 'indistinct'),
                 (r'\bangular\b', 'angular'),
                 (r'\bspiculated\b', 'spiculated'),
-                (r'\birregular\s+margins?\b', 'irregular'),
             ],
             'shape': [
-                (r'\boval\b', 'oval'),
+                (r'\b(?:oval|ovoid)\b', 'oval'),
                 (r'\bround\b', 'round'),
-                (r'\birregular\s+(?:shape|mass|lesion)\b', 'irregular'),
+                (r'\birregular\b', 'irregular'),
             ],
             'orientation': [
                 (r'\bparallel\b', 'parallel'),
@@ -62,16 +62,16 @@ class UltrasoundNegationParser:
                 (r'\bantiparallel\b', 'not parallel'),
             ],
             'echo': [
-                (r'\banechoic\b', 'anechoic'),
-                (r'\bhypoechoic\b', 'hypoechoic'),
-                (r'\bisoechoic\b', 'isoechoic'),
-                (r'\bhyperechoic\b', 'hyperechoic'),
-                (r'\bcomplex\s+(?:echo|echogenicity)\b', 'complex'),
-                (r'\bheterogeneous\b', 'heterogeneous'),
+                (r'\banecho(?:ic|genicity)\b', 'anechoic'),
+                (r'\bhypoecho(?:ic|genicity)\b', 'hypoechoic'),
+                (r'\bisoecho(?:ic|genicity)\b', 'isoechoic'),
+                (r'\bhyperecho(?:ic|genicity)\b', 'hyperechoic'),
+                (r'\bcomplex\b', 'complex'),
+                (r'\bheterogene?ous\b', 'heterogeneous'),
             ],
             'posterior': [
-                (r'\b(?:posterior\s+)?enhancement\b', 'enhancement'),
-                (r'\b(?:posterior|acoustic)\s+shadowing\b', 'shadowing'),
+                (r'\benhancement\b', 'enhancement'),
+                (r'\bshadowing\b', 'shadowing'),
                 (r'\bno\s+posterior\s+(?:acoustic\s+)?features?\b', 'no posterior features'),
             ],
             'boundary': [
@@ -84,7 +84,7 @@ class UltrasoundNegationParser:
     def normalize_text(self, text):
         """
         Normalize the text by extracting only the ultrasound section if it exists
-        and if "MAMMO" appears before "ULTRASOUND:".
+        and if "MAMMO" appears before "ULTRASOUND".
         Returns the normalized text and normalization info for the audit.
         """
         if pd.isna(text):
@@ -102,8 +102,8 @@ class UltrasoundNegationParser:
         # Convert to uppercase temporarily for the section search
         text_upper = text.upper()
         
-        # Look for ULTRASOUND: section
-        ultrasound_match = re.search(r'ULTRASOUND\s*:', text_upper)
+        # Look for ULTRASOUND (no colon required)
+        ultrasound_match = re.search(r'\bULTRASOUND\b', text_upper)
         
         normalization_info = {
             'original_length': original_length,
@@ -118,41 +118,46 @@ class UltrasoundNegationParser:
         if ultrasound_match:
             normalization_info['ultrasound_section_found'] = True
             
-            # Check if "MAMMO" appears before "ULTRASOUND:"
-            section_before_ultrasound = text_upper[:ultrasound_match.start()]
-            mammo_match = re.search(r'\bMAMMO', section_before_ultrasound)
+            # Find all MAMMO matches
+            mammo_matches = list(re.finditer(r'\bMAMMO', text_upper))
             
-            if mammo_match:
-                normalization_info['mammo_found'] = True
-                normalization_info['mammo_position'] = mammo_match.start()
+            # Filter out MAMMO matches that are in "due for mammo" or "correlat" context
+            valid_mammo_found = False
+            for mammo_match in mammo_matches:
+                # Look back from mammo to last period (or start of text)
+                lookback_start = text_upper.rfind('.', 0, mammo_match.start())
+                if lookback_start == -1:
+                    lookback_start = 0
+                
+                lookback_text = text_upper[lookback_start:mammo_match.start()]
+                
+                # Check if "DUE" or "CORRELAT" appears between the period and MAMMO
+                if 'DUE' not in lookback_text and 'CORRELAT' not in lookback_text:
+                    # This is a valid MAMMO (not in "due for mammo" or "correlates with mammo" context)
+                    valid_mammo_found = True
+                    normalization_info['mammo_found'] = True
+                    normalization_info['mammo_position'] = mammo_match.start()
+                    break
+            
+            if valid_mammo_found:
                 should_extract_section = True
         
-        # Only extract the ULTRASOUND section if we found MAMMO before it
+        # Only extract the ULTRASOUND section if we found both MAMMO and ULTRASOUND
         if should_extract_section:
-            # Extract text after ULTRASOUND:
-            section_start = ultrasound_match.end()
-            
-            # Find the next section heading (if any)
-            next_section_match = re.search(r'\b[A-Z]{3,}(?:\s+[A-Z]+)*\s*:', text_upper[section_start:])
-            
-            if next_section_match:
-                # Extract only the ULTRASOUND section
-                section_end = section_start + next_section_match.start()
-                normalized_text = text[section_start:section_end].strip()
-            else:
-                # No next section, take all text after ULTRASOUND:
-                normalized_text = text[section_start:].strip()
+            # Extract text after first appearance of ULTRASOUND
+            section_start = ultrasound_match.start()
+            normalized_text = text[section_start:].strip()
             
             normalization_info['normalization_applied'] = True
             normalization_info['section_start_pos'] = section_start
             normalization_info['normalized_length'] = len(normalized_text)
         else:
-            # No ULTRASOUND: section found or no MAMMO before it, use the entire text
+            # No ULTRASOUND found or no valid MAMMO, use the entire text
             normalized_text = text
             normalization_info['normalized_length'] = original_length
         
         return normalized_text, normalization_info
-    
+        
     def is_in_axillary_context(self, text, match_start, match_end):
         """Check if match is related to axillary nodes"""
         window = 100
@@ -177,11 +182,15 @@ class UltrasoundNegationParser:
         lookahead_text = text_lower[match_end:min(len(text_lower), match_end + 150)]
         
         # Check for terminators in lookback (which end negation scope)
+        # Find the LAST (rightmost) terminator, not the first
+        last_terminator_pos = -1
         for terminator in self.terminators:
-            term_match = re.search(terminator, lookback_text)
-            if term_match:
-                # Only consider text after the terminator
-                lookback_text = lookback_text[term_match.end():]
+            for match in re.finditer(terminator, lookback_text):
+                last_terminator_pos = max(last_terminator_pos, match.end())
+        
+        if last_terminator_pos >= 0:
+            # Only consider text after the last terminator
+            lookback_text = lookback_text[last_terminator_pos:]
         
         # Check for PRE-negation patterns (before the match)
         for negation in self.pre_negation_patterns:
@@ -222,14 +231,14 @@ class UltrasoundNegationParser:
         
         text_lower = normalized_text.lower()
         decisions = []
-        feature_values = {f: [] for f in self.feature_patterns.keys()}
+        feature_values = {f: set() for f in self.feature_patterns.keys()}  # Changed to set()
         
         for feature_type, patterns in self.feature_patterns.items():
             for pattern, value_name in patterns:
                 for match in re.finditer(pattern, text_lower):
                     # Skip if in axillary node context
-                    if self.is_in_axillary_context(text_lower, match.start(), match.end()):
-                        continue
+                    #if self.is_in_axillary_context(text_lower, match.start(), match.end()):
+                    #    continue
                     
                     is_neg = self.is_negated(text_lower, match.start(), match.end())
                     
@@ -251,16 +260,16 @@ class UltrasoundNegationParser:
                     
                     # Only add to feature values if NOT negated
                     if not is_neg:
-                        feature_values[feature_type].append(value_name)
+                        feature_values[feature_type].add(value_name)  # Changed to add()
         
         # Sort decisions by position for readability
         decisions.sort(key=lambda x: x['position'])
         
-        # Convert feature lists to comma-separated strings (only if values exist)
+        # Convert feature sets to comma-separated strings (only if values exist)
         features = {}
         for feature_type, values in feature_values.items():
             if values:
-                features[feature_type] = ', '.join(values)
+                features[feature_type] = ', '.join(sorted(values))  # Sort for consistency
             else:
                 features[feature_type] = None
         
