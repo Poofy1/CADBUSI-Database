@@ -3,10 +3,46 @@ import pandas as pd
 import json
 import os
 
+
+"""
+Margin - circumscribed, macrolobulated, microlobulated, indistinct, angular, spiculated
+Shape - oval, round, Irregular
+Orientation - parallel, not parallel
+Echo pattern - anechoic, hypoechoic, isoechoic, hyperechoic, complex, heterogeneous
+Posterior Features - No posterior features, enhancement, shadowing, combined pattern
+Lesion Boundary - abrupt interface, echogenic halo, architectural distortion 
+(ignore multi lesion cases)
+"""
+
 class UltrasoundNegationParser:
     """Custom parser for ultrasound findings with radiology-specific negation"""
     
     def __init__(self):
+        # Margin priority: circumscribed is lowest priority (1), others are higher (2)
+        # If any higher priority margin exists, it overwrites circumscribed
+        self.margin_priority = {
+            'circumscribed': 1,
+            'macrolobulated': 2,
+            'microlobulated': 2,
+            'indistinct': 2,
+            'angular': 2,
+            'spiculated': 2,
+        }
+        
+        # Echo pattern priority and types
+        # Priority: complex (3) > heterogeneous (2) > basic patterns (1)
+        self.echo_priority = {
+            'anechoic': 1,
+            'hypoechoic': 1,
+            'isoechoic': 1,
+            'hyperechoic': 1,
+            'heterogeneous': 2,
+            'complex': 3,
+        }
+        
+        # Basic echo patterns that should be consolidated to heterogeneous if multiple found
+        self.basic_echo_patterns = {'anechoic', 'hypoechoic', 'isoechoic', 'hyperechoic'}
+        
         # Pre-negation patterns (appear BEFORE the concept)
         self.pre_negation_patterns = [
             r'\bno\b',
@@ -15,7 +51,7 @@ class UltrasoundNegationParser:
             r'\bdenies\b',
             r'\bnot\s+(?:seen|present|identified|appreciated|visible)\b',
             r'\bfree\s+of\b',
-            r'\blacks?\b',
+            r'\backs?\b',
             r'\bnegative\s+for\b',
             r'\bno\s+evidence\s+of\b',
             r'\bno\s+longer\s+(?:seen|visible|present|identified)\b',
@@ -44,12 +80,12 @@ class UltrasoundNegationParser:
         # Feature patterns
         self.feature_patterns = {
             'margin': [
-                (r'\bcircumscribed\b', 'circumscribed or not circumscribed'),
+                (r'\bcircumscribed\b', 'circumscribed'),
                 (r'\b(?:macro|macrolobulated)\b', 'macrolobulated'),
                 (r'\b(?:micro|microlobulated)\b', 'microlobulated'),
                 (r'\bindistinct\b', 'indistinct'),
                 (r'\bangular\b', 'angular'),
-                (r'\bspiculated\b', 'spiculated'),
+                (r'\bspiculat(?:ed|ion)\b', 'spiculated'),
             ],
             'shape': [
                 (r'\b(?:oval|ovoid)\b', 'oval'),
@@ -204,6 +240,54 @@ class UltrasoundNegationParser:
         
         return False
     
+    def apply_priority_rules(self, feature_type, feature_values):
+        """
+        Generic priority application for any feature type.
+        Uses priority dictionaries and feature-specific consolidation rules.
+        
+        Args:
+            feature_type: 'margin', 'echo', etc.
+            feature_values: set of feature values
+            
+        Returns:
+            Consolidated set of feature values after applying priority rules
+        """
+        if not feature_values or len(feature_values) <= 1:
+            return feature_values
+        
+        # Get the priority map for this feature type
+        priority_map = getattr(self, f'{feature_type}_priority', None)
+        if not priority_map:
+            return feature_values
+        
+        # Apply feature-specific rules
+        if feature_type == 'margin':
+            # Rule: Keep only highest priority items
+            # If low priority (circumscribed) + high priority exist, remove low priority
+            max_priority = max(priority_map.get(v, 0) for v in feature_values)
+            if max_priority > 1:
+                return {v for v in feature_values if priority_map.get(v, 0) == max_priority}
+            return feature_values
+        
+        elif feature_type == 'echo':
+            # Rule 1: Highest priority (complex) takes precedence over everything
+            if 'complex' in feature_values:
+                return {'complex'}
+            
+            # Rule 2: Mid priority (heterogeneous) takes precedence over basic patterns
+            if 'heterogeneous' in feature_values:
+                return {'heterogeneous'}
+            
+            # Rule 3: Multiple basic patterns consolidate to heterogeneous
+            basic_patterns = feature_values & self.basic_echo_patterns
+            if len(basic_patterns) >= 2:
+                return {'heterogeneous'}
+            
+            return feature_values
+        
+        # Default: return as-is for unknown feature types
+        return feature_values
+    
     def parse_findings(self, findings_text):
         """Parse findings text and return both feature values and JSON audit"""
         if pd.isna(findings_text):
@@ -261,6 +345,23 @@ class UltrasoundNegationParser:
                     # Only add to feature values if NOT negated
                     if not is_neg:
                         feature_values[feature_type].add(value_name)  # Changed to add()
+        
+        # Apply priority rules for margin and echo features
+        for feature_type in ['margin', 'echo']:
+            if feature_type in feature_values and feature_values[feature_type]:
+                original_values = feature_values[feature_type].copy()
+                feature_values[feature_type] = self.apply_priority_rules(feature_type, feature_values[feature_type])
+                
+                # Add audit info about priority application
+                if original_values != feature_values[feature_type]:
+                    decisions.append({
+                        'feature_type': feature_type,
+                        'value': 'PRIORITY_APPLIED',
+                        'negated': False,
+                        'position': -1,
+                        'match_text': f"Original: {original_values}, After priority: {feature_values[feature_type]}",
+                        'context': f'{feature_type.capitalize()} values consolidated based on priority rules'
+                    })
         
         # Sort decisions by position for readability
         decisions.sort(key=lambda x: x['position'])

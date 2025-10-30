@@ -309,6 +309,12 @@ def calculate_accuracy(labelbox_df, parsed_df):
         
         accuracy = matches / total if total > 0 else 0
         
+        # NEW METRIC: Accuracy only when true label exists (non-null)
+        labeled_only = comparison_df[comparison_df['labelbox'].notna()]
+        labeled_total = len(labeled_only)
+        labeled_matches = (labeled_only['labelbox'] == labeled_only['parser']).sum()
+        labeled_accuracy = labeled_matches / labeled_total if labeled_total > 0 else None
+        
         mismatch_mask = ~((comparison_df['labelbox'].isna() & comparison_df['parser'].isna()) | 
                          (comparison_df['labelbox'] == comparison_df['parser']))
         mismatches = comparison_df[mismatch_mask]
@@ -321,6 +327,9 @@ def calculate_accuracy(labelbox_df, parsed_df):
             'true_negatives': true_negatives,
             'false_positives': false_positives,
             'false_negatives': false_negatives,
+            'labeled_only_total': labeled_total,
+            'labeled_only_matches': labeled_matches,
+            'labeled_only_accuracy': labeled_accuracy,
             'mismatches': mismatches
         }
     
@@ -367,8 +376,8 @@ def print_accuracy_report(results):
     print("PARSER ACCURACY REPORT")
     print("="*80)
     
-    # Per-feature accuracy
-    print("\nPER-FEATURE ACCURACY:")
+    # Per-feature accuracy (traditional - includes null/null as matches)
+    print("\nPER-FEATURE ACCURACY (includes null/null as matches):")
     print("-" * 40)
     for feature, metrics in results['per_feature'].items():
         print(f"{feature:15s}: {metrics['accuracy']:.2%} ({metrics['matches']}/{metrics['total_comparisons']})")
@@ -380,6 +389,27 @@ def print_accuracy_report(results):
     
     print("-" * 40)
     print(f"{'OVERALL':15s}: {overall_feature_accuracy:.2%} ({total_matches}/{total_comparisons})")
+    
+    # NEW METRIC: Accuracy only when true label exists
+    print("\n" + "="*80)
+    print("PER-FEATURE ACCURACY (only when true label exists):")
+    print("-" * 40)
+    
+    total_labeled = 0
+    total_labeled_matches = 0
+    
+    for feature, metrics in results['per_feature'].items():
+        if metrics['labeled_only_accuracy'] is not None:
+            print(f"{feature:15s}: {metrics['labeled_only_accuracy']:.2%} ({metrics['labeled_only_matches']}/{metrics['labeled_only_total']})")
+            total_labeled += metrics['labeled_only_total']
+            total_labeled_matches += metrics['labeled_only_matches']
+        else:
+            print(f"{feature:15s}: N/A (no labels)")
+    
+    # Overall accuracy for labeled data
+    overall_labeled_accuracy = total_labeled_matches / total_labeled if total_labeled > 0 else 0
+    print("-" * 40)
+    print(f"{'OVERALL':15s}: {overall_labeled_accuracy:.2%} ({total_labeled_matches}/{total_labeled})")
     
     # Per-row accuracy
     print("\n" + "="*80)
