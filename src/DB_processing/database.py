@@ -77,6 +77,12 @@ class DatabaseManager:
                 ethnicity TEXT,
                 race TEXT,
                 zipcode TEXT,
+                margin TEXT,
+                shape TEXT,
+                orientation TEXT,
+                echo TEXT,
+                posterior TEXT,
+                boundary TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -378,7 +384,8 @@ class DatabaseManager:
             'radiology_review_dtm', 'death_date', 'density_desc', 
             'rad_pathology_txt', 'rad_impression', 'date',
             'bi_rads', 'biopsy', 'modality', 'age_at_event',
-            'ethnicity', 'race', 'zipcode'
+            'ethnicity', 'race', 'zipcode', 'margin', 'shape', 
+            'orientation', 'echo', 'posterior', 'boundary'
         ]
         
         string_columns = ['accession_number', 'patient_id']
