@@ -118,7 +118,7 @@ def main():
         # Step 4: Clean data
         print("Step 4/5: Cleaning image data...")
         #Find_Orientation(CONFIG) # Unnessesary and unreliable 
-        Select_Data(CONFIG["DATABASE_DIR"], only_labels=False)
+        Select_Data(CONFIG["DATABASE_DIR"])
         
         # Make inpainting optional
         if not args.skip_inpaint:
