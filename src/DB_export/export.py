@@ -19,6 +19,23 @@ from src.DB_export.audit_report import generate_audit_report
 # Paths
 labeled_data_dir = f'{env}/labeled_data_archive/'
 
+
+def combine_labels(row):
+    """Combine all present labels from margin, shape, orientation, echo, posterior, boundary columns into a single string"""
+    label_columns = ['margin', 'shape', 'orientation', 'echo', 'posterior', 'boundary']
+    labels = []
+    
+    for col in label_columns:
+        if col in row and pd.notna(row[col]) and str(row[col]).strip():
+            # Split by comma in case multiple labels in one column
+            values = str(row[col]).split(',')
+            for val in values:
+                val = val.strip()
+                if val:
+                    labels.append(val)
+    
+    return ','.join(labels) if labels else ''
+
 def process_single_image(row, image_folder_path, image_output, mask_folder_input, mask_folder_output):
     try:
         image_name = row['image_name']
@@ -238,9 +255,11 @@ def create_train_set(breast_data, image_data, lesion_df=None):
         if col + '_image_data' in data.columns:
             data.drop(col + '_image_data', axis=1, inplace=True)
     
+    # Add label columns to keep
     columns_to_keep = ['patient_id', 'accession_number', 'study_laterality', 
                        'has_malignant', 'has_benign', 'valid', 'age_at_event', 
-                       'image_name']
+                       'image_name', 'margin', 'shape', 'orientation', 'echo', 
+                       'posterior', 'boundary']
     
     data = data[columns_to_keep]
     
@@ -252,11 +271,24 @@ def create_train_set(breast_data, image_data, lesion_df=None):
         'has_benign': 'first',
         'valid': 'first',
         'age_at_event': 'first',
-        'image_name': lambda x: list(x)
+        'image_name': lambda x: list(x),
+        'margin': 'first',
+        'shape': 'first',
+        'orientation': 'first',
+        'echo': 'first',
+        'posterior': 'first',
+        'boundary': 'first'
     }
     
     data = data.reset_index(drop=True)
     data = data.groupby('accession_number').agg(agg_dict).reset_index()
+    
+    # Combine labels into description column
+    data['description'] = data.apply(combine_labels, axis=1)
+    
+    # Drop individual label columns after combining
+    data.drop(['margin', 'shape', 'orientation', 'echo', 'posterior', 'boundary'], 
+              axis=1, inplace=True)
     
     # Clean original images
     def clean_list(img_list):
