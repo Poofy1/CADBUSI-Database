@@ -252,12 +252,12 @@ def process_single_mask(args):
     Process a single image mask. This function will be called by each thread.
     
     Args:
-        args: Tuple containing (idx, row, image_dir, mask_dir, output_dir, debug_enabled, debug_dir)
+        args: Tuple containing (idx, row, image_dir, mask_dir, output_dir, masks_output_dir, debug_enabled, debug_dir)
     
     Returns:
         Dict containing results for this image processing
     """
-    idx, row, image_dir, mask_dir, output_dir, debug_enabled, debug_dir = args
+    idx, row, image_dir, mask_dir, output_dir, masks_output_dir, debug_enabled, debug_dir = args
     
     try:
         image_name = row['image_name']
@@ -315,39 +315,54 @@ def process_single_mask(args):
         image_dimensions = []
         lesions_created = 0
 
-        # If no caliper boxes, save the full masked image
-        if not caliper_boxes:
-            output_filename = f"{base_name}.png"
+
+        # Process each caliper box separately
+        for box_idx, caliper_box in enumerate(caliper_boxes):
+            # Crop the result with 40% expansion for this specific box
+            cropped_image, expanded_box = crop_to_caliper_box(result_image, caliper_box, expand_factor=1.4)
+            
+            # Get dimensions of the cropped image
+            crop_h, crop_w = cropped_image.shape
+            image_dimensions.append((crop_w, crop_h))
+            
+            # Generate output filename with index if multiple boxes
+            output_filename = f"{base_name}_{box_idx}.png"
+            created_lesion_files.append(output_filename)
             output_path = os.path.join(output_dir, output_filename).replace('//', '/')
 
-            result_pil = Image.fromarray(result_image, mode='L')
+            # Convert numpy array back to PIL for saving
+            result_pil = Image.fromarray(cropped_image, mode='L')  # 'L' for grayscale
             save_data(result_pil, output_path)
+            
             lesions_created += 1
-            created_lesion_files.append(output_filename)
             
-            # Get dimensions of the full image
-            img_h, img_w = result_image.shape
-            image_dimensions.append((img_w, img_h))
+        # Process each caliper box separately to get raw masks
+        for box_idx, caliper_box in enumerate(caliper_boxes):
+            # Crop the result with 40% expansion for this specific box
+            cropped_mask, expanded_box = crop_to_caliper_box(dilated_mask, caliper_box, expand_factor=1.4)
             
-        else:
-            # Process each caliper box separately
-            for box_idx, caliper_box in enumerate(caliper_boxes):
-                # Crop the result with 40% expansion for this specific box
-                cropped_image, expanded_box = crop_to_caliper_box(result_image, caliper_box, expand_factor=1.4)
-                
-                # Get dimensions of the cropped image
-                crop_h, crop_w = cropped_image.shape
-                image_dimensions.append((crop_w, crop_h))
-                
-                # Generate output filename with index if multiple boxes
-                output_filename = f"{base_name}_{box_idx}.png"
-                created_lesion_files.append(output_filename)
-                output_path = os.path.join(output_dir, output_filename).replace('//', '/')
+            # Uncrop: place the cropped mask back onto a black background
+            # This zeros out everything outside the crop region
+            uncropped_mask = np.zeros_like(dilated_mask)  # Create black background with original dimensions
+            new_x1, new_y1, new_x2, new_y2 = expanded_box
+            uncropped_mask[new_y1:new_y2, new_x1:new_x2] = cropped_mask
+            
+            # Apply the database crop region to further restrict the mask
+            crop_x = int(row.get('crop_x', 0))
+            crop_y = int(row.get('crop_y', 0))
+            crop_w = int(row.get('crop_w', img_width))
+            crop_h = int(row.get('crop_h', img_height))
 
-                # Convert numpy array back to PIL for saving
-                result_pil = Image.fromarray(cropped_image, mode='L')  # 'L' for grayscale
-                save_data(result_pil, output_path)
-                lesions_created += 1
+            # Create final mask with only the database crop region
+            final_mask = uncropped_mask[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
+            
+            # Generate output filename with index if multiple boxes
+            output_filename = f"{base_name}_{box_idx}.png"
+            masks_output_path = os.path.join(masks_output_dir, output_filename).replace('//', '/')
+
+            # Convert numpy array back to PIL for saving
+            result_pil = Image.fromarray(final_mask, mode='L')  # 'L' for grayscale
+            save_data(result_pil, masks_output_path)
         
         
         # Extract width and height strings
@@ -401,16 +416,10 @@ def Mask_Lesions(database_path, output_dir, max_workers=None, debug=False):
         # Load image data from database
         image_data = db.get_images_dataframe()
 
-        # Prepare column mapping
-        image_data = image_data.rename(columns={
-            'image_name': 'image_name',
-            'accession_number': 'accession_number',
-            'patient_id': 'patient_id'
-        })
-
         image_dir = f"{database_path}/images/"
         mask_dir = f"{database_path}/lesion_masks/"
         lesion_output_dir = f"{output_dir}/lesions/"
+        masks_output_dir = f"{output_dir}/masks/"
 
         # Create debug directory if debug is enabled
         debug_dir = None
@@ -422,10 +431,6 @@ def Mask_Lesions(database_path, output_dir, max_workers=None, debug=False):
         # Filter for rows where has_caliper_mask = True
         if 'has_caliper_mask' in image_data.columns:
             masked_images = image_data[image_data['has_caliper_mask'] == True]
-        else:
-            # Fallback: use images that have masks in the mask directory
-            print("Warning: 'has_caliper_mask' column not found, checking for mask files")
-            masked_images = image_data.copy()
 
         if len(masked_images) == 0:
             print("No images found with masks")
@@ -436,7 +441,7 @@ def Mask_Lesions(database_path, output_dir, max_workers=None, debug=False):
         # Prepare arguments for each worker
         worker_args = []
         for idx, row in masked_images.iterrows():
-            worker_args.append((idx, row, image_dir, mask_dir, lesion_output_dir, debug, debug_dir))
+            worker_args.append((idx, row, image_dir, mask_dir, lesion_output_dir, masks_output_dir, debug, debug_dir))
 
         # Initialize counters
         processed_count = 0
