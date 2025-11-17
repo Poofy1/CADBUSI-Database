@@ -55,35 +55,44 @@ def merge_labelbox_labels(instance_data, instance_labels_csv_file):
     return instance_data
 
 def apply_reject_system(image_df, instance_labels_csv_file, use_reject_system):
-    # Merge labelbox data if available
-    if file_exists(instance_labels_csv_file):
-        labelbox_instance_data = read_csv(instance_labels_csv_file)
+    """
+    Filter image_df based on 'Reject Image' column from labelbox data.
+    
+    Args:
+        image_df: DataFrame with image data
+        instance_labels_csv_file: Path to InstanceLabels.csv
+        use_reject_system: Boolean - if True, remove rejected images
+    
+    Returns:
+        Filtered image_df
+    """
+    # Only process if labelbox data exists
+    if not file_exists(instance_labels_csv_file):
+        return image_df
+    
+    # Read labelbox data
+    labelbox_data = read_csv(instance_labels_csv_file)
+    
+    # Rename DicomHash to dicom_hash for consistency
+    if 'DicomHash' in labelbox_data.columns:
+        labelbox_data = labelbox_data.rename(columns={'DicomHash': 'dicom_hash'})
+    
+    # Check if Reject Image column exists
+    if 'Reject Image' not in labelbox_data.columns:
+        return image_df
+    
+    # Handle reject system
+    if use_reject_system:
+        # Get rejected images
+        rejected_hashes = labelbox_data[labelbox_data['Reject Image'] == True]['dicom_hash']
         
-        instance_data = instance_data.merge(
-            labelbox_instance_data, 
-            on='dicom_hash', 
-            how='left',
-            suffixes=('', '_labelbox')
-        )
+        before_count = len(image_df)
+        # Filter out rejected images
+        image_df = image_df[~image_df['dicom_hash'].isin(rejected_hashes)]
         
-        if 'image_name_labelbox' in instance_data.columns:
-            instance_data.drop(columns=['image_name_labelbox'], inplace=True)
-        
-        instance_data = instance_data[instance_data['dicom_hash'].isin(image_df['dicom_hash'])]
-        
-        # Handle reject system
-        if 'Reject Image' in instance_data.columns:
-            if use_reject_system:
-                before_count = len(image_df)
-                rejected_images = instance_data[instance_data['Reject Image'] == True][['dicom_hash', 'image_name']]
-                instance_data = instance_data[instance_data['Reject Image'] != True]
-                image_df = image_df[~image_df['dicom_hash'].isin(rejected_images['dicom_hash'])]
-                
-                removed_count = before_count - len(image_df)
-                append_audit("export.labeled_reject_removed", removed_count)
-                instance_data.drop(columns=['Reject Image'], inplace=True)
-            else:
-                instance_data['Reject Image'] = instance_data['Reject Image'].fillna(False)
-                
-                
+        removed_count = before_count - len(image_df)
+        if removed_count > 0:
+            print(f"Removed {removed_count} rejected images from labelbox")
+        append_audit("export.labeled_reject_removed", removed_count)
+    
     return image_df

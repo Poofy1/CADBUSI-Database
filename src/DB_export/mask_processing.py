@@ -406,6 +406,8 @@ def Mask_Lesions(database_path, output_dir, filtered_image_df=None, max_workers=
 
     Args:
         database_path: Path to the database directory
+        output_dir: Output directory for processed lesions
+        filtered_image_df: DataFrame of pre-filtered images to process (optional)
         max_workers: Maximum number of worker threads (None = use all CPU cores)
         debug: Boolean flag to enable debug image saving
 
@@ -418,11 +420,20 @@ def Mask_Lesions(database_path, output_dir, filtered_image_df=None, max_workers=
         # Filter for rows where has_caliper_mask = True
         if 'has_caliper_mask' in image_data.columns:
             masked_images = image_data[image_data['has_caliper_mask'] == True]
+        else:
+            masked_images = image_data
         
         # Apply the filter from upstream processing
         if filtered_image_df is not None:
             valid_image_names = set(filtered_image_df['image_name'].unique())
             masked_images = masked_images[masked_images['image_name'].isin(valid_image_names)]
+            print(f"Filtered to {len(masked_images)} images based on upstream filters")
+
+        if len(masked_images) == 0:
+            print("No images found with masks")
+            return pd.DataFrame(columns=['image_source', 'image_name', 'accession_number', 'patient_id', 'crop_w', 'crop_h'])
+
+        print(f"Found {len(masked_images)} images to process")
 
         image_dir = f"{database_path}/images/"
         mask_dir = f"{database_path}/lesion_masks/"
@@ -435,16 +446,6 @@ def Mask_Lesions(database_path, output_dir, filtered_image_df=None, max_workers=
             debug_dir = f"{database_path}/debug/"
             os.makedirs(debug_dir, exist_ok=True)
             print(f"Debug mode enabled. Debug images will be saved to: {debug_dir}")
-
-        # Filter for rows where has_caliper_mask = True
-        if 'has_caliper_mask' in image_data.columns:
-            masked_images = image_data[image_data['has_caliper_mask'] == True]
-
-        if len(masked_images) == 0:
-            print("No images found with masks")
-            return pd.DataFrame(columns=['image_source', 'image_name', 'accession_number', 'patient_id', 'crop_w', 'crop_h'])
-
-        print(f"Found {len(masked_images)} images to process")
 
         # Prepare arguments for each worker
         worker_args = []
