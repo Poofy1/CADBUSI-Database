@@ -14,6 +14,7 @@ from src.DB_processing.tools import append_audit
 from src.DB_processing.database import DatabaseManager
 from src.DB_export.mask_processing import Mask_Lesions
 from src.DB_export.audit_report import generate_audit_report
+from src.DB_export.instance_data import *
 
 
 # Paths
@@ -452,39 +453,7 @@ def apply_filters(image_df, video_df, breast_df, CONFIG):
     return image_df, video_df, breast_df
 
 
-def apply_reject_system(image_df, instance_labels_csv_file, use_reject_system):
-    # Merge labelbox data if available
-    if file_exists(instance_labels_csv_file):
-        labelbox_instance_data = read_csv(instance_labels_csv_file)
-        
-        instance_data = instance_data.merge(
-            labelbox_instance_data, 
-            on='dicom_hash', 
-            how='left',
-            suffixes=('', '_labelbox')
-        )
-        
-        if 'image_name_labelbox' in instance_data.columns:
-            instance_data.drop(columns=['image_name_labelbox'], inplace=True)
-        
-        instance_data = instance_data[instance_data['dicom_hash'].isin(image_df['dicom_hash'])]
-        
-        # Handle reject system
-        if 'Reject Image' in instance_data.columns:
-            if use_reject_system:
-                before_count = len(image_df)
-                rejected_images = instance_data[instance_data['Reject Image'] == True][['dicom_hash', 'image_name']]
-                instance_data = instance_data[instance_data['Reject Image'] != True]
-                image_df = image_df[~image_df['dicom_hash'].isin(rejected_images['dicom_hash'])]
-                
-                removed_count = before_count - len(image_df)
-                append_audit("export.labeled_reject_removed", removed_count)
-                instance_data.drop(columns=['Reject Image'], inplace=True)
-            else:
-                instance_data['Reject Image'] = instance_data['Reject Image'].fillna(False)
-                
-                
-    return image_df
+
 
 
 def normalize_dataframes(image_df, video_df, breast_df):
@@ -666,11 +635,12 @@ def Export_Database(CONFIG, limit = None, reparse_images = True):
     image_df = apply_reject_system(image_df, instance_labels_csv_file, use_reject_system)
     
     # Process lesion masks and get lesion data from database
-    lesion_df = Mask_Lesions(database_dir, output_dir)
+    lesion_df = Mask_Lesions(database_dir, output_dir, filtered_image_df=image_df) # Set filtered_image_df to None to avoid filtering
     print(f"Processed {len(lesion_df)} lesion images from {lesion_df['image_source'].nunique() if not lesion_df.empty else 0} source images")
 
     
     instance_data = build_instance_data(image_df, breast_df)
+    instance_data = merge_labelbox_labels(instance_data, instance_labels_csv_file)
     instance_data = add_lesions_to_instance_data(instance_data, lesion_df, image_df, breast_df)
 
     if reparse_images:   

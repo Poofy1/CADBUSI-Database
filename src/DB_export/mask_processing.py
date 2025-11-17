@@ -400,7 +400,7 @@ def process_single_mask(args):
             'lesions_created': 0
         }
 
-def Mask_Lesions(database_path, output_dir, max_workers=None, debug=False):
+def Mask_Lesions(database_path, output_dir, filtered_image_df=None, max_workers=None, debug=False):
     """
     Multithreaded version of Mask_Lesions that creates lesion records.
 
@@ -413,8 +413,16 @@ def Mask_Lesions(database_path, output_dir, max_workers=None, debug=False):
         pd.DataFrame: DataFrame with lesion information matching database schema
     """
     with DatabaseManager() as db:
-        # Load image data from database
         image_data = db.get_images_dataframe()
+        
+        # Filter for rows where has_caliper_mask = True
+        if 'has_caliper_mask' in image_data.columns:
+            masked_images = image_data[image_data['has_caliper_mask'] == True]
+        
+        # Apply the filter from upstream processing
+        if filtered_image_df is not None:
+            valid_image_names = set(filtered_image_df['image_name'].unique())
+            masked_images = masked_images[masked_images['image_name'].isin(valid_image_names)]
 
         image_dir = f"{database_path}/images/"
         mask_dir = f"{database_path}/lesion_masks/"
