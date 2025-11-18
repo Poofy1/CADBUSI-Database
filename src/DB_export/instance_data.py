@@ -10,7 +10,7 @@ def merge_labelbox_labels(instance_data, instance_labels_csv_file):
         instance_labels_csv_file: Path to InstanceLabels.csv
     
     Returns:
-        instance_data with labelbox columns added
+        instance_data with labelbox columns added (NaN for unmatched rows)
     """
     if not file_exists(instance_labels_csv_file):
         print("InstanceLabels.csv not found - skipping labelbox label merge")
@@ -43,14 +43,10 @@ def merge_labelbox_labels(instance_data, instance_labels_csv_file):
         how='left'
     )
     
-    # Fill NaN values with False for boolean columns
-    bool_columns = ['Only Normal Tissue', 'Cyst Lesion Present', 
-                    'Benign Lesion Present', 'Malignant Lesion Present']
-    for col in bool_columns:
-        if col in instance_data.columns:
-            instance_data[col] = instance_data[col].fillna(False)
-    
-    print(f"Merged labelbox labels for {instance_data[available_columns[1:]].notna().any(axis=1).sum()} images")
+    # Count how many images actually matched
+    matched_count = instance_data[available_columns[1:]].notna().any(axis=1).sum()
+    total_count = len(instance_data)
+    print(f"Merged labelbox labels for {matched_count}/{total_count} images ({total_count - matched_count} unmatched)")
     
     return instance_data
 
