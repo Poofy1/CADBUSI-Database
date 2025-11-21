@@ -508,15 +508,16 @@ def Mask_Lesions(database_path, output_dir, filtered_image_df=None, max_workers=
                 source_image_name = original_row['image_name']
                 patient_id = original_row['patient_id']
                 accession_number = original_row['accession_number']
-                
+                laterality = original_row.get('laterality', None)
+
                 # Parse lesion images (comma-separated)
                 lesion_images_str = result['lesion_images']
                 lesion_images = [img.strip() for img in lesion_images_str.split(',') if img.strip()]
-                
+
                 # Parse dimensions
                 image_w_str = result['image_w']
                 image_h_str = result['image_h']
-                
+
                 if '; ' in image_w_str:
                     # Multiple dimensions
                     widths = [int(w.strip()) for w in image_w_str.split(';')]
@@ -525,17 +526,18 @@ def Mask_Lesions(database_path, output_dir, filtered_image_df=None, max_workers=
                     # Single dimension
                     widths = [int(image_w_str)] if image_w_str else [0]
                     heights = [int(image_h_str)] if image_h_str else [0]
-                
+
                 # Create a record for each lesion image
                 for i, lesion_img in enumerate(lesion_images):
                     crop_w = widths[i] if i < len(widths) else 0
                     crop_h = heights[i] if i < len(heights) else 0
-                    
+
                     lesion_records.append({
                         'image_source': source_image_name,
                         'image_name': lesion_img,
                         'accession_number': accession_number,
                         'patient_id': patient_id,
+                        'laterality': laterality,
                         'crop_w': crop_w,
                         'crop_h': crop_h
                     })

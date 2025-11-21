@@ -59,7 +59,8 @@ class DatabaseManager:
                 has_benign INTEGER DEFAULT 0,
                 is_biopsy INTEGER DEFAULT 0,
                 is_us_biopsy INTEGER DEFAULT 0,
-                final_interpretation TEXT,
+                left_diagnosis TEXT,
+                right_diagnosis TEXT,
                 findings TEXT,
                 synoptic_report TEXT,
                 description TEXT,
@@ -378,13 +379,13 @@ class DatabaseManager:
         """Insert multiple study cases in a single transaction."""
         all_columns = [
             'accession_number', 'patient_id', 'study_laterality',
-            'birth_date', 'test_description', 'has_malignant', 'has_benign', 
-            'is_biopsy', 'is_us_biopsy', 'final_interpretation', 'findings', 
-            'synoptic_report', 'description', 'us_core_birthsex', 
-            'radiology_review_dtm', 'death_date', 'density_desc', 
+            'birth_date', 'test_description', 'has_malignant', 'has_benign',
+            'is_biopsy', 'is_us_biopsy', 'left_diagnosis', 'right_diagnosis', 'findings',
+            'synoptic_report', 'description', 'us_core_birthsex',
+            'radiology_review_dtm', 'death_date', 'density_desc',
             'rad_pathology_txt', 'rad_impression', 'date',
             'bi_rads', 'biopsy', 'modality', 'age_at_event',
-            'ethnicity', 'race', 'zipcode', 'margin', 'shape', 
+            'ethnicity', 'race', 'zipcode', 'margin', 'shape',
             'orientation', 'echo', 'posterior', 'boundary'
         ]
         

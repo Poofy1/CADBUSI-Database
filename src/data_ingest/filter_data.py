@@ -444,10 +444,11 @@ def create_final_dataset(rad_df, path_df, output_path):
     
     # Count total interpretations
     audit_interpretations(final_df_us)
-    
-    # Remove rows with empty final_interpretation
-    empty_interpretation_count = sum(final_df_us['final_interpretation'].isna())
-    final_df_us = final_df_us[final_df_us['final_interpretation'].notna()]
+
+    # Remove rows where both left_diagnosis and right_diagnosis are empty
+    both_empty = final_df_us['left_diagnosis'].isna() & final_df_us['right_diagnosis'].isna()
+    empty_interpretation_count = sum(both_empty)
+    final_df_us = final_df_us[~both_empty]
     append_audit("query_clean.rad_missing_final_interp", empty_interpretation_count)
     
 

@@ -607,9 +607,16 @@ def parse_anon_file(anon_location, image_df):
     percentage_without_images = (non_matching_breast_accessions / total_breast_accessions) * 100 if total_breast_accessions > 0 else 0
     print(f"{percentage_without_images:.1f}% of breast accessions did not have images")
 
-    # Populate has_malignant and has_benign based on final_interpretation
-    breast_csv['has_malignant'] = breast_csv['final_interpretation'] == 'MALIGNANT'
-    breast_csv['has_benign'] = breast_csv['final_interpretation'] == 'BENIGN'
+    # Populate has_malignant and has_benign based on left_diagnosis and right_diagnosis
+    # Check if either column contains MALIGNANT or BENIGN diagnosis
+    breast_csv['has_malignant'] = (
+        breast_csv['left_diagnosis'].str.contains('MALIGNANT', na=False) |
+        breast_csv['right_diagnosis'].str.contains('MALIGNANT', na=False)
+    )
+    breast_csv['has_benign'] = (
+        breast_csv['left_diagnosis'].str.contains('BENIGN', na=False) |
+        breast_csv['right_diagnosis'].str.contains('BENIGN', na=False)
+    )
 
     # Use DatabaseManager to save to SQLite
     with DatabaseManager() as db:

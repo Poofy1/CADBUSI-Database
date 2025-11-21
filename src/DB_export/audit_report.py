@@ -87,10 +87,15 @@ def calculate_split_diagnosis_stats(breast_df):
     
     for split_num in [0, 1, 2]:
         split_data = breast_df[breast_df['valid'] == split_num]
-        
+
         for laterality in ['RIGHT', 'LEFT']:
             for diagnosis in ['MALIGNANT', 'BENIGN']:
-                condition = split_data['final_interpretation'].isin([diagnosis])
+                # Check the appropriate diagnosis column based on laterality
+                if laterality == 'LEFT':
+                    condition = split_data['left_diagnosis'].str.contains(diagnosis, na=False)
+                else:  # RIGHT
+                    condition = split_data['right_diagnosis'].str.contains(diagnosis, na=False)
+
                 key = f"{laterality.lower()}_{diagnosis.lower()}"
                 breast_counts[key][split_num] = len(
                     split_data[(split_data['study_laterality'] == laterality) & condition]

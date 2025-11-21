@@ -246,30 +246,35 @@ def PerformSplit(CONFIG, df):
     return df
 
 def create_train_set(breast_data, image_data, lesion_df=None):
-    # Join breast_data and image_data
-    data = pd.merge(breast_data, image_data, 
-                    on=['accession_number'], 
+    # Join breast_data and image_data on BOTH accession_number and laterality
+    # This ensures split bilateral cases only get their respective images
+    data = pd.merge(breast_data, image_data,
+                    left_on=['accession_number', 'study_laterality'],
+                    right_on=['accession_number', 'laterality'],
                     suffixes=('', '_image_data'))
 
     # Remove duplicate columns
     for col in breast_data.columns:
         if col + '_image_data' in data.columns:
             data.drop(col + '_image_data', axis=1, inplace=True)
-    
+
+    # Drop the redundant laterality column from image_data
+    if 'laterality' in data.columns:
+        data.drop('laterality', axis=1, inplace=True)
+
     # Add label columns to keep
-    columns_to_keep = ['patient_id', 'accession_number', 'study_laterality', 
-                       'has_malignant', 'has_benign', 'valid', 'age_at_event', 
-                       'image_name', 'margin', 'shape', 'orientation', 'echo', 
+    columns_to_keep = ['patient_id', 'accession_number', 'study_laterality',
+                       'has_malignant', 'valid', 'age_at_event',
+                       'image_name', 'margin', 'shape', 'orientation', 'echo',
                        'posterior', 'boundary']
-    
+
     data = data[columns_to_keep]
-    
+
     # Aggregation dictionary
+    # Note: accession_number and study_laterality are groupby keys, so don't include them here
     agg_dict = {
         'patient_id': 'first',
-        'study_laterality': 'first',
-        'has_malignant': 'first', 
-        'has_benign': 'first',
+        'has_malignant': 'first',
         'valid': 'first',
         'age_at_event': 'first',
         'image_name': lambda x: list(x),
@@ -280,9 +285,10 @@ def create_train_set(breast_data, image_data, lesion_df=None):
         'posterior': 'first',
         'boundary': 'first'
     }
-    
+
     data = data.reset_index(drop=True)
-    data = data.groupby('accession_number').agg(agg_dict).reset_index()
+    # Group by BOTH accession_number and study_laterality to keep split bilateral cases separate
+    data = data.groupby(['accession_number', 'study_laterality'], as_index=False).agg(agg_dict)
     
     # Combine labels into description column
     data['description'] = data.apply(combine_labels, axis=1)
@@ -302,17 +308,43 @@ def create_train_set(breast_data, image_data, lesion_df=None):
     
     # Add lesion images if lesion_df is provided
     if lesion_df is not None and not lesion_df.empty and 'image_name' in lesion_df.columns:
-        # Group lesions by accession_number
-        lesion_grouped = lesion_df.groupby('accession_number')['image_name'].apply(list).reset_index()
-        lesion_grouped.columns = ['accession_number', 'lesion_images']
-        
-        # Merge lesion data with main data
-        data = data.merge(lesion_grouped, on='accession_number', how='left')
-        
+        # Check if laterality column exists in lesion_df
+        if 'laterality' in lesion_df.columns:
+            # Handle missing laterality values - drop them as they can't be matched
+            lesion_df_with_lat = lesion_df[lesion_df['laterality'].notna()].copy()
+            lesion_df_with_lat['laterality'] = lesion_df_with_lat['laterality'].str.upper()
+
+            if not lesion_df_with_lat.empty:
+                # Group lesions by BOTH accession_number and laterality for split bilateral cases
+                lesion_grouped = lesion_df_with_lat.groupby(['accession_number', 'laterality'])['image_name'].apply(list).reset_index()
+                lesion_grouped.columns = ['accession_number', 'laterality', 'lesion_images']
+
+                # Merge lesion data with main data on both accession_number and laterality
+                data = data.merge(lesion_grouped,
+                                left_on=['accession_number', 'study_laterality'],
+                                right_on=['accession_number', 'laterality'],
+                                how='left')
+
+                # Drop redundant laterality column
+                if 'laterality' in data.columns:
+                    data.drop('laterality', axis=1, inplace=True)
+            else:
+                print("Warning: No lesions with valid laterality found")
+                data['lesion_images'] = [[] for _ in range(len(data))]
+        else:
+            # Fallback to old behavior if laterality not present
+            print("Warning: laterality column not found in lesion_df, using old grouping")
+            lesion_grouped = lesion_df.groupby('accession_number')['image_name'].apply(list).reset_index()
+            lesion_grouped.columns = ['accession_number', 'lesion_images']
+            data = data.merge(lesion_grouped, on='accession_number', how='left')
+
         # Clean lesion images list - handle NaN values properly
-        data['lesion_images'] = data['lesion_images'].apply(
-            lambda x: clean_list(x) if isinstance(x, list) else []
-        )
+        if 'lesion_images' in data.columns:
+            data['lesion_images'] = data['lesion_images'].apply(
+                lambda x: clean_list(x) if isinstance(x, list) else []
+            )
+        else:
+            data['lesion_images'] = [[] for _ in range(len(data))]
     else:
         # No lesion data available
         data['lesion_images'] = [[] for _ in range(len(data))]
@@ -397,25 +429,139 @@ def map_breast_data_to_instances(instance_data, image_df, breast_df, column_mapp
     
     return instance_data
         
+def determine_has_malignant(row, laterality):
+    """
+    Determine if a breast has malignancy based on diagnosis columns and laterality.
+
+    Args:
+        row: DataFrame row with left_diagnosis and right_diagnosis columns
+        laterality: 'LEFT' or 'RIGHT'
+
+    Returns:
+        1 if malignant, 0 otherwise
+    """
+    if laterality == 'LEFT':
+        diagnosis = row.get('left_diagnosis', '')
+    elif laterality == 'RIGHT':
+        diagnosis = row.get('right_diagnosis', '')
+    else:
+        return 0
+
+    # Check if diagnosis contains MALIGNANT
+    if pd.notna(diagnosis) and 'MALIGNANT' in str(diagnosis).upper():
+        return 1
+    return 0
+
+
+def split_bilateral_cases(breast_df, image_df):
+    """
+    Split bilateral cases into separate LEFT and RIGHT breast rows based on available images.
+    Only splits if images exist for both lateralities. Otherwise converts to single-sided.
+    Excludes bilateral cases that have any images with unknown/null laterality.
+
+    Returns:
+        Updated breast_df with bilateral cases split or converted
+    """
+    bilateral_df = breast_df[breast_df['study_laterality'] == 'BILATERAL'].copy()
+    non_bilateral_df = breast_df[breast_df['study_laterality'] != 'BILATERAL'].copy()
+
+    if bilateral_df.empty:
+        return breast_df
+
+    split_rows = []
+    converted_rows = []
+    removed_count = 0
+    removed_unknown_laterality = 0
+
+    for _, row in bilateral_df.iterrows():
+        accession = row['accession_number']
+
+        # Check which lateralities have images
+        case_images = image_df[image_df['accession_number'] == accession]
+
+        # Check for unknown/null laterality images (NaN, empty string, or 'UNKNOWN')
+        has_unknown = (
+            case_images['laterality'].isna().any() or
+            (case_images['laterality'] == '').any() or
+            (case_images['laterality'].str.upper() == 'UNKNOWN').any()
+        )
+
+        if has_unknown:
+            # Exclude bilateral cases with unknown laterality images
+            removed_unknown_laterality += 1
+            continue
+
+        has_left = (case_images['laterality'] == 'LEFT').any()
+        has_right = (case_images['laterality'] == 'RIGHT').any()
+
+        if has_left and has_right:
+            # Split into two rows
+            left_row = row.copy()
+            left_row['study_laterality'] = 'LEFT'
+            left_row['has_malignant'] = determine_has_malignant(row, 'LEFT')
+
+            right_row = row.copy()
+            right_row['study_laterality'] = 'RIGHT'
+            right_row['has_malignant'] = determine_has_malignant(row, 'RIGHT')
+
+            split_rows.extend([left_row, right_row])
+        elif has_left:
+            # Convert to LEFT only
+            converted_row = row.copy()
+            converted_row['study_laterality'] = 'LEFT'
+            converted_row['has_malignant'] = determine_has_malignant(row, 'LEFT')
+            converted_rows.append(converted_row)
+        elif has_right:
+            # Convert to RIGHT only
+            converted_row = row.copy()
+            converted_row['study_laterality'] = 'RIGHT'
+            converted_row['has_malignant'] = determine_has_malignant(row, 'RIGHT')
+            converted_rows.append(converted_row)
+        else:
+            # No images for either side, remove this case
+            removed_count += 1
+
+    # Combine all dataframes
+    result_dfs = [non_bilateral_df]
+    if split_rows:
+        result_dfs.append(pd.DataFrame(split_rows))
+    if converted_rows:
+        result_dfs.append(pd.DataFrame(converted_rows))
+
+    result_df = pd.concat(result_dfs, ignore_index=True)
+
+    print(f"Bilateral processing: {len(split_rows)//2} split into L+R, {len(converted_rows)} converted to single-sided, {removed_count} removed (no images), {removed_unknown_laterality} removed (unknown laterality)")
+    append_audit("export.bilateral_split", len(split_rows)//2)
+    append_audit("export.bilateral_converted", len(converted_rows))
+    append_audit("export.bilateral_removed_no_images", removed_count)
+    append_audit("export.bilateral_removed_unknown_laterality", removed_unknown_laterality)
+
+    return result_df
+
+
 def apply_filters(image_df, video_df, breast_df, CONFIG):
     """
     Apply all quality and relevance filters to the image and video data.
-    
+
     Returns:
         tuple: (filtered_image_df, filtered_video_df, filtered_breast_df, audit_stats)
     """
     audit_stats = {}
-    
+
     # Track initial counts
     audit_stats['init_images'] = len(image_df)
     audit_stats['init_videos'] = len(video_df)
     audit_stats['init_breasts'] = len(breast_df)
-    
-    # Remove bilateral cases
-    before_bilateral_count = len(breast_df)
-    breast_df = breast_df[breast_df['study_laterality'] != 'BILATERAL']
-    audit_stats['bilateral_removed'] = before_bilateral_count - len(breast_df)
-    
+
+    # Split or convert bilateral cases based on available images
+    breast_df = split_bilateral_cases(breast_df, image_df)
+
+    # Update has_malignant for all cases based on diagnosis columns
+    # (bilateral cases already have this set by split_bilateral_cases)
+    for idx, row in breast_df.iterrows():
+        if row['study_laterality'] in ['LEFT', 'RIGHT']:
+            breast_df.at[idx, 'has_malignant'] = determine_has_malignant(row, row['study_laterality'])
+
     # Only labeled images
     image_df = image_df[image_df['label'] == True]
     image_df = image_df.drop(['label', 'area'], axis=1)

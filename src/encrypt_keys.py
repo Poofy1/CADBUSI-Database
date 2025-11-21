@@ -211,10 +211,15 @@ def encrypt_ids(input_file=None, output_file_local=None, key_output=None):
             except ValueError:
                 pass
         
-        # Find index of final_interpretation column
-        final_interp_index = -1
+        # Find indices of diagnosis columns
+        left_diagnosis_index = -1
+        right_diagnosis_index = -1
         try:
-            final_interp_index = header.index("final_interpretation")
+            left_diagnosis_index = header.index("left_diagnosis")
+        except ValueError:
+            pass
+        try:
+            right_diagnosis_index = header.index("right_diagnosis")
         except ValueError:
             pass
         
@@ -255,8 +260,8 @@ def encrypt_ids(input_file=None, output_file_local=None, key_output=None):
                     # Anonymize date columns
                     anonymized_date = anonymize_date(value)
                     encrypted_row.append(anonymized_date)
-                elif i == final_interp_index:
-                    # Simplify final_interpretation by removing the number at the end
+                elif i == left_diagnosis_index or i == right_diagnosis_index:
+                    # Simplify diagnosis by removing the number at the end
                     # Matches patterns like "BENIGN2", "MALIGNANT3" etc.
                     simplified_value = re.sub(r'([A-Z]+)\d+', r'\1', value)
                     encrypted_row.append(simplified_value)

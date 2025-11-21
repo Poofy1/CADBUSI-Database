@@ -5,6 +5,34 @@ import concurrent.futures
 from src.DB_processing.tools import append_audit
 
 
+def get_diagnosis_column(study_laterality, pathology_laterality=None):
+    """
+    Determine which diagnosis column(s) to populate based on laterality.
+
+    Args:
+        study_laterality: The Study_Laterality from the US record
+        pathology_laterality: The Pathology_Laterality (optional, for bilateral cases)
+
+    Returns:
+        A list of column names to populate: ['left_diagnosis'], ['right_diagnosis'], or both
+    """
+    if study_laterality == 'LEFT':
+        return ['left_diagnosis']
+    elif study_laterality == 'RIGHT':
+        return ['right_diagnosis']
+    elif study_laterality == 'BILATERAL':
+        # For bilateral studies, use pathology laterality if available
+        # Pathology_Laterality is always LEFT or RIGHT (never BILATERAL)
+        if pathology_laterality == 'LEFT':
+            return ['left_diagnosis']
+        elif pathology_laterality == 'RIGHT':
+            return ['right_diagnosis']
+        else:
+            # If no pathology laterality specified, populate both
+            return ['left_diagnosis', 'right_diagnosis']
+    return []
+
+
 def check_assumed_benign(final_df):
     """
     Check for benign cases based on 18-month follow-up.
@@ -95,12 +123,14 @@ def check_assumed_benign(final_df):
                     continue
             
             # If all checks pass, mark for update
-            updates[idx] = 'BENIGN1'
-    
+            updates[idx] = ('BENIGN1', row.get('Study_Laterality'))
+
     # Apply all updates at once
-    for idx, value in updates.items():
-        final_df.at[idx, 'final_interpretation'] = value
-    
+    for idx, (value, laterality) in updates.items():
+        diagnosis_cols = get_diagnosis_column(laterality)
+        for col in diagnosis_cols:
+            final_df.at[idx, col] = value
+
     return final_df
 
 def check_assumed_benign_birads3(final_df):
@@ -218,12 +248,14 @@ def check_assumed_benign_birads3(final_df):
                     continue
 
             # If all checks pass, mark for update
-            updates[idx] = 'BENIGN3'
-    
+            updates[idx] = ('BENIGN3', row.get('Study_Laterality'))
+
     # Apply all updates at once
-    for idx, value in updates.items():
-        final_df.at[idx, 'final_interpretation'] = value
-    
+    for idx, (value, laterality) in updates.items():
+        diagnosis_cols = get_diagnosis_column(laterality)
+        for col in diagnosis_cols:
+            final_df.at[idx, col] = value
+
     return final_df
 
 def check_malignant_from_biopsy(final_df):
@@ -259,45 +291,53 @@ def check_malignant_from_biopsy(final_df):
             
             for idx in us_birads6_rows:
                 row = final_df.loc[idx]
-                if pd.isna(row['final_interpretation']) or row['final_interpretation'] == '':
-                    updates[idx] = 'MALIGNANT1'
-    
+                # Check if both diagnosis columns are empty
+                left_empty = pd.isna(row.get('left_diagnosis')) or row.get('left_diagnosis') == ''
+                right_empty = pd.isna(row.get('right_diagnosis')) or row.get('right_diagnosis') == ''
+                if left_empty and right_empty:
+                    updates[idx] = ('MALIGNANT1', row.get('Study_Laterality'))
+
     # Apply all updates at once
-    for idx, value in updates.items():
-        final_df.at[idx, 'final_interpretation'] = value
-    
+    for idx, (value, laterality) in updates.items():
+        diagnosis_cols = get_diagnosis_column(laterality)
+        for col in diagnosis_cols:
+            final_df.at[idx, col] = value
+
     return final_df
 
 
 def check_from_next_diagnosis(final_df, days=240):
     """
-    For 'US' rows with empty final_interpretation:
+    For 'US' rows with empty diagnosis columns:
     - For MALIGNANT cases: Apply only to BI-RADS '4', '4A', '4B', '4C', '5', or '6'
-      Set final_interpretation to 'MALIGNANT2' only if:
+      Set diagnosis to 'MALIGNANT2' only if:
       1. The laterality matches between the US study and the pathology
       2. At least one record in the date range has 'is_us_biopsy' = 'T'
-    
+
     - For BENIGN cases: Apply only to BI-RADS '1', '2', '3', '4', '4A', '4B'
-      Set final_interpretation to 'BENIGN2' if:
+      Set diagnosis to 'BENIGN2' if:
       1. The laterality matches between the US study and the pathology
-    
-    Special case: If Study_Laterality is 'BILATERAL', consider any future laterality,
-    and if any MALIGNANT is present within the time frame, set to 'MALIGNANT2'
-    (still requiring at least one 'is_us_biopsy' = 'T').
+
+    Special case: If Study_Laterality is 'BILATERAL', look at Pathology_Laterality
+    to determine which diagnosis column(s) to populate.
     """
     # Define the target BI-RADS values for malignant and benign cases
     target_birads_malignant = set(['4', '4A', '4B', '4C', '5', '6'])
     target_birads_benign = set(['1', '2', '3', '4', '4A', '4B'])
     updates = {}
-    
+
     for patient_id in final_df['PATIENT_ID'].unique():
         patient_mask = final_df['PATIENT_ID'] == patient_id
         patient_records = final_df[patient_mask].copy().sort_values('DATE')
-        
+
         # Pre-filter to only include relevant US records for this patient
+        # Check if both diagnosis columns are empty
+        left_empty = patient_records['left_diagnosis'].isna() | (patient_records['left_diagnosis'] == '')
+        right_empty = patient_records['right_diagnosis'].isna() | (patient_records['right_diagnosis'] == '')
+
         relevant_records = patient_records[
-            (patient_records['MODALITY'] == 'US') & 
-            ((patient_records['final_interpretation'].isna()) | (patient_records['final_interpretation'] == '')) &
+            (patient_records['MODALITY'] == 'US') &
+            (left_empty & right_empty) &
             pd.notna(patient_records['DATE']) &
             pd.notna(patient_records['Study_Laterality'])
         ]
@@ -321,57 +361,92 @@ def check_from_next_diagnosis(final_df, days=240):
                 if pd.notna(record.get('is_us_biopsy'))
             )
             
-            # Handle BILATERAL case
+            # Handle BILATERAL case - check each pathology laterality separately
             if current_laterality == 'BILATERAL':
-                path_interpretations = []
+                # Track findings by laterality
+                left_findings = {'malignant': False, 'benign': False}
+                right_findings = {'malignant': False, 'benign': False}
+
                 for _, future_row in future_records.iterrows():
-                    if pd.notna(future_row.get('path_interpretation')):
-                        path_interpretations.append(future_row['path_interpretation'].upper())
-                
-                # Apply malignant case only for target BI-RADS values
-                if 'MALIGNANT' in path_interpretations and has_us_biopsy and current_birads in target_birads_malignant:
-                    updates[idx] = 'MALIGNANT2'
-                # Apply benign case only for target benign BI-RADS values, and only if NO malignant cases are present
-                elif 'BENIGN' in path_interpretations and 'MALIGNANT' not in path_interpretations and current_birads in target_birads_benign:
-                    updates[idx] = 'BENIGN2'
+                    if pd.notna(future_row.get('path_interpretation')) and pd.notna(future_row.get('Pathology_Laterality')):
+                        path_interp = future_row['path_interpretation'].upper()
+                        path_lat = future_row['Pathology_Laterality']
+
+                        # Pathology_Laterality is always LEFT or RIGHT (never BILATERAL)
+                        if path_lat == 'LEFT':
+                            if path_interp == 'MALIGNANT':
+                                left_findings['malignant'] = True
+                            elif path_interp == 'BENIGN':
+                                left_findings['benign'] = True
+                        elif path_lat == 'RIGHT':
+                            if path_interp == 'MALIGNANT':
+                                right_findings['malignant'] = True
+                            elif path_interp == 'BENIGN':
+                                right_findings['benign'] = True
+
+                # Store updates for each side separately
+                if idx not in updates:
+                    updates[idx] = {}
+
+                # Apply malignant findings (only for target BI-RADS values)
+                if left_findings['malignant'] and has_us_biopsy and current_birads in target_birads_malignant:
+                    updates[idx]['left_diagnosis'] = 'MALIGNANT2'
+                elif left_findings['benign'] and not left_findings['malignant'] and current_birads in target_birads_benign:
+                    updates[idx]['left_diagnosis'] = 'BENIGN2'
+
+                if right_findings['malignant'] and has_us_biopsy and current_birads in target_birads_malignant:
+                    updates[idx]['right_diagnosis'] = 'MALIGNANT2'
+                elif right_findings['benign'] and not right_findings['malignant'] and current_birads in target_birads_benign:
+                    updates[idx]['right_diagnosis'] = 'BENIGN2'
 
             # Handle regular laterality matching
             else:
                 found_malignant = False
                 found_benign = False
-                
+
                 # Check all matching records
                 for _, future_row in future_records.iterrows():
                     if pd.notna(future_row.get('path_interpretation')):
-                        if (pd.notna(future_row.get('Pathology_Laterality')) and 
+                        if (pd.notna(future_row.get('Pathology_Laterality')) and
                             future_row['Pathology_Laterality'] == current_laterality):
-                            
+
                             path_interp = future_row['path_interpretation'].upper()
                             if path_interp == 'MALIGNANT':
                                 found_malignant = True
                             elif path_interp == 'BENIGN':
                                 found_benign = True
-                
+
+                # Store updates
+                if idx not in updates:
+                    updates[idx] = {}
+
                 # Apply malignant finding only for target BI-RADS values
                 if found_malignant and has_us_biopsy and current_birads in target_birads_malignant:
-                    updates[idx] = 'MALIGNANT2'
+                    diagnosis_cols = get_diagnosis_column(current_laterality)
+                    for col in diagnosis_cols:
+                        updates[idx][col] = 'MALIGNANT2'
                 # Apply benign finding only for target benign BI-RADS values, and only if NO malignant cases are found
                 elif found_benign and not found_malignant and current_birads in target_birads_benign:
-                    updates[idx] = 'BENIGN2'
-    
+                    diagnosis_cols = get_diagnosis_column(current_laterality)
+                    for col in diagnosis_cols:
+                        updates[idx][col] = 'BENIGN2'
+
     # Apply all updates at once
-    for idx, value in updates.items():
-        final_df.at[idx, 'final_interpretation'] = value
-        
+    for idx, col_updates in updates.items():
+        for col, value in col_updates.items():
+            final_df.at[idx, col] = value
+
     return final_df
 
 
 
 def determine_final_interpretation(final_df, batch_size=100, max_workers=None):
 
-    if 'final_interpretation' not in final_df.columns:
-        final_df['final_interpretation'] = None
-   
+    if 'left_diagnosis' not in final_df.columns:
+        final_df['left_diagnosis'] = None
+    if 'right_diagnosis' not in final_df.columns:
+        final_df['right_diagnosis'] = None
+
     if 'BI-RADS' in final_df.columns:
         # Convert to string, remove .0, and replace 'nan' with empty string
         final_df['BI-RADS'] = (
@@ -380,30 +455,30 @@ def determine_final_interpretation(final_df, batch_size=100, max_workers=None):
             .str.replace('.0', '', regex=False)
             .str.replace('nan', '', regex=False)
         )
-        
+
     # Get unique patients
     unique_patients = final_df['PATIENT_ID'].unique()
-   
+
     # Split patients into batches of size batch_size
     patient_batches = [
         unique_patients[i:i + batch_size]
         for i in range(0, len(unique_patients), batch_size)
     ]
-   
+
     # Define worker function to process a batch of patients through all four methods
     def process_patient_batch(patient_ids):
         # Create a DEEP copy of patient records
         batch_df = final_df[final_df['PATIENT_ID'].isin(patient_ids)].copy(deep=True)
-       
+
         # Process locally without touching final_df
         batch_df = check_assumed_benign(batch_df)
         batch_df = check_assumed_benign_birads3(batch_df)
         batch_df = check_malignant_from_biopsy(batch_df)
         batch_df = check_from_next_diagnosis(batch_df)
-       
-        # Only return rows that were actually modified
-        modified_mask = batch_df['final_interpretation'].notna()
-        return batch_df.loc[modified_mask, ['PATIENT_ID', 'ACCESSION_NUMBER', 'final_interpretation']]
+
+        # Only return rows that were actually modified (either column has a value)
+        modified_mask = batch_df['left_diagnosis'].notna() | batch_df['right_diagnosis'].notna()
+        return batch_df.loc[modified_mask, ['PATIENT_ID', 'ACCESSION_NUMBER', 'left_diagnosis', 'right_diagnosis']]
    
     # Use ThreadPoolExecutor to process batches in parallel
     results = []
@@ -432,22 +507,23 @@ def determine_final_interpretation(final_df, batch_size=100, max_workers=None):
    
     # Combine all results
     combined_results = pd.concat(results)
-   
+
     # Update the original dataframe with the processed results
-    # We only update the 'final_interpretation' column
+    # We only update the 'left_diagnosis' and 'right_diagnosis' columns
     final_df.update(combined_results)
-   
+
     return final_df
 
 
 def audit_interpretations(final_df):
-    
-    # After all processing, search for specific categories in the final_interpretation column
-    benign1_count = sum(final_df['final_interpretation'] == 'BENIGN1')
-    benign2_count = sum(final_df['final_interpretation'] == 'BENIGN2')
-    benign3_count = sum(final_df['final_interpretation'] == 'BENIGN3')
-    malignant1_count = sum(final_df['final_interpretation'] == 'MALIGNANT1')
-    malignant2_count = sum(final_df['final_interpretation'] == 'MALIGNANT2')
+
+    # After all processing, search for specific categories in both diagnosis columns
+    # Count each diagnosis type from both columns
+    benign1_count = sum((final_df['left_diagnosis'] == 'BENIGN1') | (final_df['right_diagnosis'] == 'BENIGN1'))
+    benign2_count = sum((final_df['left_diagnosis'] == 'BENIGN2') | (final_df['right_diagnosis'] == 'BENIGN2'))
+    benign3_count = sum((final_df['left_diagnosis'] == 'BENIGN3') | (final_df['right_diagnosis'] == 'BENIGN3'))
+    malignant1_count = sum((final_df['left_diagnosis'] == 'MALIGNANT1') | (final_df['right_diagnosis'] == 'MALIGNANT1'))
+    malignant2_count = sum((final_df['left_diagnosis'] == 'MALIGNANT2') | (final_df['right_diagnosis'] == 'MALIGNANT2'))
     
     # Create audit log with counts for each category
     append_audit("query_clean.assumed_benign", benign1_count)
