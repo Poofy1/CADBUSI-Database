@@ -534,6 +534,62 @@ def add_previous_worst_mg_column(radiology_df):
     
     return radiology_df
 
+def extract_addendum(row):
+    """
+    Extract addendum section from radiology reports. Searches for APPENDED, AMENDMENT, or ADDENDUM
+    and returns everything after the first match found.
+    
+    Args:
+        row: DataFrame row with RADIOLOGY_REPORT and RADIOLOGY_NARRATIVE columns
+        
+    Returns:
+        str: Text from addendum keyword onwards, or None if not found
+    """
+    addendum_terms = ['ADDENDUM', 'AMENDMENT', 'APPENDED']
+    
+    # First try RADIOLOGY_REPORT
+    if 'RADIOLOGY_REPORT' in row and not pd.isna(row['RADIOLOGY_REPORT']):
+        text = row['RADIOLOGY_REPORT']
+        text_upper = text.upper()
+        
+        # Check each term and find the earliest occurrence
+        earliest_pos = len(text)
+        earliest_term = None
+        
+        for term in addendum_terms:
+            pos = text_upper.find(term)
+            if pos != -1 and pos < earliest_pos:
+                earliest_pos = pos
+                earliest_term = term
+        
+        # If we found a term, extract from that point onwards
+        if earliest_term is not None:
+            # Find the actual position in the original text (preserve case)
+            addendum_text = text[earliest_pos:].strip()
+            return addendum_text
+    
+    # If not found in RADIOLOGY_REPORT, try RADIOLOGY_NARRATIVE
+    if 'RADIOLOGY_NARRATIVE' in row and not pd.isna(row['RADIOLOGY_NARRATIVE']):
+        text = row['RADIOLOGY_NARRATIVE']
+        text_upper = text.upper()
+        
+        # Check each term and find the earliest occurrence
+        earliest_pos = len(text)
+        earliest_term = None
+        
+        for term in addendum_terms:
+            pos = text_upper.find(term)
+            if pos != -1 and pos < earliest_pos:
+                earliest_pos = pos
+                earliest_term = term
+        
+        # If we found a term, extract from that point onwards
+        if earliest_term is not None:
+            addendum_text = text[earliest_pos:].strip()
+            return addendum_text
+    
+    return None
+
 def remove_bad_data(radiology_df, output_path):
     # Count and remove rows with BI-RADS = '0'
     birads_zero_mask = radiology_df['BI-RADS'].isin(['0'])
@@ -616,7 +672,10 @@ def filter_rad_data(radiology_df, output_path):
     results = radiology_df.apply(check_for_biopsy, axis=1)
     radiology_df['is_biopsy'] = results.str[0]
     radiology_df['is_us_biopsy'] = results.str[1]
-    
+
+    # Check for addendum
+    radiology_df['addendum'] = radiology_df.apply(extract_addendum, axis=1)
+
     radiology_df = add_ultrasound_classifications(radiology_df, output_path)
     
     # Add previous worst MG column
