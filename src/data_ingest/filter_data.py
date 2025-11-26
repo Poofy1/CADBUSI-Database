@@ -438,18 +438,21 @@ def create_final_dataset(rad_df, path_df, output_path):
     append_audit("query_clean.rad_missing_address_removed", empty_endpoint_count)
     
     # Remove rows with empty BI-RADS
-    empty_birads_count = sum(final_df_us['BI-RADS'].isna())
-    final_df_us = final_df_us[final_df_us['BI-RADS'].notna()]
-    append_audit("query_clean.rad_missing_birads_removed", empty_birads_count)
+    #empty_birads_count = sum(final_df_us['BI-RADS'].isna())
+    #final_df_us = final_df_us[final_df_us['BI-RADS'].notna()]
+    #append_audit("query_clean.rad_missing_birads_removed", empty_birads_count)
     
     # Count total interpretations
     audit_interpretations(final_df_us)
 
-    # Remove rows where both left_diagnosis and right_diagnosis are empty
+    # Remove rows where both left_diagnosis and right_diagnosis are empty AND is_biopsy is True
     both_empty = final_df_us['left_diagnosis'].isna() & final_df_us['right_diagnosis'].isna()
-    empty_interpretation_count = sum(both_empty)
-    final_df_us = final_df_us[~both_empty]
-    append_audit("query_clean.rad_missing_final_interp", empty_interpretation_count)
+    is_biopsy = final_df_us['is_biopsy'] == 'T'
+    remove_condition = both_empty & is_biopsy
+
+    empty_interpretation_count = sum(remove_condition)
+    final_df_us = final_df_us[~remove_condition]
+    append_audit("query_clean.rad_missing_final_interp_biopsy", empty_interpretation_count)
     
 
     # Extract STUDY_ID from ENDPOINT_ADDRESS

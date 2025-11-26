@@ -438,12 +438,19 @@ def determine_has_malignant(row, laterality):
         laterality: 'LEFT' or 'RIGHT'
 
     Returns:
-        1 if malignant, 0 otherwise
+        1 if malignant, 0 if not malignant, -1 if both diagnoses are NULL
     """
+    # Check if both diagnoses are NULL
+    left_diag = row.get('left_diagnosis', None)
+    right_diag = row.get('right_diagnosis', None)
+
+    if pd.isna(left_diag) and pd.isna(right_diag):
+        return -1
+
     if laterality == 'LEFT':
-        diagnosis = row.get('left_diagnosis', '')
+        diagnosis = left_diag
     elif laterality == 'RIGHT':
-        diagnosis = row.get('right_diagnosis', '')
+        diagnosis = right_diag
     else:
         return 0
 
