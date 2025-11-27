@@ -145,7 +145,7 @@ def deploy_cloud_run(bucket_name=None, bucket_path=None):
         "--memory=8192Mi",
         "--concurrency=35",
         "--max-instances=500",
-        "--min-instances=1", 
+        "--min-instances=3", 
         f"--set-env-vars={env_vars}"
     ]
     
@@ -238,6 +238,7 @@ def setup_pubsub():
                 f"--push-endpoint={push_endpoint}",
                 f"--push-auth-service-account={CONFIG['env']['service_account_identity']}",
                 f"--project={CONFIG['env']['project_id']}",
+                "--ack-deadline=300",
             ], check=True)
             print(f"Subscription '{CONFIG['env']['subscription_name']}' created successfully.")
         except subprocess.CalledProcessError as e:

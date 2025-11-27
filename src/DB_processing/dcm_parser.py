@@ -670,21 +670,114 @@ def deduplicate_dcm_files(dcm_files_list):
     seen_hashes = set()
     unique_files = []
     duplicate_count = 0
-    
+
     for dcm_file in dcm_files_list:
         # Generate the same hash that would be created during processing
         dicom_hash = os.path.splitext(os.path.basename(dcm_file))[0]
-        
+
         if dicom_hash not in seen_hashes:
             seen_hashes.add(dicom_hash)
             unique_files.append(dcm_file)
         else:
             duplicate_count += 1
-    
+
     if duplicate_count > 0:
         print(f'Removed {duplicate_count} duplicate DICOM files')
-    
+
     return unique_files
+
+def filter_dcm_files_by_anon_data(dcm_files_list, anon_location, encryption_key):
+    """
+    Filter DICOM files to only process those that exist in the anonymized input data.
+
+    Parses non-anonymized patient_id and accession_number from file paths,
+    encrypts them, and matches against the anonymized CSV data.
+
+    Parameters:
+    - dcm_files_list: List of DICOM file paths with pattern /{patient_id}_{accession_id}/{hash}.dcm
+    - anon_location: Path to the CSV file containing anonymized patient_id and accession_number
+    - encryption_key: Key used to encrypt the IDs
+
+    Returns:
+    - Filtered list of DICOM file paths that match the anonymized input data
+    """
+    print("Filtering DICOM files based on anonymized input data...")
+
+    # Read the anonymized CSV
+    anon_csv = pd.read_csv(anon_location)
+    anon_csv.columns = [to_snake_case(col) for col in anon_csv.columns]
+
+    # Convert to strings
+    anon_csv['patient_id'] = anon_csv['patient_id'].astype(str)
+    anon_csv['accession_number'] = anon_csv['accession_number'].astype(str)
+
+    # Create sets for fast lookup
+    anon_patient_ids = set(anon_csv['patient_id'].unique())
+    anon_accession_numbers = set(anon_csv['accession_number'].unique())
+    anon_pairs = set(zip(anon_csv['patient_id'], anon_csv['accession_number']))
+
+    print(f"Loaded {len(anon_pairs)} unique patient-accession pairs from anonymized data")
+
+    # Filter DICOM files
+    filtered_files = []
+    skipped_count = 0
+    parse_errors = 0
+
+    for dcm_path in tqdm(dcm_files_list, desc="Filtering DICOM files"):
+        # Parse patient_id and accession_number from path
+        # Pattern: /{patient_id}_{accession_id}/{hash}.dcm
+
+        # Get the parent directory name which contains {patient_id}_{accession_id}
+        # Handle both Windows and Unix paths
+        path_normalized = dcm_path.replace('\\', '/')
+        path_parts = path_normalized.split('/')
+
+        # Find the directory name (second-to-last part before the .dcm file)
+        if len(path_parts) < 2:
+            parse_errors += 1
+            continue
+
+        parent_dir = path_parts[-2]
+
+        # Split by underscore - handle case where IDs might contain underscores
+        parts = parent_dir.split('_')
+        if len(parts) < 2:
+            parse_errors += 1
+            continue
+
+        # Try all possible split points to handle IDs that contain underscores
+        matched = False
+        for i in range(1, len(parts)):
+            potential_patient_id = '_'.join(parts[:i])
+            potential_accession_number = '_'.join(parts[i:])
+
+            # Encrypt these IDs using the same encryption as deidentify_dicom()
+            encrypted_patient_id = encrypt_single_id(encryption_key, potential_patient_id)
+            encrypted_accession_number = encrypt_single_id(encryption_key, potential_accession_number)
+
+            # Check if this combination exists in our anonymized data
+            # First check if both IDs exist individually (faster)
+            if (encrypted_patient_id in anon_patient_ids and
+                encrypted_accession_number in anon_accession_numbers):
+                # Then check if the pair exists together
+                if (encrypted_patient_id, encrypted_accession_number) in anon_pairs:
+                    filtered_files.append(dcm_path)
+                    matched = True
+                    break
+
+        if not matched:
+            skipped_count += 1
+
+    print(f"Filtered {len(dcm_files_list)} files down to {len(filtered_files)} files")
+    print(f"Skipped {skipped_count} files not in anonymized dataset")
+    if parse_errors > 0:
+        print(f"Parse errors: {parse_errors} files with invalid path format")
+
+    append_audit("dicom_filtering.total_input", len(dcm_files_list))
+    append_audit("dicom_filtering.filtered_output", len(filtered_files))
+    append_audit("dicom_filtering.skipped", skipped_count)
+
+    return filtered_files
 
 # Main Method
 def Parse_Dicom_Files(CONFIG, anon_location, lesion_anon_file, raw_storage_database, encryption_key):
@@ -714,6 +807,9 @@ def Parse_Dicom_Files(CONFIG, anon_location, lesion_anon_file, raw_storage_datab
     # Remove duplicates from current file list
     dcm_files_list = deduplicate_dcm_files(dcm_files_list)
     print(f'Unique DICOM files to process: {len(dcm_files_list)}')
+
+    # Filter files to only process those in the anonymized input data
+    dcm_files_list = filter_dcm_files_by_anon_data(dcm_files_list, anon_location, encryption_key)
 
     # Get DCM Data (already returns snake_case columns from updated parse_files)
     image_df = parse_files(CONFIG, dcm_files_list, database_path)
