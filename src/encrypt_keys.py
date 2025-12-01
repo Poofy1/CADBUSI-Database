@@ -299,7 +299,7 @@ def ff1_decrypt(key, encrypted_number, domain_size):
     
     return decrypted_value
 
-def decrypt_single_id(encrypted_id):
+def decrypt_single_id(encrypted_id, key = None):
     """Decrypt a single ID value back to its original form.
     
     Args:
@@ -309,7 +309,8 @@ def decrypt_single_id(encrypted_id):
         Original ID value as a string
     """
     # Get the same key used for encryption
-    key = get_encryption_key()
+    if key is None:
+        key = get_encryption_key()
     
     # Handle hyphenated values
     if '-' in str(encrypted_id):

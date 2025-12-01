@@ -681,8 +681,7 @@ def deduplicate_dcm_files(dcm_files_list):
         else:
             duplicate_count += 1
 
-    if duplicate_count > 0:
-        print(f'Removed {duplicate_count} duplicate DICOM files')
+    print(f'Removed {duplicate_count} duplicate DICOM files')
 
     return unique_files
 
@@ -707,13 +706,11 @@ def filter_dcm_files_by_anon_data(dcm_files_list, anon_location, encryption_key)
     anon_csv = pd.read_csv(anon_location)
     anon_csv.columns = [to_snake_case(col) for col in anon_csv.columns]
 
-    # Convert to strings
+    # Convert to strings and remove leading zeros
     anon_csv['patient_id'] = anon_csv['patient_id'].astype(str)
     anon_csv['accession_number'] = anon_csv['accession_number'].astype(str)
-
-    # Create sets for fast lookup
-    anon_patient_ids = set(anon_csv['patient_id'].unique())
-    anon_accession_numbers = set(anon_csv['accession_number'].unique())
+    
+    # Create set of anonymized pairs for fast lookup
     anon_pairs = set(zip(anon_csv['patient_id'], anon_csv['accession_number']))
 
     print(f"Loaded {len(anon_pairs)} unique patient-accession pairs from anonymized data")
@@ -722,13 +719,14 @@ def filter_dcm_files_by_anon_data(dcm_files_list, anon_location, encryption_key)
     filtered_files = []
     skipped_count = 0
     parse_errors = 0
+    found_pairs = set()  # Track which pairs we actually found
+    all_file_pairs = set()  # Track all pairs found in files (including those not in CSV)
 
     for dcm_path in tqdm(dcm_files_list, desc="Filtering DICOM files"):
         # Parse patient_id and accession_number from path
         # Pattern: /{patient_id}_{accession_id}/{hash}.dcm
 
         # Get the parent directory name which contains {patient_id}_{accession_id}
-        # Handle both Windows and Unix paths
         path_normalized = dcm_path.replace('\\', '/')
         path_parts = path_normalized.split('/')
 
@@ -739,44 +737,39 @@ def filter_dcm_files_by_anon_data(dcm_files_list, anon_location, encryption_key)
 
         parent_dir = path_parts[-2]
 
-        # Split by underscore - handle case where IDs might contain underscores
+        # Split by underscore - since IDs never contain underscores, this is unambiguous
         parts = parent_dir.split('_')
-        if len(parts) < 2:
+        if len(parts) != 2:
             parse_errors += 1
             continue
 
-        # Try all possible split points to handle IDs that contain underscores
-        matched = False
-        for i in range(1, len(parts)):
-            potential_patient_id = '_'.join(parts[:i])
-            potential_accession_number = '_'.join(parts[i:])
+        patient_id, accession_number = parts
+        
+        # Encrypt these IDs using the same encryption as deidentify_dicom()
+        encrypted_patient_id = encrypt_single_id(encryption_key, patient_id)
+        encrypted_accession_number = encrypt_single_id(encryption_key, accession_number)
 
-            # Encrypt these IDs using the same encryption as deidentify_dicom()
-            encrypted_patient_id = encrypt_single_id(encryption_key, potential_patient_id)
-            encrypted_accession_number = encrypt_single_id(encryption_key, potential_accession_number)
-
-            # Check if this combination exists in our anonymized data
-            # First check if both IDs exist individually (faster)
-            if (encrypted_patient_id in anon_patient_ids and
-                encrypted_accession_number in anon_accession_numbers):
-                # Then check if the pair exists together
-                if (encrypted_patient_id, encrypted_accession_number) in anon_pairs:
-                    filtered_files.append(dcm_path)
-                    matched = True
-                    break
-
-        if not matched:
+        # Check if this pair exists in our anonymized data
+        pair = (encrypted_patient_id, encrypted_accession_number)
+        all_file_pairs.add(pair)  # Track all pairs in files
+        
+        if pair in anon_pairs:
+            filtered_files.append(dcm_path)
+            found_pairs.add(pair)
+        else:
             skipped_count += 1
 
+    # Calculate missing accessions (accessions in CSV but not in DICOM files)
+    missing_pairs = anon_pairs - found_pairs
+    missing_count = len(missing_pairs)
+    total_anon_pairs = len(anon_pairs)
+    missing_percentage = (missing_count / total_anon_pairs * 100) if total_anon_pairs > 0 else 0
+
     print(f"Filtered {len(dcm_files_list)} files down to {len(filtered_files)} files")
-    print(f"Skipped {skipped_count} files not in anonymized dataset")
-    if parse_errors > 0:
-        print(f"Parse errors: {parse_errors} files with invalid path format")
-
-    append_audit("dicom_filtering.total_input", len(dcm_files_list))
-    append_audit("dicom_filtering.filtered_output", len(filtered_files))
-    append_audit("dicom_filtering.skipped", skipped_count)
-
+    print(f"Found {len(all_file_pairs)} unique patient-accession pairs in file list")
+    print(f"Found {len(found_pairs)} unique patient-accession pairs matching CSV")
+    print(f"{missing_percentage:.1f}% of anonymized accessions ({missing_count}/{total_anon_pairs}) were not found in DICOM files")
+    
     return filtered_files
 
 # Main Method

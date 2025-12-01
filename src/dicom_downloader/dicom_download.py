@@ -231,6 +231,13 @@ def setup_pubsub():
     if not subscription_exists:
         print(f"Setting up Pub/Sub subscription: {CONFIG['env']['subscription_name']}")
         try:
+            # Create dead letter topic first
+            dead_letter_topic = f"{CONFIG['env']['topic_name']}-failed"
+            subprocess.run([
+                "gcloud", "pubsub", "topics", "create", dead_letter_topic,
+                f"--project={CONFIG['env']['project_id']}"
+            ], check=True)
+            
             # Simple subscription without delivery limits
             subprocess.run([
                 "gcloud", "pubsub", "subscriptions", "create", CONFIG['env']['subscription_name'],
@@ -238,7 +245,9 @@ def setup_pubsub():
                 f"--push-endpoint={push_endpoint}",
                 f"--push-auth-service-account={CONFIG['env']['service_account_identity']}",
                 f"--project={CONFIG['env']['project_id']}",
-                "--ack-deadline=300",
+                "--ack-deadline=600",
+                "--max-delivery-attempts=5",
+                f"--dead-letter-topic=projects/{CONFIG['env']['project_id']}/topics/{dead_letter_topic}",
             ], check=True)
             print(f"Subscription '{CONFIG['env']['subscription_name']}' created successfully.")
         except subprocess.CalledProcessError as e:
@@ -380,6 +389,20 @@ def cleanup_resources():
             print(f"  Topic '{CONFIG['env']['topic_name']}' not found (already deleted or never created)")
         else:
             print(f"Failed to delete topic: {e.stderr.strip()}")
+    
+    # Delete dead-letter topic
+    try:
+        dead_letter_topic = f"{CONFIG['env']['topic_name']}-failed"
+        subprocess.run([
+            "gcloud", "pubsub", "topics", "delete", dead_letter_topic,
+            f"--project={CONFIG['env']['project_id']}", "--quiet"
+        ], check=True, capture_output=True, text=True)
+        print(f"Deleted dead-letter topic '{dead_letter_topic}'")
+    except subprocess.CalledProcessError as e:
+        if "NOT_FOUND" in e.stderr or "not found" in e.stderr.lower():
+            print(f"  Dead-letter topic '{dead_letter_topic}' not found (already deleted or never created)")
+        else:
+            print(f"Failed to delete dead-letter topic: {e.stderr.strip()}")
     
     # Delete Cloud Run service
     try:

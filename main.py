@@ -1,22 +1,7 @@
 import ssl
 ssl._create_default_https_context = ssl._create_unverified_context
 
-from src.dicom_downloader.dicom_download import *
-from src.data_ingest.query import *
-from src.encrypt_keys import *
-from data_ingest.clean_pathology import filter_path_data
-from data_ingest.clean_radiology import filter_rad_data
-from src.data_ingest.filter_data import create_final_dataset
-
-from src.DB_processing.image_processing import analyze_images
-from src.DB_processing.data_selection import Select_Data
-from src.DB_export.export import Export_Database
-from src.DB_processing.dcm_parser import Parse_Dicom_Files
-from src.DB_processing.video_processing import ProcessVideoData
-from src.ML_processing.lesion_detection import Locate_Lesions
-from src.ML_processing.inpaint_N2N import Inpaint_Dataset_N2N
-from src.ML_processing.orientation_detection import Find_Orientation
-from src.ML_processing.download_models import download_models
+from src.encrypt_keys import encrypt_ids
 
 from storage_adapter import * 
 from config import CONFIG
@@ -64,6 +49,10 @@ def main():
     
     # Handle query command
     if args.query:
+        from src.data_ingest.query import run_breast_imaging_query
+        from data_ingest.clean_pathology import filter_path_data
+        from data_ingest.clean_radiology import filter_rad_data
+        from src.data_ingest.filter_data import create_final_dataset
         limit = args.limit
         
         # If no limit is specified, ask for confirmation
@@ -87,9 +76,19 @@ def main():
         create_final_dataset(rad_df, path_df, OUTPUT_PATH)
     
     elif args.deploy or args.cleanup or args.rerun:
+        from src.dicom_downloader.dicom_download import dicom_download_remote_start
         dicom_download_remote_start(DICOM_QUERY_PATH, args.deploy, args.cleanup)
         
     elif args.database:
+        from src.DB_processing.image_processing import analyze_images
+        from src.DB_processing.data_selection import Select_Data
+        from src.DB_processing.dcm_parser import Parse_Dicom_Files
+        from src.DB_processing.video_processing import ProcessVideoData
+        from src.ML_processing.lesion_detection import Locate_Lesions
+        from src.ML_processing.inpaint_N2N import Inpaint_Dataset_N2N
+        from src.ML_processing.orientation_detection import Find_Orientation
+        from src.ML_processing.download_models import download_models
+        
         lesion_pathology = f'{env}/data/lesion_pathology.csv'
         lesion_anon_file = f'{env}/data/lesion_anon_data.csv'
         anon_file = f'{env}/data/anon_data.csv'
@@ -139,6 +138,7 @@ def main():
             print('Database uploaded')
 
     elif args.export:
+        from src.DB_export.export import Export_Database
         #Download Database
         if storage.is_gcp:
             local_full_path = os.path.join(storage.windir, DATABASE_LOCAL_PATH) if storage.windir else DATABASE_LOCAL_PATH
