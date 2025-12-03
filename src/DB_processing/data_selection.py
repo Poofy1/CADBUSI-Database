@@ -22,10 +22,10 @@ def choose_images_to_label(db):
     dark_removed = dark_count_before - dark_count_after
     
     # Mark all rows with calipers as label = False
-    caliper_count_before = len(db[db['label']])
-    db.loc[db['has_calipers'] == 1, 'label'] = False
-    caliper_count_after = len(db[db['label']])
-    caliper_removed = caliper_count_before - caliper_count_after
+    #caliper_count_before = len(db[db['label']])
+    #db.loc[db['has_calipers'] == 1, 'label'] = False
+    #caliper_count_after = len(db[db['label']])
+    #caliper_removed = caliper_count_before - caliper_count_after
     
     # set label = False for all non-breast images
     area_count_before = len(db[db['label']])
@@ -51,7 +51,7 @@ def choose_images_to_label(db):
     
     # Create an audit log for all the filtering operations
     append_audit("image_processing.too_dark_removed", dark_removed)
-    append_audit("image_processing.caliper_issues_removed", caliper_removed) # same as caliper_with_duplicates?
+    #append_audit("image_processing.caliper_issues_removed", caliper_removed) # same as caliper_with_duplicates?
     append_audit("image_processing.non_breast_removed", area_removed)
     append_audit("image_processing.unknown_lat_removed", lat_removed)
     append_audit("image_processing.multi_region_removed", region_removed)

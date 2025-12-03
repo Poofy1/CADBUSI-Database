@@ -509,6 +509,7 @@ def Mask_Lesions(database_path, output_dir, filtered_image_df=None, max_workers=
                 patient_id = original_row['patient_id']
                 accession_number = original_row['accession_number']
                 laterality = original_row.get('laterality', None)
+                caliper_boxes_confidence_str = original_row.get('caliper_boxes_confidence', '')
 
                 # Parse lesion images (comma-separated)
                 lesion_images_str = result['lesion_images']
@@ -527,10 +528,20 @@ def Mask_Lesions(database_path, output_dir, filtered_image_df=None, max_workers=
                     widths = [int(image_w_str)] if image_w_str else [0]
                     heights = [int(image_h_str)] if image_h_str else [0]
 
+                # Parse confidence scores (semicolon-separated)
+                if caliper_boxes_confidence_str and '; ' in caliper_boxes_confidence_str:
+                    confidences = [conf.strip() for conf in caliper_boxes_confidence_str.split(';')]
+                elif caliper_boxes_confidence_str:
+                    confidences = [caliper_boxes_confidence_str.strip()]
+                else:
+                    confidences = []
+
                 # Create a record for each lesion image
                 for i, lesion_img in enumerate(lesion_images):
                     crop_w = widths[i] if i < len(widths) else 0
                     crop_h = heights[i] if i < len(heights) else 0
+                    # Each lesion gets its corresponding confidence value
+                    confidence = confidences[i] if i < len(confidences) else ''
 
                     lesion_records.append({
                         'image_source': source_image_name,
@@ -539,7 +550,8 @@ def Mask_Lesions(database_path, output_dir, filtered_image_df=None, max_workers=
                         'patient_id': patient_id,
                         'laterality': laterality,
                         'crop_w': crop_w,
-                        'crop_h': crop_h
+                        'crop_h': crop_h,
+                        'caliper_boxes_confidence': confidence
                     })
         
         lesion_df = pd.DataFrame(lesion_records)

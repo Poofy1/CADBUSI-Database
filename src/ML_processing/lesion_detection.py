@@ -115,30 +115,35 @@ def prepare_box_prompts(boxes, image_size, model_input_size):
 def detect_calipers_yolo(image, yolo_model, confidence_threshold):
     """
     Use YOLO model to detect calipers in the image
-    
+
     Returns:
-        List of bounding boxes in format [x1, y1, x2, y2]
+        Tuple of (boxes, confidences) where:
+        - boxes: List of bounding boxes in format [x1, y1, x2, y2]
+        - confidences: List of confidence scores for each box
     """
     # Convert PIL to numpy if needed
     if isinstance(image, Image.Image):
         image_np = np.array(image)
     else:
         image_np = image
-    
+
     # Run YOLO inference
     results = yolo_model(image_np, conf=confidence_threshold, verbose=False)
-    
+
     caliper_boxes = []
-    
-    # Extract bounding boxes from results
+    confidences = []
+
+    # Extract bounding boxes and confidence scores from results
     for result in results:
         if result.boxes is not None:
             boxes = result.boxes.xyxy.cpu().numpy()
-            for box in boxes:
+            confs = result.boxes.conf.cpu().numpy()
+            for box, conf in zip(boxes, confs):
                 x1, y1, x2, y2 = box
                 caliper_boxes.append([int(x1), int(y1), int(x2), int(y2)])
-    
-    return caliper_boxes
+                confidences.append(float(conf))
+
+    return caliper_boxes, confidences
 
 def load_image(image_name, image_data_row, image_dir):
     """Load and crop image based on database row information."""
@@ -251,20 +256,21 @@ def process_single_image(image_name, image_dir, image_data_row, model, yolo_mode
     result = {
         'has_caliper_mask': False,
         'caliper_boxes': [],
+        'caliper_boxes_confidence': '',
     }
-    
+
     # Initialize variables for debug saving
     target_image = None
     mask_resized = None
     cropped_caliper_boxes = []
-    
+
     try:
         target_image, crops, dim = load_image(image_name, image_data_row, image_dir)
         crop_x, crop_y, crop_x2, crop_y2 = crops
         img_width, img_height = dim
 
         # Detect boxes using YOLO on the CROPPED image
-        cropped_caliper_boxes = detect_calipers_yolo(target_image, yolo_model, confidence_threshold=0.3)
+        cropped_caliper_boxes, confidences = detect_calipers_yolo(target_image, yolo_model, confidence_threshold=0.3)
 
         if len(cropped_caliper_boxes) == 0:
             return result
@@ -278,6 +284,9 @@ def process_single_image(image_name, image_dir, image_data_row, model, yolo_mode
 
         # Store caliper boxes in result format (using full image coordinates)
         result['caliper_boxes'] = "; ".join(f"[{b[0]}, {b[1]}, {b[2]}, {b[3]}]" for b in full_image_caliper_boxes)
+
+        # Store confidence scores in result format (semicolon-separated)
+        result['caliper_boxes_confidence'] = "; ".join(f"{c:.4f}" for c in confidences)
         
         # Only run SAMUS model if use_samus_model is True
         if use_samus_model and cropped_caliper_boxes:
@@ -419,11 +428,11 @@ def Locate_Lesions(image_dir, save_debug_images=False):
     with DatabaseManager() as db:
         # Load image data from database
         image_data = db.get_images_dataframe()
-        
+
         # Add columns to dataframe if they don't exist (for in-memory processing)
-        for col in ["caliper_boxes", "has_caliper_mask"]:
+        for col in ["caliper_boxes", "caliper_boxes_confidence", "has_caliper_mask"]:
             if col not in image_data.columns:
-                image_data[col] = "" if col == "caliper_boxes" else False
+                image_data[col] = "" if col in ["caliper_boxes", "caliper_boxes_confidence"] else False
         
         # Initialize has_caliper_mask to False for ALL rows
         image_data["has_caliper_mask"] = False
@@ -474,11 +483,12 @@ def Locate_Lesions(image_dir, save_debug_images=False):
             if result is not None:
                 clean_idx = image_to_clean_idx[i]
                 image_name = valid_images[i]
-                
+
                 # Prepare update data for batch insert
                 update_data = {
                     'image_name': image_name,
                     'caliper_boxes': result['caliper_boxes'],
+                    'caliper_boxes_confidence': result['caliper_boxes_confidence'],
                     'has_caliper_mask': result['has_caliper_mask']
                 }
                 batch_updates.append(update_data)
@@ -487,5 +497,19 @@ def Locate_Lesions(image_dir, save_debug_images=False):
                 print(f"Warning: Failed to process image {i}")
 
         if batch_updates:
-            db.insert_images_batch(batch_updates, update_only=True)
-            print(f"Processed {processed_count} images with YOLO-based caliper detection")
+            try:
+                db.insert_images_batch(batch_updates, update_only=True)
+                print(f"Processed {processed_count} images with YOLO-based caliper detection")
+            except Exception as e:
+                # Save to JSON as backup if database write fails
+                import json
+                import datetime
+                backup_file = f'batch_updates_backup_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}.json'
+                with open(backup_file, 'w') as f:
+                    json.dump(batch_updates, f, indent=2)
+                print(f"\n{'='*80}")
+                print(f"ERROR: Database write failed: {e}")
+                print(f"Results have been saved to: {backup_file}")
+                print(f"Total records saved: {len(batch_updates)}")
+                print(f"{'='*80}\n")
+                raise

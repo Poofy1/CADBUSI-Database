@@ -120,6 +120,7 @@ class DatabaseManager:
                 has_calipers INTEGER DEFAULT 0,
                 has_calipers_prediction REAL,
                 caliper_boxes TEXT,
+                caliper_boxes_confidence TEXT,
                 has_caliper_mask INTEGER DEFAULT 0,
                 darkness REAL,
                 label INTEGER DEFAULT 1,
@@ -327,12 +328,12 @@ class DatabaseManager:
             'region_location_max_x1', 'region_location_max_y1',
             'crop_x', 'crop_y', 'crop_w', 'crop_h', 'crop_aspect_ratio',
             'photometric_interpretation', 'rows', 'columns', 'physical_delta_x',
-            'has_calipers', 'has_calipers_prediction', 'caliper_boxes', 'has_caliper_mask',
+            'has_calipers', 'has_calipers_prediction', 'caliper_boxes', 'caliper_boxes_confidence', 'has_caliper_mask',
             'darkness', 'label', 'region_count', 'closest_fn', 'distance',
             'file_name', 'software_versions', 'manufacturer_model_name'
         ]
         
-        string_columns = ['accession_number', 'patient_id', 'image_name', 'dicom_hash', 'caliper_boxes', 'inpainted_from']
+        string_columns = ['accession_number', 'patient_id', 'image_name', 'dicom_hash', 'caliper_boxes', 'caliper_boxes_confidence', 'inpainted_from']
         boolean_columns = ['has_calipers', 'has_caliper_mask', 'label']
         
         return self._batch_upsert_helper(

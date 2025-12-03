@@ -1,10 +1,10 @@
 import os, cv2, ast, datetime, glob
 import pandas as pd
-import numpy as np
 from tqdm import tqdm
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import sys
+import hashlib
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
@@ -195,6 +195,7 @@ def Crop_Videos(df, input_dir, output_dir):
     append_audit("export.exported_videos", processed_videos)
 
 
+
 def PerformSplit(CONFIG, df):
     val_split = CONFIG["VAL_SPLIT"]
     test_split = CONFIG["TEST_SPLIT"]
@@ -202,46 +203,42 @@ def PerformSplit(CONFIG, df):
     if 'valid' not in df.columns:
         df['valid'] = None
     
-    # Get unique patient ids
-    unique_patients = df['patient_id'].unique()
-    total_patients = len(unique_patients)
-    
-    # Calculate how many patients should be in each set
-    num_test_patients = int(total_patients * test_split)
-    num_val_patients = int(total_patients * val_split)
-    num_train_patients = total_patients - num_val_patients - num_test_patients
-    
-    # Randomly shuffle the patient ids
-    np.random.shuffle(unique_patients)
-    
-    # Split into three groups
-    test_patients = unique_patients[:num_test_patients]
-    val_patients = unique_patients[num_test_patients:num_test_patients + num_val_patients]
-    
-    # Assign split status based on patient id (0=train, 1=val, 2=test)
-    def assign_split(patient_id):
-        if patient_id in test_patients:
+    def get_split_from_hash(patient_id, val_split, test_split):
+        """Deterministically assign split based on patient_id hash."""
+        # Create a stable hash from patient_id
+        hash_bytes = hashlib.md5(str(patient_id).encode()).digest()
+        # Convert first 8 bytes to a float between 0 and 1
+        hash_int = int.from_bytes(hash_bytes[:8], byteorder='big')
+        hash_float = hash_int / (2**64)
+        
+        # Assign split based on hash value
+        if hash_float < test_split:
             return 2  # Test
-        elif patient_id in val_patients:
-            return 1  # validation
+        elif hash_float < test_split + val_split:
+            return 1  # Validation
         else:
             return 0  # Training
     
-    df['valid'] = df['patient_id'].apply(assign_split)
+    # Apply deterministic split
+    df['valid'] = df['patient_id'].apply(
+        lambda pid: get_split_from_hash(pid, val_split, test_split)
+    )
     
-    # Count samples in each split
+    # Count samples and patients in each split
     train_samples = (df['valid'] == 0).sum()
     val_samples = (df['valid'] == 1).sum()
     test_samples = (df['valid'] == 2).sum()
     
-    # Print split statistics
-    print(f"Split completed: {train_samples} training, {val_samples} validation, {test_samples} test samples")
-    print(f"Patient split: {num_train_patients} training, {num_val_patients} validation, {num_test_patients} test patients")
+    train_patients = df[df['valid'] == 0]['patient_id'].nunique()
+    val_patients = df[df['valid'] == 1]['patient_id'].nunique()
+    test_patients = df[df['valid'] == 2]['patient_id'].nunique()
     
-    # Log statistics to audit file
-    append_audit("export.train_patients", num_train_patients)
-    append_audit("export.val_patients", num_val_patients)
-    append_audit("export.test_patients", num_test_patients)
+    print(f"Split completed: {train_samples} training, {val_samples} validation, {test_samples} test samples")
+    print(f"Patient split: {train_patients} training, {val_patients} validation, {test_patients} test patients")
+    
+    append_audit("export.train_patients", train_patients)
+    append_audit("export.val_patients", val_patients)
+    append_audit("export.test_patients", test_patients)
     
     return df
 
@@ -266,7 +263,9 @@ def create_train_set(breast_data, image_data, lesion_df=None):
     columns_to_keep = ['patient_id', 'accession_number', 'study_laterality',
                        'has_malignant', 'valid', 'age_at_event',
                        'image_name', 'margin', 'shape', 'orientation', 'echo',
-                       'posterior', 'boundary']
+                       'posterior', 'boundary', 'is_biopsy', 'is_us_biopsy',
+                       'findings', 'synoptic_report', 'death_date', 'density_desc',
+                       'rad_impression', 'date', 'was_bilateral']
 
     data = data[columns_to_keep]
 
@@ -283,7 +282,16 @@ def create_train_set(breast_data, image_data, lesion_df=None):
         'orientation': 'first',
         'echo': 'first',
         'posterior': 'first',
-        'boundary': 'first'
+        'boundary': 'first',
+        'is_biopsy': 'first',
+        'is_us_biopsy': 'first',
+        'findings': 'first',
+        'synoptic_report': 'first',
+        'death_date': 'first',
+        'density_desc': 'first',
+        'rad_impression': 'first',
+        'date': 'first',
+        'was_bilateral': 'first'
     }
 
     data = data.reset_index(drop=True)
@@ -472,8 +480,11 @@ def split_bilateral_cases(breast_df, image_df):
     bilateral_df = breast_df[breast_df['study_laterality'] == 'BILATERAL'].copy()
     non_bilateral_df = breast_df[breast_df['study_laterality'] != 'BILATERAL'].copy()
 
+    # Add was_bilateral column to non-bilateral cases (set to 0)
+    non_bilateral_df['was_bilateral'] = 0
+
     if bilateral_df.empty:
-        return breast_df
+        return non_bilateral_df
 
     split_rows = []
     converted_rows = []
@@ -506,10 +517,12 @@ def split_bilateral_cases(breast_df, image_df):
             left_row = row.copy()
             left_row['study_laterality'] = 'LEFT'
             left_row['has_malignant'] = determine_has_malignant(row, 'LEFT')
+            left_row['was_bilateral'] = 1
 
             right_row = row.copy()
             right_row['study_laterality'] = 'RIGHT'
             right_row['has_malignant'] = determine_has_malignant(row, 'RIGHT')
+            right_row['was_bilateral'] = 1
 
             split_rows.extend([left_row, right_row])
         elif has_left:
@@ -517,12 +530,14 @@ def split_bilateral_cases(breast_df, image_df):
             converted_row = row.copy()
             converted_row['study_laterality'] = 'LEFT'
             converted_row['has_malignant'] = determine_has_malignant(row, 'LEFT')
+            converted_row['was_bilateral'] = 1
             converted_rows.append(converted_row)
         elif has_right:
             # Convert to RIGHT only
             converted_row = row.copy()
             converted_row['study_laterality'] = 'RIGHT'
             converted_row['has_malignant'] = determine_has_malignant(row, 'RIGHT')
+            converted_row['was_bilateral'] = 1
             converted_rows.append(converted_row)
         else:
             # No images for either side, remove this case
@@ -571,7 +586,7 @@ def apply_filters(image_df, video_df, breast_df, CONFIG):
 
     # Only labeled images
     image_df = image_df[image_df['label'] == True]
-    image_df = image_df.drop(['label', 'area'], axis=1)
+    image_df = image_df.drop(['label'], axis=1)
     
     # Only images/videos with valid patient ids (from filtered breast_df)
     valid_patient_ids = breast_df['patient_id'].unique()
@@ -642,12 +657,20 @@ def build_instance_data(image_df, breast_df):
     
     # Map breast data columns
     column_mappings = {
-        'synoptic_report': 'synoptic_report',
-        'findings': 'findings', 
-        'age_at_event': 'Age'
+        'age_at_event': 'Age',
+        'bi_rads': 'bi_rads'
     }
     instance_data = map_breast_data_to_instances(instance_data, image_df, breast_df, column_mappings)
-    
+
+    # Add columns from Images table
+    image_columns_to_add = ['area', 'orientation', 'photometric_interpretation',
+                             'has_calipers', 'has_calipers_prediction', 'inpainted_from',
+                             'caliper_boxes_confidence']
+    for col in image_columns_to_add:
+        if col in image_df.columns:
+            image_to_col_map = dict(zip(image_df['image_name'], image_df[col]))
+            instance_data[col] = instance_data['image_name'].map(image_to_col_map)
+
     # Add physical_delta_x
     if 'physical_delta_x' in image_df.columns:
         image_to_physicaldelta_map = dict(zip(image_df['image_name'], image_df['physical_delta_x']))
@@ -696,20 +719,30 @@ def add_lesions_to_instance_data(instance_data, lesion_df, image_df, breast_df):
             'patient_id': row['patient_id'],
             'accession_number': row['accession_number'],
             'laterality': row['laterality'],
-            'physical_delta_x': row.get('physical_delta_x', None)
+            'physical_delta_x': row.get('physical_delta_x', None),
+            'area': row.get('area', None),
+            'orientation': row.get('orientation', None),
+            'photometric_interpretation': row.get('photometric_interpretation', None),
+            'has_calipers': row.get('has_calipers', None),
+            'has_calipers_prediction': row.get('has_calipers_prediction', None),
+            'inpainted_from': row.get('inpainted_from', None),
+            'caliper_boxes_confidence': row.get('caliper_boxes_confidence', None)
         }
-    
+
     # Get metadata from source images
-    for col in ['patient_id', 'accession_number', 'laterality', 'physical_delta_x']:
+    metadata_columns = ['patient_id', 'accession_number', 'laterality', 'physical_delta_x',
+                        'area', 'orientation', 'photometric_interpretation',
+                        'has_calipers', 'has_calipers_prediction', 'inpainted_from',
+                        'caliper_boxes_confidence']
+    for col in metadata_columns:
         lesion_instances[col] = lesion_df['image_source'].map(
             lambda x: source_to_metadata.get(x, {}).get(col)
         )
     
     # Map breast data columns (same as regular images)
     column_mappings = {
-        'synoptic_report': 'synoptic_report',
-        'findings': 'findings', 
-        'age_at_event': 'Age'
+        'age_at_event': 'Age',
+        'bi_rads': 'bi_rads'
     }
     
     # Get columns that exist in breast_df

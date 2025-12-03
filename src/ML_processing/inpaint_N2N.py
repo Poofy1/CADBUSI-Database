@@ -83,6 +83,7 @@ def process_single_image(args):
         new_row['image_name'] = new_filename
         new_row['inpainted_from'] = original_filename
         new_row['has_calipers'] = 0
+        new_row['has_calipers_prediction'] = -1
         new_row['dicom_hash'] = f"{row_dict['dicom_hash']}_inpainted"
         
         return new_row
@@ -101,7 +102,7 @@ def Inpaint_Dataset_N2N(input_folder, num_workers=8):
         # Filter the data
         processed_data = data[
             (data['distance'] > 5) & 
-            ((data['has_calipers'] == True) | (data['photometric_interpretation'] == 'RGB'))
+            ((data['has_calipers'] == True))
         ]
         
         if len(processed_data) == 0:
