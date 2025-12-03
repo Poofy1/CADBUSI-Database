@@ -50,8 +50,8 @@ def main():
     # Handle query command
     if args.query:
         from src.data_ingest.query import run_breast_imaging_query
-        from data_ingest.clean_pathology import filter_path_data
-        from data_ingest.clean_radiology import filter_rad_data
+        from src.data_ingest.clean_pathology import filter_path_data
+        from src.data_ingest.clean_radiology import filter_rad_data
         from src.data_ingest.filter_data import create_final_dataset
         limit = args.limit
         

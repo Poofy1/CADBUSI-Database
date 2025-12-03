@@ -196,9 +196,9 @@ def Crop_Videos(df, input_dir, output_dir):
 
 
 
-def PerformSplit(CONFIG, df):
-    val_split = CONFIG["VAL_SPLIT"]
-    test_split = CONFIG["TEST_SPLIT"]
+def PerformSplit(df):
+    val_split = 0.15
+    test_split = 0.15
     
     if 'valid' not in df.columns:
         df['valid'] = None
@@ -265,7 +265,7 @@ def create_train_set(breast_data, image_data, lesion_df=None):
                        'image_name', 'margin', 'shape', 'orientation', 'echo',
                        'posterior', 'boundary', 'is_biopsy', 'is_us_biopsy',
                        'findings', 'synoptic_report', 'death_date', 'density_desc',
-                       'rad_impression', 'date', 'was_bilateral']
+                       'rad_impression', 'date', 'was_bilateral', 'has_unknown_laterality']
 
     data = data[columns_to_keep]
 
@@ -291,7 +291,8 @@ def create_train_set(breast_data, image_data, lesion_df=None):
         'density_desc': 'first',
         'rad_impression': 'first',
         'date': 'first',
-        'was_bilateral': 'first'
+        'was_bilateral': 'first',
+        'has_unknown_laterality': 'first'
     }
 
     data = data.reset_index(drop=True)
@@ -472,7 +473,7 @@ def split_bilateral_cases(breast_df, image_df):
     """
     Split bilateral cases into separate LEFT and RIGHT breast rows based on available images.
     Only splits if images exist for both lateralities. Otherwise converts to single-sided.
-    Excludes bilateral cases that have any images with unknown/null laterality.
+    Keeps bilateral cases with unknown laterality and flags them with has_unknown_laterality=1.
 
     Returns:
         Updated breast_df with bilateral cases split or converted
@@ -480,8 +481,9 @@ def split_bilateral_cases(breast_df, image_df):
     bilateral_df = breast_df[breast_df['study_laterality'] == 'BILATERAL'].copy()
     non_bilateral_df = breast_df[breast_df['study_laterality'] != 'BILATERAL'].copy()
 
-    # Add was_bilateral column to non-bilateral cases (set to 0)
+    # Add was_bilateral and has_unknown_laterality columns to non-bilateral cases (set to 0)
     non_bilateral_df['was_bilateral'] = 0
+    non_bilateral_df['has_unknown_laterality'] = 0
 
     if bilateral_df.empty:
         return non_bilateral_df
@@ -489,7 +491,7 @@ def split_bilateral_cases(breast_df, image_df):
     split_rows = []
     converted_rows = []
     removed_count = 0
-    removed_unknown_laterality = 0
+    flagged_unknown_laterality = 0
 
     for _, row in bilateral_df.iterrows():
         accession = row['accession_number']
@@ -505,9 +507,8 @@ def split_bilateral_cases(breast_df, image_df):
         )
 
         if has_unknown:
-            # Exclude bilateral cases with unknown laterality images
-            removed_unknown_laterality += 1
-            continue
+            # Keep the case but flag it
+            flagged_unknown_laterality += 1
 
         has_left = (case_images['laterality'] == 'LEFT').any()
         has_right = (case_images['laterality'] == 'RIGHT').any()
@@ -518,11 +519,13 @@ def split_bilateral_cases(breast_df, image_df):
             left_row['study_laterality'] = 'LEFT'
             left_row['has_malignant'] = determine_has_malignant(row, 'LEFT')
             left_row['was_bilateral'] = 1
+            left_row['has_unknown_laterality'] = 1 if has_unknown else 0
 
             right_row = row.copy()
             right_row['study_laterality'] = 'RIGHT'
             right_row['has_malignant'] = determine_has_malignant(row, 'RIGHT')
             right_row['was_bilateral'] = 1
+            right_row['has_unknown_laterality'] = 1 if has_unknown else 0
 
             split_rows.extend([left_row, right_row])
         elif has_left:
@@ -531,6 +534,7 @@ def split_bilateral_cases(breast_df, image_df):
             converted_row['study_laterality'] = 'LEFT'
             converted_row['has_malignant'] = determine_has_malignant(row, 'LEFT')
             converted_row['was_bilateral'] = 1
+            converted_row['has_unknown_laterality'] = 1 if has_unknown else 0
             converted_rows.append(converted_row)
         elif has_right:
             # Convert to RIGHT only
@@ -538,6 +542,7 @@ def split_bilateral_cases(breast_df, image_df):
             converted_row['study_laterality'] = 'RIGHT'
             converted_row['has_malignant'] = determine_has_malignant(row, 'RIGHT')
             converted_row['was_bilateral'] = 1
+            converted_row['has_unknown_laterality'] = 1 if has_unknown else 0
             converted_rows.append(converted_row)
         else:
             # No images for either side, remove this case
@@ -552,11 +557,11 @@ def split_bilateral_cases(breast_df, image_df):
 
     result_df = pd.concat(result_dfs, ignore_index=True)
 
-    print(f"Bilateral processing: {len(split_rows)//2} split into L+R, {len(converted_rows)} converted to single-sided, {removed_count} removed (no images), {removed_unknown_laterality} removed (unknown laterality)")
+    print(f"Bilateral processing: {len(split_rows)//2} split into L+R, {len(converted_rows)} converted to single-sided, {removed_count} removed (no images), {flagged_unknown_laterality} flagged (unknown laterality)")
     append_audit("export.bilateral_split", len(split_rows)//2)
     append_audit("export.bilateral_converted", len(converted_rows))
     append_audit("export.bilateral_removed_no_images", removed_count)
-    append_audit("export.bilateral_removed_unknown_laterality", removed_unknown_laterality)
+    append_audit("export.bilateral_flagged_unknown_laterality", flagged_unknown_laterality)
 
     return result_df
 
@@ -844,7 +849,7 @@ def Export_Database(CONFIG, limit = None, reparse_images = True):
     append_audit("export.final_breasts", remaining_breast_count)
         
     # Val split for case data
-    breast_df = PerformSplit(CONFIG, breast_df)
+    breast_df = PerformSplit(breast_df)
     
     # Create trainable csv data
     train_data = create_train_set(breast_df, image_df, lesion_df)
