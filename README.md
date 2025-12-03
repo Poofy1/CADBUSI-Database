@@ -10,6 +10,7 @@ SQLite database manager that is designed to process breast ultrasound data from 
 - Install requirements: `pip install -r requirements.txt`
 - Create/Configure: `./config.py`
 - Obtain certificate `./src/dicom_downloader/CertEmulationCA.crt`
+- Obtain user privileges: `gcloud auth application-default login --no-launch-browser`
 
 ## Configuration
 All user parameters will be controlled from a `./config.py` file, you will need to configure the following parameters:

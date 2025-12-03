@@ -84,7 +84,12 @@ def get_radiology_data(limit=None):
       DATE_DIFF(EXTRACT(DATE FROM RAD_FACT_RADIOLOGY.RADIOLOGY_DTM), PAT_DIM_PATIENT.PATIENT_BIRTH_DATE, YEAR) - 
         IF(EXTRACT(MONTH FROM PAT_DIM_PATIENT.PATIENT_BIRTH_DATE)*100 + EXTRACT(DAY FROM PAT_DIM_PATIENT.PATIENT_BIRTH_DATE) > 
            EXTRACT(MONTH FROM RAD_FACT_RADIOLOGY.RADIOLOGY_DTM)*100 + EXTRACT(DAY FROM RAD_FACT_RADIOLOGY.RADIOLOGY_DTM),1,0) AS AGE_AT_EVENT,
-      PAT_DIM_PATIENT.PATIENT_BIRTH_DATE AS BIRTH_DATE
+      PAT_DIM_PATIENT.PATIENT_BIRTH_DATE AS BIRTH_DATE,
+      -- Added breast-specific pathology fields
+      breast_results.A1_PATHOLOGY_TXT,
+      breast_results.A1_PATHOLOGY_CATEGORY_DESC,
+      breast_results.A2_PATHOLGY_TXT,
+      breast_results.A2_PATHOLOGY_CATEGORY_DESC
     FROM breast_imaging_patients
     INNER JOIN 
       `ml-mps-adl-intfhr-phi-p-3b6e.phi_secondary_use_fhir_clinicnumber_us_p.Patient` PAT_PATIENT 
@@ -104,6 +109,13 @@ def get_radiology_data(limit=None):
     INNER JOIN 
       `ml-mps-adl-intudp-phi-p-d5cb.phi_udpwh_etl_us_p.DIM_RADIOLOGY_TEST_NAME` RADTEST_DIM_RADIOLOGY_TEST_NAME 
       ON (RAD_FACT_RADIOLOGY.RADIOLOGY_TEST_NAME_DK = RADTEST_DIM_RADIOLOGY_TEST_NAME.RADIOLOGY_TEST_NAME_DK)
+    -- Join to get breast-specific pathology data
+    LEFT JOIN 
+      `ml-mps-adl-intudp-phi-p-d5cb.phi_rad_udpwh_us_p.DIM_RADIOLOGY_EXAM` rad_exam
+      ON (RAD_FACT_RADIOLOGY.ACCESSION_NBR = rad_exam.ACCESSION_NBR_ID)
+    LEFT JOIN 
+      `ml-mps-adl-intudp-phi-p-d5cb.phi_rad_udpwh_us_p.DIM_RADIOLOGY_EXAM_RESULTS_BREAST` breast_results
+      ON (rad_exam.RADIOLOGY_EXAM_DK = breast_results.RADIOLOGY_EXAM_DK)
     WHERE RADTEST_DIM_RADIOLOGY_TEST_NAME.RADIOLOGY_TEST_DESCRIPTION LIKE '%BREAST%'
     """
 
@@ -199,78 +211,6 @@ def get_pathology_data(patient_ids, batch_size=1000):
     
     return df
 
-'''
-def get_lab_data(patient_ids, batch_size=1000):
-    """
-    Get lab test data for specific patient IDs, processing in batches
-    
-    Args:
-        patient_ids (list): List of patient IDs to query
-        batch_size (int): Number of patients to process in each batch
-    
-    Returns:
-        pandas.DataFrame: Query results as a dataframe
-    """
-    start_time = time.time()
-    print("Initializing BigQuery client for lab data...")
-    client = bigquery.Client()
-    
-    # Process in batches
-    all_results = []
-    total_patients = len(patient_ids)
-    total_batches = (total_patients + batch_size - 1) // batch_size
-    
-    # Create a tqdm progress bar
-    for i in tqdm(range(0, total_patients, batch_size), total=total_batches):
-        batch = patient_ids[i:i+batch_size]
-
-        # Format IDs appropriately
-        if batch and all(str(id).isdigit() for id in batch):
-            ids_str = ', '.join([str(id) for id in batch])
-        else:
-            ids_str = ', '.join([f"'{id}'" for id in batch])
-        
-        query = f"""
-        SELECT DISTINCT
-          PAT_DIM_PATIENT.PATIENT_CLINIC_NUMBER AS PAT_PATIENT_CLINIC_NUMBER,
-          LAB_FACT_LAB_TEST.LAB_ACCESSION_NBR AS LAB_LAB_ACCESSION_NBR,
-          LAB_FACT_LAB_TEST.ENCOUNTER_NUMBER AS LAB_ENCOUNTER_NUMBER,
-          LAB_FACT_LAB_TEST.LAB_COMMENTS AS LAB_LAB_COMMENTS,
-          LT_DIM_LAB_TEST.LAB_TEST_CODE AS LT_LAB_TEST_CODE,
-          LAB_FACT_LAB_TEST.LAB_COLLECTION_DTM AS LAB_LAB_COLLECTION_DTM,
-          DATE_DIFF(EXTRACT(DATE FROM LAB_FACT_LAB_TEST.LAB_COLLECTION_DTM), PAT_DIM_PATIENT.PATIENT_BIRTH_DATE, YEAR) - 
-            IF(EXTRACT(MONTH FROM PAT_DIM_PATIENT.PATIENT_BIRTH_DATE)*100 + EXTRACT(DAY FROM PAT_DIM_PATIENT.PATIENT_BIRTH_DATE) > 
-               EXTRACT(MONTH FROM LAB_FACT_LAB_TEST.LAB_COLLECTION_DTM)*100 + EXTRACT(DAY FROM LAB_FACT_LAB_TEST.LAB_COLLECTION_DTM),1,0) AS LAB_PATIENT_AGE_AT_EVENT,
-          LAB_FACT_LAB_TEST.LAB_ORDER_DTM AS LAB_LAB_ORDER_DTM,
-          LAB_FACT_LAB_TEST.LAB_RESULT_DTM AS LAB_LAB_RESULT_DTM,
-          LT_DIM_LAB_TEST.LAB_TEST_DESCRIPTION AS LT_LAB_TEST_DESCRIPTION,
-          PANTES_DIM_LAB_PANEL_TEST.LAB_PANEL_TEST_TYPE AS PANTES_LAB_PANEL_TEST_TYPE
-        FROM `ml-mps-adl-intudp-phi-p-d5cb.phi_udpwh_etl_us_p.FACT_LAB_TEST` LAB_FACT_LAB_TEST
-        INNER JOIN
-          `ml-mps-adl-intudp-phi-p-d5cb.phi_udpwh_etl_us_p.DIM_LAB_TEST` LT_DIM_LAB_TEST
-          ON (LAB_FACT_LAB_TEST.LAB_TEST_DK = LT_DIM_LAB_TEST.LAB_TEST_DK)
-        INNER JOIN
-          `ml-mps-adl-intudp-phi-p-d5cb.phi_udpwh_etl_us_p.DIM_LAB_PANEL_TEST` PANTES_DIM_LAB_PANEL_TEST
-          ON (LAB_FACT_LAB_TEST.LAB_PANEL_TEST_DK = PANTES_DIM_LAB_PANEL_TEST.LAB_PANEL_TEST_DK)
-        INNER JOIN
-          `ml-mps-adl-intudp-phi-p-d5cb.phi_udpwh_etl_us_p.DIM_PATIENT` PAT_DIM_PATIENT
-          ON (LAB_FACT_LAB_TEST.PATIENT_DK = PAT_DIM_PATIENT.PATIENT_DK)
-        WHERE PAT_DIM_PATIENT.PATIENT_CLINIC_NUMBER IN ({ids_str})
-        """
-        
-        batch_df = client.query(query).to_dataframe()
-        all_results.append(batch_df)
-    
-    # Combine all batch results
-    if all_results:
-        df = pd.concat(all_results, ignore_index=True)
-    else:
-        df = pd.DataFrame()
-    
-    total_duration = time.time() - start_time
-    print(f"Lab data query complete. Retrieved {len(df)} total rows in {total_duration:.2f} seconds.")
-    
-    return df'''
   
 def run_breast_imaging_query(limit=None):
     """
