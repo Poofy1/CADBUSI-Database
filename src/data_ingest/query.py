@@ -28,16 +28,15 @@ def get_radiology_data(limit=None):
     limit_clause = f"LIMIT {limit}" if limit is not None else ""
     
     query = f"""
-    -- First identify ALL patients with US modality (excluding males)
-    -- NO procedure code filtering - just US modality
+    -- First identify ALL patients with US modality at series level (excluding males)
     WITH us_imaging_patients AS (
       SELECT DISTINCT PAT_PATIENT.CLINIC_NUMBER AS PATIENT_ID
       FROM `ml-mps-adl-intfhr-phi-p-3b6e.phi_secondary_use_fhir_clinicnumber_us_p.ImagingStudy` imaging
+      INNER JOIN `ml-mps-adl-intfhr-phi-p-3b6e.phi_secondary_use_fhir_clinicnumber_us_p.ImagingStudySeries` imaging_series
+        ON (imaging.id = imaging_series.imaging_study_id)
       INNER JOIN `ml-mps-adl-intfhr-phi-p-3b6e.phi_secondary_use_fhir_clinicnumber_us_p.Patient` PAT_PATIENT 
         ON (imaging.clinic_number = PAT_PATIENT.clinic_number)
-      INNER JOIN `ml-mps-adl-intudp-phi-p-d5cb.phi_udpwh_etl_us_p.FACT_RADIOLOGY` RAD_FACT_RADIOLOGY 
-        ON (imaging.ACCESSION_IDENTIFIER_VALUE = RAD_FACT_RADIOLOGY.ACCESSION_NBR)
-      WHERE RAD_FACT_RADIOLOGY.SERVICE_MODALITY_CODE = 'US'
+      WHERE imaging_series.SERIES_MODALITY_CODE = 'US'
         AND PAT_PATIENT.US_CORE_BIRTHSEX != 'M'
       {limit_clause}
     )
@@ -49,7 +48,7 @@ def get_radiology_data(limit=None):
       imaging_studies.PROCEDURE_CODE_TEXT,
       ENDPOINT.ADDRESS AS ENDPOINT_ADDRESS,
       PAT_PATIENT.US_CORE_BIRTHSEX,
-      RAD_FACT_RADIOLOGY.SERVICE_MODALITY_CODE AS MODALITY,
+      IMAGINGSTUDYSERIES.SERIES_MODALITY_CODE AS MODALITY,
       RAD_FACT_RADIOLOGY.RADIOLOGY_NARRATIVE,
       RAD_FACT_RADIOLOGY.RADIOLOGY_REPORT,
       RAD_FACT_RADIOLOGY.SERVICE_RESULT_STATUS,
@@ -83,6 +82,9 @@ def get_radiology_data(limit=None):
     LEFT JOIN 
       `ml-mps-adl-intfhr-phi-p-3b6e.phi_secondary_use_fhir_clinicnumber_us_p.ImagingStudy` imaging_studies
       ON (RAD_FACT_RADIOLOGY.ACCESSION_NBR = imaging_studies.ACCESSION_IDENTIFIER_VALUE)
+    LEFT JOIN
+      `ml-mps-adl-intfhr-phi-p-3b6e.phi_secondary_use_fhir_clinicnumber_us_p.ImagingStudySeries` IMAGINGSTUDYSERIES
+      ON (imaging_studies.id = IMAGINGSTUDYSERIES.imaging_study_id)
     LEFT JOIN 
       `ml-mps-adl-intfhr-phi-p-3b6e.phi_secondary_use_fhir_clinicnumber_us_p.Endpoint` ENDPOINT 
       ON (imaging_studies.gcp_endpoint_id = ENDPOINT.id)
@@ -96,6 +98,7 @@ def get_radiology_data(limit=None):
       `ml-mps-adl-intudp-phi-p-d5cb.phi_rad_udpwh_us_p.DIM_RADIOLOGY_EXAM_RESULTS_BREAST` breast_results
       ON (rad_exam.RADIOLOGY_EXAM_DK = breast_results.RADIOLOGY_EXAM_DK)
     WHERE RADTEST_DIM_RADIOLOGY_TEST_NAME.RADIOLOGY_TEST_DESCRIPTION LIKE '%BREAST%'
+      AND imaging_studies.DESCRIPTION LIKE '%BREAST%'
     """
 
     query_start_time = time.time()

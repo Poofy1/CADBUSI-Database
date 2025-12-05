@@ -534,14 +534,70 @@ def add_previous_worst_mg_column(radiology_df):
     
     return radiology_df
 
+def extract_modality_guidance(row):
+    """
+    Extract modality guidance from the DESCRIPTION column by finding the word before ' GUID'.
+    Only marks unknowns as 'OTHER' if is_biopsy is 'T'.
+
+    Args:
+        row: DataFrame row containing DESCRIPTION and is_biopsy columns
+
+    Returns:
+        str: Modality guidance value (US, MAMMO, TOMO, STEREOTACTIC, MR, OTHER, or None)
+    """
+    description = row['DESCRIPTION']
+    is_biopsy = row.get('is_biopsy', 'F')
+
+    if pd.isna(description):
+        return None
+
+    # Convert to uppercase for case-insensitive matching
+    description_upper = description.upper()
+
+    # Check if ' GUID' exists in the description
+    if ' GUID' not in description_upper:
+        return None
+
+    # Mapping dictionary
+    modality_map = {
+        'ULTRASOUND': 'US',
+        'US': 'US',
+        'MAMMO': 'MAMMO',
+        'TOMO': 'TOMO',
+        'STEREOTACTIC': 'STEREOTACTIC',
+        'STEREO': 'STEREOTACTIC',
+        'MR': 'MR'
+    }
+
+    # Split text before ' GUID' to get all words
+    text_before_guid = description_upper.split(' GUID')[0]
+    words = text_before_guid.split()
+
+    if not words:
+        # Only mark as OTHER if is_biopsy is 'T'
+        return 'OTHER' if is_biopsy == 'T' else None
+
+    # First, check the immediate word before ' GUID'
+    immediate_word = words[-1]
+    if immediate_word in modality_map:
+        return modality_map[immediate_word]
+
+    # If immediate word doesn't match, check all words before ' GUID' from right to left
+    for word in reversed(words[:-1]):  # Skip the last word (already checked)
+        if word in modality_map:
+            return modality_map[word]
+
+    # If no match found, only return OTHER if is_biopsy is 'T'
+    return 'OTHER' if is_biopsy == 'T' else None
+
 def extract_addendum(row):
     """
     Extract addendum section from radiology reports. Searches for APPENDED, AMENDMENT, or ADDENDUM
     and returns everything after the first match found.
-    
+
     Args:
         row: DataFrame row with RADIOLOGY_REPORT and RADIOLOGY_NARRATIVE columns
-        
+
     Returns:
         str: Text from addendum keyword onwards, or None if not found
     """
@@ -675,6 +731,9 @@ def filter_rad_data(radiology_df, output_path):
 
     # Check for addendum
     radiology_df['addendum'] = radiology_df.apply(extract_addendum, axis=1)
+
+    # Extract modality guidance (must be after is_biopsy is created)
+    radiology_df['MODALITY_GUIDANCE'] = radiology_df.apply(extract_modality_guidance, axis=1)
 
     radiology_df = add_ultrasound_classifications(radiology_df, output_path)
     
