@@ -664,9 +664,6 @@ def build_instance_data(image_df, breast_df):
     # Add is_lesion column (0 for regular images)
     instance_data['is_lesion'] = 0
 
-    # Add lesion_coord column (empty for regular images)
-    instance_data['lesion_coord'] = ''
-
     # Map breast data columns
     column_mappings = {
         'age_at_event': 'Age'
@@ -675,8 +672,7 @@ def build_instance_data(image_df, breast_df):
 
     # Add columns from Images table
     image_columns_to_add = ['area', 'orientation', 'photometric_interpretation',
-                             'has_calipers', 'has_calipers_prediction', 'inpainted_from',
-                             'yolo_confidence', 'samus_confidence']
+                             'has_calipers', 'has_calipers_prediction', 'inpainted_from']
     for col in image_columns_to_add:
         if col in image_df.columns:
             image_to_col_map = dict(zip(image_df['image_name'], image_df[col]))
@@ -724,15 +720,6 @@ def add_lesions_to_instance_data(instance_data, lesion_df, image_df, breast_df):
 
     # Add is_lesion column (1 for lesion images)
     lesion_instances['is_lesion'] = 1
-
-    # Add lesion_coord column from crop_x and crop_y in lesion_df
-    if 'crop_x' in lesion_df.columns and 'crop_y' in lesion_df.columns:
-        lesion_instances['lesion_coord'] = lesion_df.apply(
-            lambda row: f"{int(row['crop_x'])},{int(row['crop_y'])}" if pd.notna(row['crop_x']) and pd.notna(row['crop_y']) else '',
-            axis=1
-        ).values
-    else:
-        lesion_instances['lesion_coord'] = ''
 
     # Map metadata from source images via image_source
     source_to_metadata = {}
