@@ -148,6 +148,7 @@ class Samus(nn.Module):
           if bbox is not None:
               if len(bbox.shape) == 3:  # Multiple boxes: b n 4
                   all_masks = []
+                  all_iou_predictions = []
                   for i in range(bbox.shape[1]):  # For each box
                       single_box = bbox[:, i, :]  # b 4
                       se, de = self.prompt_encoder(
@@ -155,39 +156,43 @@ class Samus(nn.Module):
                           boxes=single_box,
                           masks=None,
                       )
-                      low_res_masks, _ = self.mask_decoder(
+                      low_res_masks, iou_predictions = self.mask_decoder(
                           image_embeddings=imge,
-                          image_pe=self.prompt_encoder.get_dense_pe(), 
+                          image_pe=self.prompt_encoder.get_dense_pe(),
                           sparse_prompt_embeddings=se,
-                          dense_prompt_embeddings=de, 
+                          dense_prompt_embeddings=de,
                           multimask_output=False,
                       )
                       masks = F.interpolate(low_res_masks, (256, 256), mode="bilinear", align_corners=False)
                       all_masks.append(masks)
-                  
+                      all_iou_predictions.append(iou_predictions)
+
                   # Combine masks (union strategy)
                   combined_masks = torch.zeros_like(all_masks[0])
                   for mask in all_masks:
                       combined_masks = torch.maximum(combined_masks, mask)
-                  
-                  outputs = {"low_res_logits": combined_masks, "masks": combined_masks}
+
+                  # Keep individual IoU predictions (one per box)
+                  stacked_iou = torch.cat(all_iou_predictions, dim=0)
+
+                  outputs = {"low_res_logits": combined_masks, "masks": combined_masks, "iou_predictions": stacked_iou}
                   return outputs
-              
+
               else:  # Single box: b 4 (original logic)
                   se, de = self.prompt_encoder(
                       points=None,
                       boxes=bbox,
                       masks=None,
                   )
-              low_res_masks, _ = self.mask_decoder(
+              low_res_masks, iou_predictions = self.mask_decoder(
                   image_embeddings=imge,
-                  image_pe=self.prompt_encoder.get_dense_pe(), 
+                  image_pe=self.prompt_encoder.get_dense_pe(),
                   sparse_prompt_embeddings=se,
-                  dense_prompt_embeddings=de, 
+                  dense_prompt_embeddings=de,
                   multimask_output=False,
               )
               masks = F.interpolate(low_res_masks, (256, 256), mode="bilinear", align_corners=False)
-              outputs = {"low_res_logits": low_res_masks, "masks": masks}
+              outputs = {"low_res_logits": low_res_masks, "masks": masks, "iou_predictions": iou_predictions}
               return outputs
           
           # Handle point prompts
@@ -199,20 +204,20 @@ class Samus(nn.Module):
                               boxes=None,
                               masks=None,
                           )
-                  low_res_masks, _ = self.mask_decoder( # low_res_mask b 1 128 128
+                  low_res_masks, iou_predictions = self.mask_decoder( # low_res_mask b 1 128 128
                               image_embeddings=imge,
-                              image_pe=self.prompt_encoder.get_dense_pe(), 
+                              image_pe=self.prompt_encoder.get_dense_pe(),
                               sparse_prompt_embeddings=se,
-                              dense_prompt_embeddings=de, 
+                              dense_prompt_embeddings=de,
                               multimask_output=False,
                               )
                   masks = F.interpolate(low_res_masks, (256, 256), mode="bilinear", align_corners=False)
-                  outputs = {"low_res_logits": low_res_masks, "masks": masks}
+                  outputs = {"low_res_logits": low_res_masks, "masks": masks, "iou_predictions": iou_predictions}
                   return outputs
-              
+
               # Multiple sets of points (original logic for 4D tensor)
               else:
-                  low_res_masks, masks = [], []
+                  low_res_masks, masks, iou_preds = [], [], []
                   for i in range(pt[0].shape[1]):
                       pti = (pt[0][:, i, :, :], pt[1][:, i, :])
                       sei, dei = self.prompt_encoder(            # se b 2 256, de b 256 32 32
@@ -220,22 +225,25 @@ class Samus(nn.Module):
                                   boxes=None,
                                   masks=None,
                               )
-                      low_res_masksi, _ = self.mask_decoder( # low_res_mask b 1 128 128
+                      low_res_masksi, iou_predictions = self.mask_decoder( # low_res_mask b 1 128 128
                               image_embeddings=imge,
-                              image_pe=self.prompt_encoder.get_dense_pe(), 
+                              image_pe=self.prompt_encoder.get_dense_pe(),
                               sparse_prompt_embeddings=sei,
-                              dense_prompt_embeddings=dei, 
+                              dense_prompt_embeddings=dei,
                               multimask_output=False,
                               )
                       masksi = F.interpolate(low_res_masksi, (256, 256), mode="bilinear", align_corners=False)
                       low_res_masks.append(low_res_masksi)
                       masks.append(masksi)
-                  
+                      iou_preds.append(iou_predictions)
+
                   low_res_masks = torch.stack(low_res_masks, dim=1)
                   masks = torch.stack(masks, dim=1) # b c 1 255 255
                   masks = masks.reshape(masks.shape[0], -1, masks.shape[3], masks.shape[4])
                   low_res_masks = low_res_masks.reshape(low_res_masks.shape[0], -1, low_res_masks.shape[3], low_res_masks.shape[4])
-                  outputs = {"low_res_logits": low_res_masks, "masks": masks}
+                  # Keep individual IoU predictions (one per point set)
+                  stacked_iou = torch.cat(iou_preds, dim=0)
+                  outputs = {"low_res_logits": low_res_masks, "masks": masks, "iou_predictions": stacked_iou}
                   return outputs
           
           # Handle case where neither points nor boxes are provided

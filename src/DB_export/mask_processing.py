@@ -283,6 +283,7 @@ def process_single_mask(args):
                 'lesion_images': "",
                 'image_w': "",
                 'image_h': "",
+                'crop_coords': "",
                 'lesions_created': 0
             }
         
@@ -313,6 +314,7 @@ def process_single_mask(args):
         # Track created lesion image names and dimensions
         created_lesion_files = []
         image_dimensions = []
+        crop_coordinates = []  # Track crop coordinates (x1, y1, x2, y2)
         lesions_created = 0
 
 
@@ -320,10 +322,14 @@ def process_single_mask(args):
         for box_idx, caliper_box in enumerate(caliper_boxes):
             # Crop the result with 40% expansion for this specific box
             cropped_image, expanded_box = crop_to_caliper_box(result_image, caliper_box, expand_factor=1.4)
-            
+
             # Get dimensions of the cropped image
             crop_h, crop_w = cropped_image.shape
             image_dimensions.append((crop_w, crop_h))
+
+            # Store crop coordinates (top-left corner of the crop in the original image)
+            new_x1, new_y1, new_x2, new_y2 = expanded_box
+            crop_coordinates.append((new_x1, new_y1))
             
             # Generate output filename with index if multiple boxes
             output_filename = f"{base_name}_{box_idx}.png"
@@ -364,7 +370,7 @@ def process_single_mask(args):
             result_pil = Image.fromarray(final_mask, mode='L')  # 'L' for grayscale
             save_data(result_pil, masks_output_path)
         
-        
+
         # Extract width and height strings
         if len(image_dimensions) == 1:
             # Single image - store width and height as separate values
@@ -376,8 +382,17 @@ def process_single_mask(args):
             heights = [str(dim[1]) for dim in image_dimensions]
             image_w_str = "; ".join(widths)
             image_h_str = "; ".join(heights)
-        
-        
+
+        # Extract crop coordinates strings
+        if len(crop_coordinates) == 1:
+            # Single lesion - store as "x,y"
+            crop_coords_str = f"{crop_coordinates[0][0]},{crop_coordinates[0][1]}"
+        else:
+            # Multiple lesions - store as semicolon-separated "x,y" pairs
+            coords = [f"{coord[0]},{coord[1]}" for coord in crop_coordinates]
+            crop_coords_str = "; ".join(coords)
+
+
         return {
             'idx': idx,
             'success': True,
@@ -385,6 +400,7 @@ def process_single_mask(args):
             'lesion_images': ", ".join(created_lesion_files),
             'image_w': image_w_str,
             'image_h': image_h_str,
+            'crop_coords': crop_coords_str,
             'lesions_created': lesions_created
         }
         
@@ -397,6 +413,7 @@ def process_single_mask(args):
             'lesion_images': "",
             'image_w': "",
             'image_h': "",
+            'crop_coords': "",
             'lesions_created': 0
         }
 
@@ -509,7 +526,8 @@ def Mask_Lesions(database_path, output_dir, filtered_image_df=None, max_workers=
                 patient_id = original_row['patient_id']
                 accession_number = original_row['accession_number']
                 laterality = original_row.get('laterality', None)
-                caliper_boxes_confidence_str = original_row.get('caliper_boxes_confidence', '')
+                yolo_confidence_str = original_row.get('yolo_confidence', '')
+                samus_confidence_str = original_row.get('samus_confidence', '')
 
                 # Parse lesion images (comma-separated)
                 lesion_images_str = result['lesion_images']
@@ -528,20 +546,45 @@ def Mask_Lesions(database_path, output_dir, filtered_image_df=None, max_workers=
                     widths = [int(image_w_str)] if image_w_str else [0]
                     heights = [int(image_h_str)] if image_h_str else [0]
 
-                # Parse confidence scores (semicolon-separated)
-                if caliper_boxes_confidence_str and '; ' in caliper_boxes_confidence_str:
-                    confidences = [conf.strip() for conf in caliper_boxes_confidence_str.split(';')]
-                elif caliper_boxes_confidence_str:
-                    confidences = [caliper_boxes_confidence_str.strip()]
+                # Parse crop coordinates
+                crop_coords_str = result['crop_coords']
+                crop_coords_list = []
+                if crop_coords_str:
+                    if '; ' in crop_coords_str:
+                        # Multiple coordinates
+                        for coord_pair in crop_coords_str.split(';'):
+                            x, y = coord_pair.strip().split(',')
+                            crop_coords_list.append((int(x), int(y)))
+                    else:
+                        # Single coordinate
+                        x, y = crop_coords_str.split(',')
+                        crop_coords_list.append((int(x), int(y)))
+
+                # Parse YOLO confidence scores (semicolon-separated)
+                if yolo_confidence_str and '; ' in yolo_confidence_str:
+                    yolo_confidences = [conf.strip() for conf in yolo_confidence_str.split(';')]
+                elif yolo_confidence_str:
+                    yolo_confidences = [yolo_confidence_str.strip()]
                 else:
-                    confidences = []
+                    yolo_confidences = []
+
+                # Parse SAMUS confidence scores (semicolon-separated)
+                if samus_confidence_str and '; ' in samus_confidence_str:
+                    samus_confidences = [conf.strip() for conf in samus_confidence_str.split(';')]
+                elif samus_confidence_str:
+                    samus_confidences = [samus_confidence_str.strip()]
+                else:
+                    samus_confidences = []
 
                 # Create a record for each lesion image
                 for i, lesion_img in enumerate(lesion_images):
                     crop_w = widths[i] if i < len(widths) else 0
                     crop_h = heights[i] if i < len(heights) else 0
-                    # Each lesion gets its corresponding confidence value
-                    confidence = confidences[i] if i < len(confidences) else ''
+                    # Each lesion gets its corresponding confidence values
+                    yolo_conf = yolo_confidences[i] if i < len(yolo_confidences) else ''
+                    samus_conf = samus_confidences[i] if i < len(samus_confidences) else ''
+                    # Get crop coordinates for this lesion
+                    crop_x, crop_y = crop_coords_list[i] if i < len(crop_coords_list) else (0, 0)
 
                     lesion_records.append({
                         'image_source': source_image_name,
@@ -551,7 +594,10 @@ def Mask_Lesions(database_path, output_dir, filtered_image_df=None, max_workers=
                         'laterality': laterality,
                         'crop_w': crop_w,
                         'crop_h': crop_h,
-                        'caliper_boxes_confidence': confidence
+                        'crop_x': crop_x,
+                        'crop_y': crop_y,
+                        'yolo_confidence': yolo_conf,
+                        'samus_confidence': samus_conf
                     })
         
         lesion_df = pd.DataFrame(lesion_records)

@@ -265,7 +265,7 @@ def create_train_set(breast_data, image_data, lesion_df=None):
                        'image_name', 'margin', 'shape', 'orientation', 'echo',
                        'posterior', 'boundary', 'is_biopsy', 'is_us_biopsy',
                        'findings', 'synoptic_report', 'death_date', 'density_desc',
-                       'rad_impression', 'date', 'was_bilateral', 'has_unknown_laterality']
+                       'rad_impression', 'date', 'was_bilateral', 'has_unknown_laterality', 'bi_rads']
 
     data = data[columns_to_keep]
 
@@ -292,7 +292,8 @@ def create_train_set(breast_data, image_data, lesion_df=None):
         'rad_impression': 'first',
         'date': 'first',
         'was_bilateral': 'first',
-        'has_unknown_laterality': 'first'
+        'has_unknown_laterality': 'first',
+        'bi_rads': 'first'
     }
 
     data = data.reset_index(drop=True)
@@ -659,18 +660,23 @@ def build_instance_data(image_df, breast_df):
     """
     # Create base instance_data
     instance_data = image_df[['dicom_hash', 'image_name']].copy()
-    
+
+    # Add is_lesion column (0 for regular images)
+    instance_data['is_lesion'] = 0
+
+    # Add lesion_coord column (empty for regular images)
+    instance_data['lesion_coord'] = ''
+
     # Map breast data columns
     column_mappings = {
-        'age_at_event': 'Age',
-        'bi_rads': 'bi_rads'
+        'age_at_event': 'Age'
     }
     instance_data = map_breast_data_to_instances(instance_data, image_df, breast_df, column_mappings)
 
     # Add columns from Images table
     image_columns_to_add = ['area', 'orientation', 'photometric_interpretation',
                              'has_calipers', 'has_calipers_prediction', 'inpainted_from',
-                             'caliper_boxes_confidence']
+                             'yolo_confidence', 'samus_confidence']
     for col in image_columns_to_add:
         if col in image_df.columns:
             image_to_col_map = dict(zip(image_df['image_name'], image_df[col]))
@@ -712,10 +718,22 @@ def add_lesions_to_instance_data(instance_data, lesion_df, image_df, breast_df):
     
     # Create base lesion instance data
     lesion_instances = lesion_df[['image_name']].copy()
-    
+
     # Add a placeholder dicom_hash (lesions don't have their own dicom_hash)
     lesion_instances['dicom_hash'] = lesion_df['image_source']  # Use source image as reference
-    
+
+    # Add is_lesion column (1 for lesion images)
+    lesion_instances['is_lesion'] = 1
+
+    # Add lesion_coord column from crop_x and crop_y in lesion_df
+    if 'crop_x' in lesion_df.columns and 'crop_y' in lesion_df.columns:
+        lesion_instances['lesion_coord'] = lesion_df.apply(
+            lambda row: f"{int(row['crop_x'])},{int(row['crop_y'])}" if pd.notna(row['crop_x']) and pd.notna(row['crop_y']) else '',
+            axis=1
+        ).values
+    else:
+        lesion_instances['lesion_coord'] = ''
+
     # Map metadata from source images via image_source
     source_to_metadata = {}
     for _, row in image_df.iterrows():
@@ -731,14 +749,15 @@ def add_lesions_to_instance_data(instance_data, lesion_df, image_df, breast_df):
             'has_calipers': row.get('has_calipers', None),
             'has_calipers_prediction': row.get('has_calipers_prediction', None),
             'inpainted_from': row.get('inpainted_from', None),
-            'caliper_boxes_confidence': row.get('caliper_boxes_confidence', None)
+            'yolo_confidence': row.get('yolo_confidence', None),
+            'samus_confidence': row.get('samus_confidence', None)
         }
 
     # Get metadata from source images
     metadata_columns = ['patient_id', 'accession_number', 'laterality', 'physical_delta_x',
                         'area', 'orientation', 'photometric_interpretation',
                         'has_calipers', 'has_calipers_prediction', 'inpainted_from',
-                        'caliper_boxes_confidence']
+                        'yolo_confidence', 'samus_confidence']
     for col in metadata_columns:
         lesion_instances[col] = lesion_df['image_source'].map(
             lambda x: source_to_metadata.get(x, {}).get(col)
@@ -746,8 +765,7 @@ def add_lesions_to_instance_data(instance_data, lesion_df, image_df, breast_df):
     
     # Map breast data columns (same as regular images)
     column_mappings = {
-        'age_at_event': 'Age',
-        'bi_rads': 'bi_rads'
+        'age_at_event': 'Age'
     }
     
     # Get columns that exist in breast_df

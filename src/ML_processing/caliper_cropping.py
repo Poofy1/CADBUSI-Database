@@ -696,6 +696,7 @@ def process_single_image_pair(pair, image_dir, image_data_row, model, transform,
     result = {
         'has_caliper_mask': False,
         'caliper_boxes': [],
+        'samus_confidence': '',
     }
     
     # Only process if we have more than one caliper detected
@@ -768,19 +769,31 @@ def process_single_image_pair(pair, image_dir, image_data_row, model, transform,
                     if isinstance(outputs, tuple):
                         mask = outputs[0]
                     elif isinstance(outputs, dict):
+                        # Extract IoU predictions (confidence scores - one per box)
+                        if 'iou_predictions' in outputs:
+                            iou_pred = outputs['iou_predictions']
+                            # Convert to list of individual confidence values
+                            if iou_pred.numel() == 1:
+                                # Single box
+                                result['samus_confidence'] = f"{float(iou_pred.cpu().item()):.4f}"
+                            else:
+                                # Multiple boxes - format as semicolon-separated string
+                                iou_values = iou_pred.cpu().flatten().tolist()
+                                result['samus_confidence'] = "; ".join(f"{val:.4f}" for val in iou_values)
+
                         possible_keys = ['masks', 'pred_masks', 'output', 'prediction', 'segmentation', 'mask', 'pred']
                         mask = None
                         for key in possible_keys:
                             if key in outputs:
                                 mask = outputs[key]
                                 break
-                        
+
                         if mask is None:
                             first_key = list(outputs.keys())[0]
                             mask = outputs[first_key]
                     else:
                         mask = outputs
-                        
+
                     # Convert mask to numpy for visualization
                     mask_np = mask.squeeze().cpu().numpy()
                     mask_np = torch.sigmoid(torch.tensor(mask_np)).numpy()
@@ -1045,10 +1058,12 @@ def Locate_Lesions(image_dir, save_debug_images=False):
                 cursor.execute("""
                     UPDATE Images
                     SET caliper_boxes = ?,
-                        has_caliper_mask = ?
+                        has_caliper_mask = ?,
+                        samus_confidence = ?
                     WHERE image_name = ?
-                """, (result['caliper_boxes'], 
+                """, (result['caliper_boxes'],
                       1 if result['has_caliper_mask'] else 0,
+                      result['samus_confidence'],
                       clean_image_name))
                 
                 processed_count += 1

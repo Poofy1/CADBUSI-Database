@@ -256,7 +256,8 @@ def process_single_image(image_name, image_dir, image_data_row, model, yolo_mode
     result = {
         'has_caliper_mask': False,
         'caliper_boxes': [],
-        'caliper_boxes_confidence': '',
+        'yolo_confidence': '',
+        'samus_confidence': '',
     }
 
     # Initialize variables for debug saving
@@ -286,7 +287,7 @@ def process_single_image(image_name, image_dir, image_data_row, model, yolo_mode
         result['caliper_boxes'] = "; ".join(f"[{b[0]}, {b[1]}, {b[2]}, {b[3]}]" for b in full_image_caliper_boxes)
 
         # Store confidence scores in result format (semicolon-separated)
-        result['caliper_boxes_confidence'] = "; ".join(f"{c:.4f}" for c in confidences)
+        result['yolo_confidence'] = "; ".join(f"{c:.4f}" for c in confidences)
         
         # Only run SAMUS model if use_samus_model is True
         if use_samus_model and cropped_caliper_boxes:
@@ -307,7 +308,19 @@ def process_single_image(image_name, image_dir, image_data_row, model, yolo_mode
                     with autocast():
                         outputs = model(image_tensor, bbox=box_tensor.unsqueeze(0))
                     mask = outputs['masks']
-                        
+
+                    # Extract IoU predictions (confidence scores - one per box)
+                    if 'iou_predictions' in outputs:
+                        iou_pred = outputs['iou_predictions']
+                        # Convert to list of individual confidence values
+                        if iou_pred.numel() == 1:
+                            # Single box
+                            result['samus_confidence'] = f"{float(iou_pred.cpu().item()):.4f}"
+                        else:
+                            # Multiple boxes - format as semicolon-separated string
+                            iou_values = iou_pred.cpu().flatten().tolist()
+                            result['samus_confidence'] = "; ".join(f"{val:.4f}" for val in iou_values)
+
                     # Convert mask to numpy for visualization
                     mask_np = mask.squeeze().cpu().numpy()
                     mask_np = torch.sigmoid(torch.tensor(mask_np)).numpy()
@@ -430,9 +443,9 @@ def Locate_Lesions(image_dir, save_debug_images=False):
         image_data = db.get_images_dataframe()
 
         # Add columns to dataframe if they don't exist (for in-memory processing)
-        for col in ["caliper_boxes", "caliper_boxes_confidence", "has_caliper_mask"]:
+        for col in ["caliper_boxes", "yolo_confidence", "has_caliper_mask"]:
             if col not in image_data.columns:
-                image_data[col] = "" if col in ["caliper_boxes", "caliper_boxes_confidence"] else False
+                image_data[col] = "" if col in ["caliper_boxes", "yolo_confidence"] else False
         
         # Initialize has_caliper_mask to False for ALL rows
         image_data["has_caliper_mask"] = False
@@ -488,8 +501,9 @@ def Locate_Lesions(image_dir, save_debug_images=False):
                 update_data = {
                     'image_name': image_name,
                     'caliper_boxes': result['caliper_boxes'],
-                    'caliper_boxes_confidence': result['caliper_boxes_confidence'],
-                    'has_caliper_mask': result['has_caliper_mask']
+                    'yolo_confidence': result['yolo_confidence'],
+                    'has_caliper_mask': result['has_caliper_mask'],
+                    'samus_confidence': result['samus_confidence']
                 }
                 batch_updates.append(update_data)
                 processed_count += 1
