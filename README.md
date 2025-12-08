@@ -58,9 +58,6 @@ CONFIG = {
 
     # Export Settings
     "EXPORT_DIR": "exports/",
-    "VAL_SPLIT": 0.2,
-    "TEST_SPLIT": 0.1,
-    "FOCUS_TYPE": "breast", # 'breast' exports cropped breast image. 'lesion' exports cropped/masked lesions.
 }
 ```
 ## Usage
