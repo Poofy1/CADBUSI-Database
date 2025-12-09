@@ -122,7 +122,7 @@ def extract_cancer_type(text):
 def fill_pathology_accession_numbers(final_df):
     """
     Fill in accession numbers for rows with lesion_diag entries.
-    For each patient with is_us_biopsy = T, find lesion_diag rows from 1 day before 
+    For each patient with is_biopsy = T, find lesion_diag rows from 1 day before 
     the biopsy up to 6 months after and assign the accession number from the most recent 
     previous MODALITY = US row before that specific biopsy.
     Only assigns if lateralities match:
@@ -133,7 +133,7 @@ def fill_pathology_accession_numbers(final_df):
     with the same ACCESSION_NUMBER.
     """
     # Pre-filter all relevant records once (major speedup)
-    biopsy_mask = final_df['is_us_biopsy'] == 'T'
+    biopsy_mask = final_df['is_biopsy'] == 'T'
     biopsy_records = final_df[biopsy_mask & pd.notna(final_df['DATE'])][
         ['PATIENT_ID', 'DATE']
     ].reset_index()
@@ -149,7 +149,7 @@ def fill_pathology_accession_numbers(final_df):
     ].reset_index()
     
     us_records_mask = (
-        (final_df['MODALITY'] == 'US') &
+        #(final_df['MODALITY'] == 'US') &
         pd.notna(final_df['ACCESSION_NUMBER']) &
         (final_df['ACCESSION_NUMBER'] != '') &
         pd.notna(final_df['Study_Laterality']) &
@@ -418,24 +418,39 @@ def create_final_dataset(rad_df, path_df, output_path):
     final_df.to_csv(f'{output_path}/combined_dataset_debug.csv', index=False)
 
     audit_pathology_dates(final_df)
-    
-    # Filter to keep only rows with 'US' in MODALITY
-    initial_count = len(final_df)
-    final_df_us = final_df[final_df['MODALITY'].str.contains('US', na=False, case=False)]
-    filtered_count = initial_count - len(final_df_us)
 
-    append_audit("query_clean.rad_non_US_removed", filtered_count - path_df_length) # path_df_length were removed here but lets keep radiology context
-    
+    # Keep US rows OR rows with diagnosis (left_diagnosis or right_diagnosis)
+    initial_count = len(final_df)
+    is_us = final_df['MODALITY'].str.contains('US', na=False, case=False)
+    has_diagnosis = final_df['left_diagnosis'].notna() | final_df['right_diagnosis'].notna()
+
+    final_df_filtered = final_df[is_us | has_diagnosis].copy()
+
+    # Clear ENDPOINT_ADDRESS for non-US rows
+    non_us_mask = ~final_df_filtered['MODALITY'].str.contains('US', na=False, case=False)
+    final_df_filtered.loc[non_us_mask, 'ENDPOINT_ADDRESS'] = None
+
+    filtered_count = initial_count - len(final_df_filtered)
+    append_audit("query_clean.rad_non_US_no_diagnosis_removed", filtered_count - path_df_length)
+
+    us_count = is_us.sum()
+    non_us_with_diagnosis = len(final_df_filtered[non_us_mask])
+    print(f"Kept {us_count} US rows and {non_us_with_diagnosis} non-US rows with diagnosis")
+    append_audit("query_clean.us_rows", us_count)
+    append_audit("query_clean.non_us_with_diagnosis", non_us_with_diagnosis)
+
     # Remove duplicate rows based on Accession_Number
-    duplicate_accessions = final_df_us[final_df_us.duplicated(subset=['ACCESSION_NUMBER'], keep=False)]['ACCESSION_NUMBER']
-    duplicate_count = len(final_df_us[final_df_us['ACCESSION_NUMBER'].isin(duplicate_accessions)])
-    final_df_us = final_df_us[~final_df_us['ACCESSION_NUMBER'].isin(duplicate_accessions)]
+    duplicate_accessions = final_df_filtered[final_df_filtered.duplicated(subset=['ACCESSION_NUMBER'], keep=False)]['ACCESSION_NUMBER']
+    duplicate_count = len(final_df_filtered[final_df_filtered['ACCESSION_NUMBER'].isin(duplicate_accessions)])
+    final_df_filtered = final_df_filtered[~final_df_filtered['ACCESSION_NUMBER'].isin(duplicate_accessions)]
     append_audit("query_clean.rad_duplicates_removed", duplicate_count)
-    
-    # Remove rows with empty ENDPOINT_ADDRESS
-    empty_endpoint_count = sum(final_df_us['ENDPOINT_ADDRESS'].isna())
-    final_df_us = final_df_us[final_df_us['ENDPOINT_ADDRESS'].notna()]
-    append_audit("query_clean.rad_missing_address_removed", empty_endpoint_count)
+
+    # Remove US rows with empty ENDPOINT_ADDRESS (non-US rows already have cleared endpoints, so skip those)
+    us_rows = final_df_filtered['MODALITY'].str.contains('US', na=False, case=False)
+    empty_endpoint_in_us = us_rows & final_df_filtered['ENDPOINT_ADDRESS'].isna()
+    empty_endpoint_count = sum(empty_endpoint_in_us)
+    final_df_filtered = final_df_filtered[~empty_endpoint_in_us]
+    append_audit("query_clean.rad_us_missing_address_removed", empty_endpoint_count)
     
     # Remove rows with empty BI-RADS
     #empty_birads_count = sum(final_df_us['BI-RADS'].isna())
@@ -443,36 +458,36 @@ def create_final_dataset(rad_df, path_df, output_path):
     #append_audit("query_clean.rad_missing_birads_removed", empty_birads_count)
     
     # Count total interpretations
-    audit_interpretations(final_df_us)
+    audit_interpretations(final_df_filtered)
 
     # Remove rows where both left_diagnosis and right_diagnosis are empty AND is_biopsy is True
-    both_empty = final_df_us['left_diagnosis'].isna() & final_df_us['right_diagnosis'].isna()
-    is_biopsy = final_df_us['is_biopsy'] == 'T'
+    both_empty = final_df_filtered['left_diagnosis'].isna() & final_df_filtered['right_diagnosis'].isna()
+    is_biopsy = final_df_filtered['is_biopsy'] == 'T'
     remove_condition = both_empty & is_biopsy
 
     empty_interpretation_count = sum(remove_condition)
-    final_df_us = final_df_us[~remove_condition]
+    final_df_filtered = final_df_filtered[~remove_condition]
     append_audit("query_clean.rad_missing_final_interp_biopsy", empty_interpretation_count)
     
 
     # Extract STUDY_ID from ENDPOINT_ADDRESS
-    final_df_us['STUDY_ID'] = final_df_us['ENDPOINT_ADDRESS'].apply(
+    final_df_filtered['STUDY_ID'] = final_df_filtered['ENDPOINT_ADDRESS'].apply(
         lambda url: url.split('/')[-1] if pd.notna(url) else None
     )
-    
+
     # Clean lesion pathology
-    pathology_subset = pathology_subset[pathology_subset['ACCESSION_NUMBER'].isin(final_df_us['ACCESSION_NUMBER'])]
+    pathology_subset = pathology_subset[pathology_subset['ACCESSION_NUMBER'].isin(final_df_filtered['ACCESSION_NUMBER'])]
     pathology_subset['cancer_type'] = pathology_subset['lesion_diag'].apply(extract_cancer_type)
     
-    # Save the US-only filtered dataset
-    final_df_us.to_csv(f'{env}/data/endpoint_data.csv', index=False)
+    # Save the filtered dataset
+    final_df_filtered.to_csv(f'{env}/data/endpoint_data.csv', index=False)
     pathology_subset.to_csv(f'{output_path}/lesion_pathology.csv', index=False)
 
     # Print statistics
-    print(f"Data ready with {len(final_df_us)} accessions")
-    append_audit("query_clean.final_case_count", len(final_df_us))
+    print(f"Data ready with {len(final_df_filtered)} accessions")
+    append_audit("query_clean.final_case_count", len(final_df_filtered))
     
-    return final_df
+    return final_df_filtered
 
 
 

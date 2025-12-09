@@ -174,9 +174,7 @@ def get_pathology_data(patient_ids, batch_size=1000):
           `ml-mps-adl-intudp-phi-p-d5cb.phi_udpwh_etl_us_p.DIM_SPECIMEN_PART_TYPE` SPECPARTYP
           ON (SPECDET.SPECIMEN_PART_TYPE_DK = SPECPARTYP.SPECIMEN_PART_TYPE_DK)
         WHERE PAT_DIM_PATIENT.PATIENT_CLINIC_NUMBER IN ({ids_str})
-        AND (
-          LOWER(SPECPARTYP.SPECIMEN_PART_TYPE_CODE) IN ('breast','breast1','breast2','breast3','breast4','breast5','breast6','breast7','breast8','breast9','breast10','breast11')
-        )
+        AND LOWER(SPECPARTYP.SPECIMEN_PART_TYPE_NAME) LIKE '%breast%'
         """
         
         batch_df = client.query(query).to_dataframe()

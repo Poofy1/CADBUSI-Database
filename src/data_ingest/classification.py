@@ -45,7 +45,7 @@ def check_assumed_benign(final_df):
     today = pd.Timestamp.now()
     
     # Pre-compute the eligible US records with BI-RADS 1 or 2 to avoid processing irrelevant rows
-    us_mask = (final_df['MODALITY'] == 'US') & (final_df['BI-RADS'].isin(['1', '2'])) & pd.notna(final_df['DATE'])
+    us_mask = (final_df['BI-RADS'].isin(['1', '2'])) & pd.notna(final_df['DATE'])
     us_records = final_df[us_mask]
     
     # Only process patients who have eligible US records
@@ -147,7 +147,7 @@ def check_assumed_benign_birads3(final_df):
     today = pd.Timestamp.now()
     
     # Pre-compute the eligible US records with BI-RADS 3 to avoid processing irrelevant rows
-    us_mask = (final_df['MODALITY'] == 'US') & (final_df['BI-RADS'] == '3') & pd.notna(final_df['DATE'])
+    us_mask = (final_df['BI-RADS'] == '3') & pd.notna(final_df['DATE'])
     us_records = final_df[us_mask]
     
     # Only process patients who have eligible US records
@@ -194,8 +194,8 @@ def check_assumed_benign_birads3(final_df):
             # Filter for follow-up US records specifically
             followup_us_records = patient_records[
                 (patient_records['DATE'] > row['DATE']) &
-                (patient_records['DATE'] <= followup_end) &
-                (patient_records['MODALITY'] == 'US')
+                (patient_records['DATE'] <= followup_end) #&
+                #(patient_records['MODALITY'] == 'US')
             ]
 
             if len(followup_us_records) > 0 and 'BI-RADS' in followup_us_records.columns:
@@ -260,48 +260,68 @@ def check_assumed_benign_birads3(final_df):
 
 def check_malignant_from_biopsy(final_df):
     """
-    Check for malignancy indicators by marking rows as MALIGNANT1 
+    Check for malignancy indicators by marking rows as MALIGNANT1
     if BI-RADS = 6 and MODALITY is 'US', for cases without interpretation,
     but only if there exists at least one 'MALIGNANT' in path_interpretation
-    FOR THAT PATIENT.
+    FOR THAT PATIENT. For bilateral cases, only marks the specific breast(s)
+    that have malignancy based on Pathology_Laterality.
     """
     updates = {}
-    
+
     # Process each patient separately
     for patient_id in final_df['PATIENT_ID'].unique():
         # Get all records for this patient
         patient_records = final_df[final_df['PATIENT_ID'] == patient_id]
-        
-        # Check if any path_interpretation for this patient contains 'MALIGNANT'
-        has_malignant = any(
-            isinstance(interp, str) and 'MALIGNANT' in interp 
-            for interp in patient_records['path_interpretation'] 
-            if pd.notna(interp)
-        )
-        
-        # Only proceed if there's at least one 'MALIGNANT' in path_interpretation for this patient
-        if has_malignant:
+
+        # Collect which breast(s) have malignancy from pathology records
+        malignant_breasts = set()
+        for _, record in patient_records.iterrows():
+            if pd.notna(record.get('path_interpretation')) and 'MALIGNANT' in str(record['path_interpretation']):
+                path_lat = record.get('Pathology_Laterality')
+                if pd.notna(path_lat) and path_lat in ['LEFT', 'RIGHT']:
+                    malignant_breasts.add(path_lat)
+
+        # Only proceed if there's at least one malignant breast identified
+        if malignant_breasts:
             # Find BI-RADS 6 US rows for this patient
             us_birads6_rows = patient_records[
-                (pd.notna(patient_records.get('MODALITY'))) & 
-                (patient_records['MODALITY'] == 'US') & 
-                (pd.notna(patient_records.get('BI-RADS'))) & 
+                (pd.notna(patient_records.get('MODALITY'))) &
+                #(patient_records['MODALITY'] == 'US') &
+                (pd.notna(patient_records.get('BI-RADS'))) &
                 (patient_records['BI-RADS'] == '6')
             ].index
-            
+
             for idx in us_birads6_rows:
                 row = final_df.loc[idx]
-                # Check if both diagnosis columns are empty
-                left_empty = pd.isna(row.get('left_diagnosis')) or row.get('left_diagnosis') == ''
-                right_empty = pd.isna(row.get('right_diagnosis')) or row.get('right_diagnosis') == ''
-                if left_empty and right_empty:
-                    updates[idx] = ('MALIGNANT1', row.get('Study_Laterality'))
+                laterality = row.get('Study_Laterality')
+
+                if laterality == 'BILATERAL':
+                    # For bilateral cases, only mark breasts that have malignancy
+                    for malignant_breast in malignant_breasts:
+                        # Check if the specific diagnosis column is empty
+                        diag_col = 'left_diagnosis' if malignant_breast == 'LEFT' else 'right_diagnosis'
+                        if pd.isna(row.get(diag_col)) or row.get(diag_col) == '':
+                            # Store the update with the pathology laterality
+                            if idx not in updates:
+                                updates[idx] = []
+                            updates[idx].append(('MALIGNANT1', laterality, malignant_breast))
+                else:
+                    # For non-bilateral cases, check if the laterality matches any malignant breast
+                    if laterality in malignant_breasts:
+                        # Check if both diagnosis columns are empty
+                        left_empty = pd.isna(row.get('left_diagnosis')) or row.get('left_diagnosis') == ''
+                        right_empty = pd.isna(row.get('right_diagnosis')) or row.get('right_diagnosis') == ''
+                        if left_empty and right_empty:
+                            if idx not in updates:
+                                updates[idx] = []
+                            updates[idx].append(('MALIGNANT1', laterality, None))
 
     # Apply all updates at once
-    for idx, (value, laterality) in updates.items():
-        diagnosis_cols = get_diagnosis_column(laterality)
-        for col in diagnosis_cols:
-            final_df.at[idx, col] = value
+    for idx, update_list in updates.items():
+        for value, laterality, pathology_laterality in update_list:
+            diagnosis_cols = get_diagnosis_column(laterality, pathology_laterality)
+            for col in diagnosis_cols:
+                final_df.at[idx, col] = value
 
     return final_df
 
@@ -312,7 +332,7 @@ def check_from_next_diagnosis(final_df, days=240):
     - For MALIGNANT cases: Apply only to BI-RADS '4', '4A', '4B', '4C', '5', or '6'
       Set diagnosis to 'MALIGNANT2' only if:
       1. The laterality matches between the US study and the pathology
-      2. At least one record in the date range has 'is_us_biopsy' = 'T'
+      2. At least one record in the date range has 'is_biopsy' = 'T'
 
     - For BENIGN cases: Apply only to BI-RADS '1', '2', '3', '4', '4A', '4B'
       Set diagnosis to 'BENIGN2' if:
@@ -336,7 +356,7 @@ def check_from_next_diagnosis(final_df, days=240):
         right_empty = patient_records['right_diagnosis'].isna() | (patient_records['right_diagnosis'] == '')
 
         relevant_records = patient_records[
-            (patient_records['MODALITY'] == 'US') &
+            #(patient_records['MODALITY'] == 'US') &
             (left_empty & right_empty) &
             pd.notna(patient_records['DATE']) &
             pd.notna(patient_records['Study_Laterality'])
@@ -354,11 +374,11 @@ def check_from_next_diagnosis(final_df, days=240):
                 (patient_records['DATE'] <= future_date)
             ]
             
-            # Check if there's at least one record with 'is_us_biopsy' = 'T' in the date range
+            # Check if there's at least one record with 'is_biopsy' = 'T' in the date range
             has_us_biopsy = any(
-                (record['is_us_biopsy'] == 'T') 
+                (record['is_biopsy'] == 'T') 
                 for _, record in future_records.iterrows() 
-                if pd.notna(record.get('is_us_biopsy'))
+                if pd.notna(record.get('is_biopsy'))
             )
             
             # Handle BILATERAL case - check each pathology laterality separately
@@ -439,6 +459,76 @@ def check_from_next_diagnosis(final_df, days=240):
     return final_df
 
 
+def check_pathology_override(final_df):
+    """
+    Final classification override based on A2_PATHOLOGY_CATEGORY_DESC and A1_PATHOLOGY_CATEGORY_DESC.
+    This is the last classification method that runs and will override previous classifications.
+
+    Priority: A2_PATHOLOGY_CATEGORY_DESC > A1_PATHOLOGY_CATEGORY_DESC
+    If 'malignant' (case insensitive) exists: MALIGNANT4
+    Otherwise if non-empty: BENIGN4
+    Updates the appropriate diagnosis column(s) based on laterality.
+    """
+    updates = {}
+
+    # Track metrics
+    filled_empty = 0  # Empty -> Filled
+    equivalent_override = 0  # Same type (Benign* -> Benign4 or Malignant* -> Malignant4)
+    disagreement = 0  # Different type (Benign* -> Malignant4 or Malignant* -> Benign4)
+
+    for idx, row in final_df.iterrows():
+        # Get pathology category with A2 priority
+        pathology_cat = None
+        if pd.notna(row.get('A2_PATHOLOGY_CATEGORY_DESC')) and str(row.get('A2_PATHOLOGY_CATEGORY_DESC')).strip():
+            pathology_cat = str(row.get('A2_PATHOLOGY_CATEGORY_DESC')).strip()
+        elif pd.notna(row.get('A1_PATHOLOGY_CATEGORY_DESC')) and str(row.get('A1_PATHOLOGY_CATEGORY_DESC')).strip():
+            pathology_cat = str(row.get('A1_PATHOLOGY_CATEGORY_DESC')).strip()
+
+        # If we have a pathology category, determine classification
+        if pathology_cat:
+            # Check if 'malignant' or 'invasive' appears (case insensitive)
+            pathology_lower = pathology_cat.lower()
+            if 'malignant' in pathology_lower or 'invasive' in pathology_lower:
+                classification = 'MALIGNANT4'
+            else:
+                classification = 'BENIGN4'
+
+            # Get laterality to determine which column(s) to update
+            laterality = row.get('Study_Laterality')
+
+            # Get the pathology laterality if available for bilateral cases
+            path_laterality = row.get('Pathology_Laterality')
+
+            # Get the diagnosis columns that will be updated
+            diagnosis_cols = get_diagnosis_column(laterality, path_laterality)
+
+            # Check existing diagnoses to categorize the update
+            for col in diagnosis_cols:
+                old_value = row.get(col)
+
+                # Categorize the change
+                if pd.isna(old_value) or old_value == '' or old_value is None:
+                    filled_empty += 1
+                elif 'BENIGN' in str(old_value) and 'BENIGN' in classification:
+                    equivalent_override += 1
+                elif 'MALIGNANT' in str(old_value) and 'MALIGNANT' in classification:
+                    equivalent_override += 1
+                elif ('BENIGN' in str(old_value) and 'MALIGNANT' in classification) or \
+                     ('MALIGNANT' in str(old_value) and 'BENIGN' in classification):
+                    disagreement += 1
+
+            # Store the update
+            updates[idx] = (classification, laterality, path_laterality)
+
+    # Apply all updates at once
+    for idx, (value, laterality, path_laterality) in updates.items():
+        diagnosis_cols = get_diagnosis_column(laterality, path_laterality)
+        for col in diagnosis_cols:
+            final_df.at[idx, col] = value
+
+    # Return dataframe and metrics (metrics will be aggregated and printed later)
+    return final_df, filled_empty, equivalent_override, disagreement
+
 
 def determine_final_interpretation(final_df, batch_size=100, max_workers=None):
 
@@ -465,7 +555,7 @@ def determine_final_interpretation(final_df, batch_size=100, max_workers=None):
         for i in range(0, len(unique_patients), batch_size)
     ]
 
-    # Define worker function to process a batch of patients through all four methods
+    # Define worker function to process a batch of patients through all classification methods
     def process_patient_batch(patient_ids):
         # Create a DEEP copy of patient records
         batch_df = final_df[final_df['PATIENT_ID'].isin(patient_ids)].copy(deep=True)
@@ -475,21 +565,30 @@ def determine_final_interpretation(final_df, batch_size=100, max_workers=None):
         batch_df = check_assumed_benign_birads3(batch_df)
         batch_df = check_malignant_from_biopsy(batch_df)
         batch_df = check_from_next_diagnosis(batch_df)
+        batch_df, filled_empty, equivalent_override, disagreement = check_pathology_override(batch_df)
 
         # Only return rows that were actually modified (either column has a value)
         modified_mask = batch_df['left_diagnosis'].notna() | batch_df['right_diagnosis'].notna()
-        return batch_df.loc[modified_mask, ['PATIENT_ID', 'ACCESSION_NUMBER', 'left_diagnosis', 'right_diagnosis']]
+        result_df = batch_df.loc[modified_mask, ['PATIENT_ID', 'ACCESSION_NUMBER', 'left_diagnosis', 'right_diagnosis']]
+
+        # Return results and metrics
+        return result_df, filled_empty, equivalent_override, disagreement
    
     # Use ThreadPoolExecutor to process batches in parallel
     results = []
-   
+
+    # Aggregate metrics from all batches
+    total_filled_empty = 0
+    total_equivalent_override = 0
+    total_disagreement = 0
+
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Submit all batches for processing and capture futures
         futures = {
             executor.submit(process_patient_batch, batch): batch
             for batch in patient_batches
         }
-       
+
         # Process results as they complete
         for future in tqdm(
             concurrent.futures.as_completed(futures),
@@ -497,20 +596,41 @@ def determine_final_interpretation(final_df, batch_size=100, max_workers=None):
             desc="Determining classifications"
         ):
             try:
-                batch_result = future.result()
+                batch_result, filled_empty, equivalent_override, disagreement = future.result()
                 results.append(batch_result)
+
+                # Aggregate metrics
+                total_filled_empty += filled_empty
+                total_equivalent_override += equivalent_override
+                total_disagreement += disagreement
             except Exception as e:
                 print(f"Error processing batch: {e}")
-   
+
     if not results:
         return final_df
-   
+
     # Combine all results
     combined_results = pd.concat(results)
 
     # Update the original dataframe with the processed results
     # We only update the 'left_diagnosis' and 'right_diagnosis' columns
     final_df.update(combined_results)
+
+    # Print aggregated pathology override metrics
+    total_updates = total_filled_empty + total_equivalent_override + total_disagreement
+    if total_updates > 0:
+        print("\n=== Pathology Override Metrics ===")
+        print(f"Total diagnosis updates: {total_updates}")
+        print(f"Filled empty diagnoses: {total_filled_empty} ({total_filled_empty/total_updates*100:.1f}%)")
+        print(f"Equivalent overrides: {total_equivalent_override} ({total_equivalent_override/total_updates*100:.1f}%)")
+        print(f"Disagreements: {total_disagreement} ({total_disagreement/total_updates*100:.1f}%)")
+        print("=" * 35)
+
+        # Log to audit
+        append_audit("classification.pathology_override_total", total_updates)
+        append_audit("classification.pathology_override_filled_empty", total_filled_empty)
+        append_audit("classification.pathology_override_equivalent", total_equivalent_override)
+        append_audit("classification.pathology_override_disagreement", total_disagreement)
 
     return final_df
 
@@ -522,22 +642,26 @@ def audit_interpretations(final_df):
     benign1_count = sum((final_df['left_diagnosis'] == 'BENIGN1') | (final_df['right_diagnosis'] == 'BENIGN1'))
     benign2_count = sum((final_df['left_diagnosis'] == 'BENIGN2') | (final_df['right_diagnosis'] == 'BENIGN2'))
     benign3_count = sum((final_df['left_diagnosis'] == 'BENIGN3') | (final_df['right_diagnosis'] == 'BENIGN3'))
+    benign4_count = sum((final_df['left_diagnosis'] == 'BENIGN4') | (final_df['right_diagnosis'] == 'BENIGN4'))
     malignant1_count = sum((final_df['left_diagnosis'] == 'MALIGNANT1') | (final_df['right_diagnosis'] == 'MALIGNANT1'))
     malignant2_count = sum((final_df['left_diagnosis'] == 'MALIGNANT2') | (final_df['right_diagnosis'] == 'MALIGNANT2'))
-    
+    malignant4_count = sum((final_df['left_diagnosis'] == 'MALIGNANT4') | (final_df['right_diagnosis'] == 'MALIGNANT4'))
+
     # Create audit log with counts for each category
     append_audit("query_clean.assumed_benign", benign1_count)
     append_audit("query_clean.birads3_benign", benign3_count)
     append_audit("query_clean.path_confirmed_benign", benign2_count)
+    append_audit("query_clean.pathology_override_benign", benign4_count)
     append_audit("query_clean.path_confirmed_malignant", malignant2_count)
     append_audit("query_clean.birads6_malignant", malignant1_count)
-    
+    append_audit("query_clean.pathology_override_malignant", malignant4_count)
+
     # Calculate total benign (all benign categories)
-    total_benign = benign1_count + benign2_count + benign3_count
+    total_benign = benign1_count + benign2_count + benign3_count + benign4_count
     append_audit("query_clean.final_benign_count", total_benign)
-    
+
     # Calculate total malignant (all malignant categories)
-    total_malignant = malignant1_count + malignant2_count
+    total_malignant = malignant1_count + malignant2_count + malignant4_count
     append_audit("query_clean.final_malignant_count", total_malignant)
     
     # Calculate unknown (cases without a final interpretation)
