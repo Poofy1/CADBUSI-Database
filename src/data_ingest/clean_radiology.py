@@ -590,6 +590,85 @@ def extract_modality_guidance(row):
     # If no match found, only return OTHER if is_biopsy is 'T'
     return 'OTHER' if is_biopsy == 'T' else None
 
+def apply_biopsy_guidance_modality(radiology_df):
+    """
+    Apply guidance modality from biopsy rows to nearby exams and calculate days to biopsy.
+
+    For each biopsy with a guidance modality:
+    - Apply that modality to exams within -30 to 120 days (if they don't have one)
+    - Calculate days_to_biopsy for all exams (days until next biopsy)
+
+    Args:
+        radiology_df: DataFrame with PATIENT_ID, RADIOLOGY_DTM, is_biopsy, MODALITY_GUIDANCE columns
+
+    Returns:
+        DataFrame with updated MODALITY_GUIDANCE and new days_to_biopsy column
+    """
+    print("Applying biopsy guidance modality to nearby exams...")
+
+    # Convert RADIOLOGY_DTM to datetime if not already
+    radiology_df['RADIOLOGY_DTM'] = pd.to_datetime(radiology_df['RADIOLOGY_DTM'], errors='coerce')
+
+    # Initialize days_to_biopsy column
+    radiology_df['days_to_biopsy'] = None
+
+    # Sort by patient and date for efficient processing
+    df_sorted = radiology_df.sort_values(['PATIENT_ID', 'RADIOLOGY_DTM']).copy()
+
+    # Group by patient
+    grouped = df_sorted.groupby('PATIENT_ID')
+
+    guidance_applied_count = 0
+    rows_with_days_to_biopsy = 0
+
+    for patient_id, group in grouped:
+        # Get all biopsy rows for this patient
+        biopsy_rows = group[group['is_biopsy'] == 'T']
+
+        if biopsy_rows.empty:
+            continue
+
+        # Process each row in the group
+        for idx, row in group.iterrows():
+            row_date = row['RADIOLOGY_DTM']
+
+            # Find the next biopsy after this row
+            future_biopsies = biopsy_rows[biopsy_rows['RADIOLOGY_DTM'] > row_date]
+            if not future_biopsies.empty:
+                next_biopsy = future_biopsies.iloc[0]
+                days_diff = (next_biopsy['RADIOLOGY_DTM'] - row_date).days
+                radiology_df.loc[idx, 'days_to_biopsy'] = days_diff
+                rows_with_days_to_biopsy += 1
+
+            # Apply guidance modality from nearby biopsies (if current row doesn't have one)
+            if pd.isna(row['MODALITY_GUIDANCE']) or row['MODALITY_GUIDANCE'] == '':
+                # Check all biopsies within the time window
+                for biopsy_idx, biopsy_row in biopsy_rows.iterrows():
+                    biopsy_date = biopsy_row['RADIOLOGY_DTM']
+                    biopsy_guidance = biopsy_row['MODALITY_GUIDANCE']
+
+                    # Skip if biopsy doesn't have guidance modality
+                    if pd.isna(biopsy_guidance) or biopsy_guidance == '':
+                        continue
+
+                    # Calculate days difference (positive if row is before biopsy)
+                    days_diff = (biopsy_date - row_date).days
+
+                    # Check if within window: -30 to 120 days
+                    # -30 means row can be up to 30 days AFTER the biopsy
+                    # 120 means row can be up to 120 days BEFORE the biopsy
+                    if -30 <= days_diff <= 120:
+                        radiology_df.loc[idx, 'MODALITY_GUIDANCE'] = biopsy_guidance
+                        guidance_applied_count += 1
+                        break  # Apply from the first matching biopsy only
+
+    print(f"Applied guidance modality to {guidance_applied_count} rows")
+    print(f"Calculated days_to_biopsy for {rows_with_days_to_biopsy} rows")
+    append_audit("query_clean_rad.guidance_modality_applied", guidance_applied_count)
+    append_audit("query_clean_rad.days_to_biopsy_calculated", rows_with_days_to_biopsy)
+
+    return radiology_df
+
 def extract_addendum(row):
     """
     Extract addendum section from radiology reports. Searches for APPENDED, AMENDMENT, or ADDENDUM
@@ -735,8 +814,11 @@ def filter_rad_data(radiology_df, output_path):
     # Extract modality guidance (must be after is_biopsy is created)
     radiology_df['MODALITY_GUIDANCE'] = radiology_df.apply(extract_modality_guidance, axis=1)
 
+    # Apply guidance modality from biopsies to nearby exams and calculate days_to_biopsy
+    radiology_df = apply_biopsy_guidance_modality(radiology_df)
+
     radiology_df = add_ultrasound_classifications(radiology_df, output_path)
-    
+
     # Add previous worst MG column
     radiology_df = add_previous_worst_mg_column(radiology_df)
 

@@ -318,17 +318,27 @@ def process_csv_file(csv_file, bucket_name=None, bucket_path=None):
     
     # Read all rows into memory first
     all_rows = []
+    no_endpoint_count = 0
     with open(csv_file, 'r') as f:
         reader = csv.DictReader(f)
         for row in reader:
             url = row.get('ENDPOINT_ADDRESS')
-            study_id = row.get('STUDY_ID')
-            
-            # Skip rows we don't want to process
-            if study_id in existing_studies or not url:
+            patient_id = row.get('PATIENT_ID')
+            accession_number = row.get('ACCESSION_NUMBER')
+
+            # Skip rows without endpoint data (e.g., non-US modalities)
+            if not url or url.strip() == '':
+                no_endpoint_count += 1
                 continue
-                
-            all_rows.append((url, study_id, row))
+
+            # Construct folder name to match app/main.py: {patient_id}_{accession_number}
+            folder_name = f"{patient_id}_{accession_number}" if patient_id and accession_number else None
+
+            # Skip rows that already exist in storage
+            if folder_name and folder_name in existing_studies:
+                continue
+
+            all_rows.append((url, folder_name, row))
     
     # Shuffle the rows to randomize processing order
     random.shuffle(all_rows)
@@ -342,21 +352,24 @@ def process_csv_file(csv_file, bucket_name=None, bucket_path=None):
         print(f"DEBUG: Limiting processing to {DEBUG_MESSAGE_LIMIT} messages")
     
     num_skipped = len(existing_studies) if bucket_path and bucket_name else 0
-    num_published = 0 
-    
+    num_published = 0
+
     # Process the shuffled rows
     pbar = tqdm.tqdm(total=total_rows, desc="Publishing messages")
-    
-    for url, study_id, row in all_rows:
+
+    for url, folder_name, row in all_rows:
         publish_message(url)
-        num_published += 1 
+        num_published += 1
         pbar.update(1)
-        
+
     pbar.close()
-    
+
+    # Report filtering results
+    if no_endpoint_count > 0:
+        print(f"Filtered out {no_endpoint_count} rows without endpoint data (non-US modalities)")
     if num_skipped > 0:
         print(f"Skipped {num_skipped} existing studies")
-    
+
     print(f"Published {num_published} new messages from {csv_file}")
     print(f"Wait for bucket storage to fill up to {num_published} new folders, then cleanup with: python main.py --cleanup")
 

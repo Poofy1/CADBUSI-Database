@@ -2,7 +2,9 @@ import pandas as pd
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor
 import concurrent.futures
+import os
 from src.DB_processing.tools import append_audit
+from main import env
 
 
 def get_diagnosis_column(study_laterality, pathology_laterality=None):
@@ -476,13 +478,19 @@ def check_pathology_override(final_df):
     equivalent_override = 0  # Same type (Benign* -> Benign4 or Malignant* -> Malignant4)
     disagreement = 0  # Different type (Benign* -> Malignant4 or Malignant* -> Benign4)
 
+    # Track disagreement details for CSV export
+    disagreement_records = []
+
     for idx, row in final_df.iterrows():
         # Get pathology category with A2 priority
         pathology_cat = None
+        pathology_source = None
         if pd.notna(row.get('A2_PATHOLOGY_CATEGORY_DESC')) and str(row.get('A2_PATHOLOGY_CATEGORY_DESC')).strip():
             pathology_cat = str(row.get('A2_PATHOLOGY_CATEGORY_DESC')).strip()
+            pathology_source = 'A2'
         elif pd.notna(row.get('A1_PATHOLOGY_CATEGORY_DESC')) and str(row.get('A1_PATHOLOGY_CATEGORY_DESC')).strip():
             pathology_cat = str(row.get('A1_PATHOLOGY_CATEGORY_DESC')).strip()
+            pathology_source = 'A1'
 
         # If we have a pathology category, determine classification
         if pathology_cat:
@@ -516,6 +524,20 @@ def check_pathology_override(final_df):
                 elif ('BENIGN' in str(old_value) and 'MALIGNANT' in classification) or \
                      ('MALIGNANT' in str(old_value) and 'BENIGN' in classification):
                     disagreement += 1
+                    # Record disagreement details
+                    disagreement_records.append({
+                        'patient_id': row.get('PATIENT_ID'),
+                        'accession_number': row.get('ACCESSION_NUMBER'),
+                        'study_laterality': laterality,
+                        'pathology_laterality': path_laterality,
+                        'diagnosis_column': col,
+                        'before_classification': old_value,
+                        'after_classification': classification,
+                        'pathology_category': pathology_cat,
+                        'pathology_source': pathology_source,
+                        'A1_PATHOLOGY_CATEGORY_DESC': row.get('A1_PATHOLOGY_CATEGORY_DESC'),
+                        'A2_PATHOLOGY_CATEGORY_DESC': row.get('A2_PATHOLOGY_CATEGORY_DESC')
+                    })
 
             # Store the update
             updates[idx] = (classification, laterality, path_laterality)
@@ -526,8 +548,8 @@ def check_pathology_override(final_df):
         for col in diagnosis_cols:
             final_df.at[idx, col] = value
 
-    # Return dataframe and metrics (metrics will be aggregated and printed later)
-    return final_df, filled_empty, equivalent_override, disagreement
+    # Return dataframe, metrics, and disagreement records
+    return final_df, filled_empty, equivalent_override, disagreement, disagreement_records
 
 
 def determine_final_interpretation(final_df, batch_size=100, max_workers=None):
@@ -565,22 +587,23 @@ def determine_final_interpretation(final_df, batch_size=100, max_workers=None):
         batch_df = check_assumed_benign_birads3(batch_df)
         batch_df = check_malignant_from_biopsy(batch_df)
         batch_df = check_from_next_diagnosis(batch_df)
-        batch_df, filled_empty, equivalent_override, disagreement = check_pathology_override(batch_df)
+        batch_df, filled_empty, equivalent_override, disagreement, disagreement_records = check_pathology_override(batch_df)
 
         # Only return rows that were actually modified (either column has a value)
         modified_mask = batch_df['left_diagnosis'].notna() | batch_df['right_diagnosis'].notna()
         result_df = batch_df.loc[modified_mask, ['PATIENT_ID', 'ACCESSION_NUMBER', 'left_diagnosis', 'right_diagnosis']]
 
-        # Return results and metrics
-        return result_df, filled_empty, equivalent_override, disagreement
+        # Return results, metrics, and disagreement records
+        return result_df, filled_empty, equivalent_override, disagreement, disagreement_records
    
     # Use ThreadPoolExecutor to process batches in parallel
     results = []
 
-    # Aggregate metrics from all batches
+    # Aggregate metrics and disagreement records from all batches
     total_filled_empty = 0
     total_equivalent_override = 0
     total_disagreement = 0
+    all_disagreement_records = []
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Submit all batches for processing and capture futures
@@ -596,13 +619,16 @@ def determine_final_interpretation(final_df, batch_size=100, max_workers=None):
             desc="Determining classifications"
         ):
             try:
-                batch_result, filled_empty, equivalent_override, disagreement = future.result()
+                batch_result, filled_empty, equivalent_override, disagreement, disagreement_records = future.result()
                 results.append(batch_result)
 
                 # Aggregate metrics
                 total_filled_empty += filled_empty
                 total_equivalent_override += equivalent_override
                 total_disagreement += disagreement
+
+                # Collect disagreement records
+                all_disagreement_records.extend(disagreement_records)
             except Exception as e:
                 print(f"Error processing batch: {e}")
 
@@ -631,6 +657,13 @@ def determine_final_interpretation(final_df, batch_size=100, max_workers=None):
         append_audit("classification.pathology_override_filled_empty", total_filled_empty)
         append_audit("classification.pathology_override_equivalent", total_equivalent_override)
         append_audit("classification.pathology_override_disagreement", total_disagreement)
+
+    # Export disagreement records to CSV
+    if all_disagreement_records:
+        disagreement_df = pd.DataFrame(all_disagreement_records)
+        output_path = os.path.join(env, 'data', 'pathology_override_disagreements.csv')
+        disagreement_df.to_csv(output_path, index=False)
+        print(f"\nExported {len(all_disagreement_records)} disagreement records to: {output_path}")
 
     return final_df
 
