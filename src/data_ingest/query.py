@@ -199,6 +199,8 @@ def run_breast_imaging_query(limit=None):
     Args:
         limit (int, optional): Limit the number of patients to process
     """
+    print(f"Setting query limit to {limit}")
+    
     # Create data directory if it doesn't exist
     data_dir = os.path.join(env, "data")
     if not os.path.exists(data_dir):

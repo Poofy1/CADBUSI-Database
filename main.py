@@ -55,16 +55,6 @@ def main():
         from src.data_ingest.filter_data import create_final_dataset
         limit = args.limit
         
-        # If no limit is specified, ask for confirmation
-        if limit is None:
-            confirmation = input("No limit specified. Are you sure you want to query without a limit? (y/n): ")
-            if confirmation.lower() not in ['y', 'yes']:
-                print("Query cancelled.")
-                sys.exit(0)
-            print("Proceeding with unlimited query.")
-        else:
-            print(f"Setting query limit to {limit}")
-        
         # Run the query with the specified limit
         rad_df, path_df = run_breast_imaging_query(limit=limit)
 

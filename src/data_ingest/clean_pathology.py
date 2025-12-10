@@ -160,7 +160,7 @@ def categorize_pathology(text):
         r"\bDCIS\b",
         r"METASTATIC\s+CARCINOMA",
         r"INVASIVE\s+CARCINOMA",
-        r"\bCARCINOMA\b",
+        r"CARCINOMA",
         r"\bMALIGNAN[CT]\b",
         r"\bTUMOR\b",
         r"METASTATIC",
