@@ -74,6 +74,8 @@ class DatabaseManager:
                 bi_rads TEXT,
                 biopsy TEXT,
                 modality TEXT,
+                modality_guidance TEXT,
+                days_to_biopsy INTEGER,
                 age_at_event INTEGER,
                 ethnicity TEXT,
                 race TEXT,
@@ -386,8 +388,8 @@ class DatabaseManager:
             'synoptic_report', 'description', 'us_core_birthsex',
             'radiology_review_dtm', 'death_date', 'density_desc',
             'rad_pathology_txt', 'rad_impression', 'date',
-            'bi_rads', 'biopsy', 'modality', 'age_at_event',
-            'ethnicity', 'race', 'zipcode', 'margin', 'shape',
+            'bi_rads', 'biopsy', 'modality', 'modality_guidance', 'days_to_biopsy',
+            'age_at_event', 'ethnicity', 'race', 'zipcode', 'margin', 'shape',
             'orientation', 'echo', 'posterior', 'boundary'
         ]
         

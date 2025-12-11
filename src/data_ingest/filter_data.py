@@ -183,30 +183,39 @@ def fill_pathology_accession_numbers(final_df):
     ]
     
     if not date_filtered.empty:
-        # For each valid biopsy-lesion pair, find the most recent US record
-        for _, row in tqdm(date_filtered.iterrows(), 
-                          desc="Filling pathology accession numbers",
-                          total=len(date_filtered)):
-            patient_id = row['PATIENT_ID']
-            biopsy_date = row['DATE_biopsy']
-            lesion_idx = row['index_lesion']
-            pathology_laterality = row['Pathology_Laterality']
-            
-            # Find US records for this patient before biopsy date
-            patient_us = us_records[
-                (us_records['PATIENT_ID'] == patient_id) &
-                (us_records['DATE'] < biopsy_date)
-            ]
-            
-            if not patient_us.empty:
-                # Get most recent (already sorted by date due to original sort)
-                most_recent_us = patient_us.loc[patient_us['DATE'].idxmax()]
-                study_laterality = most_recent_us['Study_Laterality']
-                
-                # Check laterality matching (vectorized)
-                if (study_laterality == 'BILATERAL' or 
-                    study_laterality == pathology_laterality):
-                    accession_updates[lesion_idx] = most_recent_us['ACCESSION_NUMBER']
+        # Fully vectorized approach: merge date_filtered with us_records
+        # This creates all possible biopsy-lesion-US combinations
+        print("Vectorized matching of pathology accession numbers...")
+        biopsy_lesion_us = pd.merge(
+            date_filtered,
+            us_records,
+            on='PATIENT_ID',
+            suffixes=('', '_us')
+        )
+
+        # Filter: US date must be before biopsy date
+        biopsy_lesion_us = biopsy_lesion_us[
+            biopsy_lesion_us['DATE'] < biopsy_lesion_us['DATE_biopsy']
+        ]
+
+        if not biopsy_lesion_us.empty:
+            # Check laterality matching vectorized
+            laterality_match = (
+                (biopsy_lesion_us['Study_Laterality'] == 'BILATERAL') |
+                (biopsy_lesion_us['Study_Laterality'] == biopsy_lesion_us['Pathology_Laterality'])
+            )
+            biopsy_lesion_us = biopsy_lesion_us[laterality_match]
+
+            if not biopsy_lesion_us.empty:
+                # For each lesion, get the most recent US record (max DATE)
+                # Sort by DATE to ensure we get the most recent
+                biopsy_lesion_us = biopsy_lesion_us.sort_values('DATE')
+
+                # Group by lesion index and take the last (most recent) US record
+                most_recent_us = biopsy_lesion_us.groupby('index_lesion').last()
+
+                # Create the updates dictionary
+                accession_updates = most_recent_us['ACCESSION_NUMBER'].to_dict()
     
     # Batch update accession numbers (much faster than individual .at[] calls)
     if accession_updates:

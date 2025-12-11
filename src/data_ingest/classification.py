@@ -1,6 +1,6 @@
 import pandas as pd
 from tqdm import tqdm
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 import concurrent.futures
 import os
 from src.DB_processing.tools import append_audit
@@ -552,7 +552,28 @@ def check_pathology_override(final_df):
     return final_df, filled_empty, equivalent_override, disagreement, disagreement_records
 
 
-def determine_final_interpretation(final_df, batch_size=100, max_workers=None):
+def _process_patient_batch_worker(args):
+    """Worker function for multiprocessing - must be at module level to be picklable."""
+    patient_ids, batch_data = args
+
+    # Reconstruct the batch dataframe from the subset
+    batch_df = batch_data.copy(deep=True)
+
+    # Process locally
+    batch_df = check_assumed_benign(batch_df)
+    batch_df = check_assumed_benign_birads3(batch_df)
+    batch_df = check_malignant_from_biopsy(batch_df)
+    batch_df = check_from_next_diagnosis(batch_df)
+    batch_df, filled_empty, equivalent_override, disagreement, disagreement_records = check_pathology_override(batch_df)
+
+    # Only return rows that were actually modified
+    modified_mask = batch_df['left_diagnosis'].notna() | batch_df['right_diagnosis'].notna()
+    result_df = batch_df.loc[modified_mask, ['PATIENT_ID', 'ACCESSION_NUMBER', 'left_diagnosis', 'right_diagnosis']]
+
+    return result_df, filled_empty, equivalent_override, disagreement, disagreement_records
+
+
+def determine_final_interpretation(final_df, batch_size=100, max_workers=None, use_multiprocessing=True):
 
     if 'left_diagnosis' not in final_df.columns:
         final_df['left_diagnosis'] = None
@@ -577,26 +598,22 @@ def determine_final_interpretation(final_df, batch_size=100, max_workers=None):
         for i in range(0, len(unique_patients), batch_size)
     ]
 
-    # Define worker function to process a batch of patients through all classification methods
-    def process_patient_batch(patient_ids):
-        # Create a DEEP copy of patient records
-        batch_df = final_df[final_df['PATIENT_ID'].isin(patient_ids)].copy(deep=True)
+    # Only copy the columns actually used by classification functions
+    needed_cols = [
+        'PATIENT_ID', 'DATE', 'BI-RADS', 'MODALITY', 'ACCESSION_NUMBER',
+        'Study_Laterality', 'Pathology_Laterality', 'is_biopsy',
+        'path_interpretation', 'A1_PATHOLOGY_CATEGORY_DESC', 'A2_PATHOLOGY_CATEGORY_DESC',
+        'left_diagnosis', 'right_diagnosis'
+    ]
+    existing_cols = [col for col in needed_cols if col in final_df.columns]
 
-        # Process locally without touching final_df
-        batch_df = check_assumed_benign(batch_df)
-        batch_df = check_assumed_benign_birads3(batch_df)
-        batch_df = check_malignant_from_biopsy(batch_df)
-        batch_df = check_from_next_diagnosis(batch_df)
-        batch_df, filled_empty, equivalent_override, disagreement, disagreement_records = check_pathology_override(batch_df)
+    # Prepare batch data (patient_ids, subset of dataframe for those patients)
+    batch_args = []
+    for batch in patient_batches:
+        batch_subset = final_df.loc[final_df['PATIENT_ID'].isin(batch), existing_cols].copy(deep=True)
+        batch_args.append((batch, batch_subset))
 
-        # Only return rows that were actually modified (either column has a value)
-        modified_mask = batch_df['left_diagnosis'].notna() | batch_df['right_diagnosis'].notna()
-        result_df = batch_df.loc[modified_mask, ['PATIENT_ID', 'ACCESSION_NUMBER', 'left_diagnosis', 'right_diagnosis']]
-
-        # Return results, metrics, and disagreement records
-        return result_df, filled_empty, equivalent_override, disagreement, disagreement_records
-   
-    # Use ThreadPoolExecutor to process batches in parallel
+    # Use ProcessPoolExecutor for true parallelism (or ThreadPoolExecutor as fallback)
     results = []
 
     # Aggregate metrics and disagreement records from all batches
@@ -605,11 +622,17 @@ def determine_final_interpretation(final_df, batch_size=100, max_workers=None):
     total_disagreement = 0
     all_disagreement_records = []
 
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+    # Choose executor based on use_multiprocessing flag
+    executor_class = ProcessPoolExecutor if use_multiprocessing else ThreadPoolExecutor
+    executor_name = "ProcessPoolExecutor" if use_multiprocessing else "ThreadPoolExecutor"
+
+    print(f"Using {executor_name} with {max_workers or 'auto'} workers")
+
+    with executor_class(max_workers=max_workers) as executor:
         # Submit all batches for processing and capture futures
         futures = {
-            executor.submit(process_patient_batch, batch): batch
-            for batch in patient_batches
+            executor.submit(_process_patient_batch_worker, batch_arg): i
+            for i, batch_arg in enumerate(batch_args)
         }
 
         # Process results as they complete
@@ -631,6 +654,8 @@ def determine_final_interpretation(final_df, batch_size=100, max_workers=None):
                 all_disagreement_records.extend(disagreement_records)
             except Exception as e:
                 print(f"Error processing batch: {e}")
+                import traceback
+                traceback.print_exc()
 
     if not results:
         return final_df
