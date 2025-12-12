@@ -471,6 +471,12 @@ class DatabaseManager:
         cursor.execute("SELECT DISTINCT patient_id FROM Images")
         return {row[0] for row in cursor.fetchall()}
 
+    def get_existing_accession_numbers(self) -> set:
+        """Get set of all existing accession numbers from StudyCases table."""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT DISTINCT accession_number FROM StudyCases")
+        return {row[0] for row in cursor.fetchall()}
+
     def update_image_metadata_from_studies(self):
         """Update image laterality and area from StudyCases where missing."""
         cursor = self.conn.cursor()

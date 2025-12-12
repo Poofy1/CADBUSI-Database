@@ -646,15 +646,49 @@ def parse_anon_file(anon_location, image_df):
 
         # Insert images - dict keys match DB columns
         if not image_df_new.empty:
-            image_data = image_df_new.to_dict('records')
-            inserted_images = db.insert_images_batch(image_data)
+            # Get all accession numbers that exist in StudyCases (both from breast_csv and already in DB)
+            valid_accession_numbers = set(breast_csv['accession_number'].unique())
+            existing_accessions = db.get_existing_accession_numbers()
+            valid_accession_numbers.update(existing_accessions)
+
+            # Filter images to only those with valid accession numbers
+            before_count = len(image_df_new)
+            image_df_new = image_df_new[image_df_new['accession_number'].isin(valid_accession_numbers)]
+            after_count = len(image_df_new)
+
+            if before_count > after_count:
+                print(f"Filtered out {before_count - after_count} images with missing accession numbers in StudyCases")
+
+            if not image_df_new.empty:
+                image_data = image_df_new.to_dict('records')
+                inserted_images = db.insert_images_batch(image_data)
+            else:
+                inserted_images = 0
         else:
             inserted_images = 0
 
         # Insert videos - dict keys match DB columns
         if not video_df.empty:
-            video_data = video_df.to_dict('records')
-            inserted_videos = db.insert_videos_batch(video_data)
+            # Filter out videos from existing patients (similar to images)
+            video_df['patient_id'] = video_df['patient_id'].astype(str)
+            video_df_new = video_df[~video_df['patient_id'].isin(existing_patient_ids)]
+
+            if not video_df_new.empty:
+                # Filter videos to only those with valid accession numbers
+                before_count = len(video_df_new)
+                video_df_new = video_df_new[video_df_new['accession_number'].isin(valid_accession_numbers)]
+                after_count = len(video_df_new)
+
+                if before_count > after_count:
+                    print(f"Filtered out {before_count - after_count} videos with missing accession numbers in StudyCases")
+
+                if not video_df_new.empty:
+                    video_data = video_df_new.to_dict('records')
+                    inserted_videos = db.insert_videos_batch(video_data)
+                else:
+                    inserted_videos = 0
+            else:
+                inserted_videos = 0
         else:
             inserted_videos = 0
 
