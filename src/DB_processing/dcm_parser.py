@@ -590,22 +590,32 @@ def parse_anon_file(anon_location, image_df):
     if not video_df.empty:
         video_df[['patient_id', 'accession_number']] = video_df[['patient_id', 'accession_number']].astype(str)
 
-    # Filter to only keep rows where accession_number exists in both datasets
-    image_accession_numbers = set(image_df['accession_number'].unique())
-    breast_accession_numbers = set(breast_csv['accession_number'].unique())
-
-    # Keep only matching accession numbers
-    matching_accession_numbers = image_accession_numbers.intersection(breast_accession_numbers)
-
-    image_df = image_df[image_df['accession_number'].isin(matching_accession_numbers)]
-    breast_csv = breast_csv[breast_csv['accession_number'].isin(matching_accession_numbers)]
+    # Filter to only keep rows where patient_id has at least some images
+    # Get unique patient IDs that have images
+    image_patient_ids = set(image_df['patient_id'].unique())
     if not video_df.empty:
-        video_df = video_df[video_df['accession_number'].isin(matching_accession_numbers)]
+        video_patient_ids = set(video_df['patient_id'].unique())
+        all_patient_ids_with_images = image_patient_ids.union(video_patient_ids)
+    else:
+        all_patient_ids_with_images = image_patient_ids
 
-    total_breast_accessions = len(breast_accession_numbers)
-    non_matching_breast_accessions = len(breast_accession_numbers - matching_accession_numbers)
-    percentage_without_images = (non_matching_breast_accessions / total_breast_accessions) * 100 if total_breast_accessions > 0 else 0
-    print(f"{percentage_without_images:.1f}% of breast accessions did not have images")
+    breast_patient_ids = set(breast_csv['patient_id'].unique())
+
+    # Keep ALL rows from breast_csv for any patient_id that has at least one image
+    matching_patient_ids = all_patient_ids_with_images.intersection(breast_patient_ids)
+
+    # Filter breast_csv to only patients with images (keeps all rows for those patients)
+    breast_csv = breast_csv[breast_csv['patient_id'].isin(matching_patient_ids)]
+
+    # Filter image/video data to only patients in breast_csv
+    image_df = image_df[image_df['patient_id'].isin(matching_patient_ids)]
+    if not video_df.empty:
+        video_df = video_df[video_df['patient_id'].isin(matching_patient_ids)]
+
+    total_breast_patients = len(breast_patient_ids)
+    non_matching_breast_patients = len(breast_patient_ids - matching_patient_ids)
+    percentage_without_images = (non_matching_breast_patients / total_breast_patients) * 100 if total_breast_patients > 0 else 0
+    print(f"{percentage_without_images:.1f}% of breast patients did not have images")
 
     # Populate has_malignant and has_benign based on left_diagnosis and right_diagnosis
     # Check if either column contains MALIGNANT or BENIGN diagnosis
