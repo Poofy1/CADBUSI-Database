@@ -469,7 +469,7 @@ if __name__ == "__main__":
         csv_path=csv_path,
         source_images_dir=source_images_dir,
         caliper_csv_path=caliper_csv_path,
-        output_dir="C:/Users/Tristan/Desktop/Yolo7/",
+        output_dir="D:/DATA/CADBUSI/training_sets/Yolo6/",
         train_ratio=0.8,  # 80% train, 20% validation
         caliper_percentage=0.10,  # 10% of images will use caliper versions
         num_workers=None  # Set to None to use all available CPUs - 1
