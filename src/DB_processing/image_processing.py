@@ -5,7 +5,7 @@ import numpy as np
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
-from storage_adapter import *
+from tools.storage_adapter import *
 thread_local = threading.local()
 
 current_dir = os.path.dirname(os.path.abspath(__file__))

@@ -1,4 +1,4 @@
-from storage_adapter import *
+from tools.storage_adapter import *
 from src.DB_processing.tools import append_audit
 
 def merge_labelbox_labels(instance_data, instance_labels_csv_file):

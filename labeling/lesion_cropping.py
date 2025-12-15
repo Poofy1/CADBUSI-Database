@@ -6,7 +6,7 @@ from tqdm import tqdm
 import ast
 from pathlib import Path
 from collections import defaultdict
-from storage_adapter import * 
+from tools.storage_adapter import * 
 from src.DB_processing.database import DatabaseManager
 
 env = os.path.dirname(os.path.abspath(__file__))

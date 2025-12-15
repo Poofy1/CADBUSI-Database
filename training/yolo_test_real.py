@@ -10,7 +10,7 @@ from pathlib import Path
 import yaml
 from tqdm import tqdm
 import re
-from storage_adapter import *
+from tools.storage_adapter import *
 current_dir = os.path.dirname(os.path.dirname(__file__))
 
 # Add parent directory to path

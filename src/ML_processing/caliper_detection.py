@@ -5,7 +5,7 @@ from torchvision import transforms
 from tqdm import tqdm
 import warnings
 from torch.utils.data import DataLoader
-from storage_adapter import *
+from tools.storage_adapter import *
 from torch.utils.data import Dataset
 from torch.amp import autocast
 warnings.filterwarnings('ignore')

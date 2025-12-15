@@ -3,7 +3,7 @@ ssl._create_default_https_context = ssl._create_unverified_context
 
 from src.encrypt_keys import encrypt_ids
 
-from storage_adapter import * 
+from tools.storage_adapter import * 
 from config import CONFIG
 import argparse
 import os

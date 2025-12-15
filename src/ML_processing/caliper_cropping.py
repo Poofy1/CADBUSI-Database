@@ -9,7 +9,7 @@ import cv2
 import pandas as pd
 from tqdm import tqdm
 from scipy import ndimage
-from storage_adapter import *
+from tools.storage_adapter import *
 from src.DB_processing.tools import get_reader, reader, append_audit
 from src.DB_processing.database import DatabaseManager
 env = os.path.dirname(os.path.abspath(__file__))

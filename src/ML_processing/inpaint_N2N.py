@@ -7,7 +7,7 @@ import pandas as pd
 from PIL import Image
 from concurrent.futures import ThreadPoolExecutor
 from training.train_twin_N2N import N2N_Original_Used_UNet
-from storage_adapter import *
+from tools.storage_adapter import *
 from src.DB_processing.database import DatabaseManager
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"

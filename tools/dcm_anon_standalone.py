@@ -6,7 +6,7 @@ from tqdm import tqdm
 import warnings
 import logging
 import io
-from storage_adapter import read_binary, file_exists, list_files, make_dirs, StorageClient
+from tools.storage_adapter import read_binary, file_exists, list_files, make_dirs, StorageClient
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)

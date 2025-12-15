@@ -3,7 +3,7 @@ import pandas as pd
 import hashlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
-from storage_adapter import *
+from tools.storage_adapter import *
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)

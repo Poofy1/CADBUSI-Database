@@ -3,7 +3,7 @@ import easyocr
 import threading
 thread_local = threading.local()
 import os
-from storage_adapter import *
+from tools.storage_adapter import *
 import json
 import numpy as np
 import re

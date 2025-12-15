@@ -9,7 +9,7 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
 env = os.path.dirname(os.path.abspath(__file__))
-from storage_adapter import *
+from tools.storage_adapter import *
 from src.DB_processing.tools import append_audit
 from src.DB_processing.database import DatabaseManager
 from src.DB_export.mask_processing import Mask_Lesions

@@ -4,7 +4,7 @@ import numpy as np
 from PIL import Image
 import cv2
 from tqdm import tqdm
-from storage_adapter import read_image, save_data
+from tools.storage_adapter import read_image, save_data
 import ast
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import sys

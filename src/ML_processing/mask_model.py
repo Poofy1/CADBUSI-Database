@@ -6,7 +6,7 @@ import torchvision
 from torchvision.models.detection import FasterRCNN
 from torchvision.models.detection.rpn import AnchorGenerator
 from torch.utils.data import Dataset, DataLoader
-from storage_adapter import *
+from tools.storage_adapter import *
 from torch.amp import autocast
 
 env = os.path.dirname(os.path.abspath(__file__))

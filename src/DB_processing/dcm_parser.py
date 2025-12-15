@@ -10,7 +10,7 @@ from functools import lru_cache
 from PIL import Image
 import time
 import re
-from storage_adapter import *
+from tools.storage_adapter import *
 from src.encrypt_keys import *
 from src.DB_processing.tools import append_audit
 from src.DB_processing.database import DatabaseManager

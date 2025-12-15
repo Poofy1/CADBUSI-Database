@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader
 from torchvision.datasets import ImageFolder
 import torch.nn as nn
 from torch.utils.data import Dataset
-from storage_adapter import *
+from tools.storage_adapter import *
 from src.DB_processing.database import DatabaseManager
 warnings.filterwarnings('ignore')
 env = os.path.dirname(os.path.abspath(__file__))
