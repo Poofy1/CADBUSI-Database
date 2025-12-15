@@ -796,12 +796,11 @@ def add_lesions_to_instance_data(instance_data, lesion_df, image_df, breast_df):
 def Export_Database(CONFIG, limit = None, reparse_images = True):
 
     use_reject_system = False # True = removes rejects from training
-    output_dir = CONFIG["EXPORT_DIR"]
     database_dir = CONFIG["DATABASE_DIR"]
     instance_labels_csv_file = os.path.join(CONFIG["LABELBOX_LABELS"], 'InstanceLabels.csv')
-    
+
     date = datetime.datetime.now().strftime("%m_%d_%Y_%H_%M_%S")
-    output_dir = f'{output_dir}/export_{date}/'
+    output_dir = os.path.join(database_dir, 'exports', f'export_{date}')
     print(f"Exporting dataset to {output_dir}")
     make_dirs(output_dir)
 

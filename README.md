@@ -55,9 +55,6 @@ CONFIG = {
     "TARGET_CASES": "/failed_cases.csv", # Directory of worst performing cases from training. Prepares these cases for instance labeling on Label Box.
     "VIDEO_SAMPLING": 0, # every nth frame, 0 turns off videos
     "DEBUG_DATA_RANGE": [], # Process a reduced set of dicom files (Ex: [0, 1000]).
-
-    # Export Settings
-    "EXPORT_DIR": "exports/",
 }
 ```
 ## Usage
