@@ -141,6 +141,7 @@ class DatabaseManager:
                 inpainted_from TEXT,
                 software_versions TEXT,
                 manufacturer_model_name TEXT,
+                exclusion_reason TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (accession_number) REFERENCES StudyCases(accession_number) ON DELETE CASCADE
             )
@@ -340,10 +341,10 @@ class DatabaseManager:
             'photometric_interpretation', 'rows', 'columns', 'physical_delta_x',
             'has_calipers', 'has_calipers_prediction', 'caliper_boxes', 'caliper_coordinates', 'yolo_confidence', 'has_caliper_mask', 'samus_confidence',
             'darkness', 'label', 'region_count', 'closest_fn', 'distance',
-            'file_name', 'software_versions', 'manufacturer_model_name'
+            'file_name', 'software_versions', 'manufacturer_model_name', 'exclusion_reason'
         ]
 
-        string_columns = ['accession_number', 'patient_id', 'image_name', 'dicom_hash', 'caliper_boxes', 'caliper_coordinates', 'yolo_confidence', 'samus_confidence', 'inpainted_from']
+        string_columns = ['accession_number', 'patient_id', 'image_name', 'dicom_hash', 'caliper_boxes', 'caliper_coordinates', 'yolo_confidence', 'samus_confidence', 'inpainted_from', 'exclusion_reason']
         boolean_columns = ['has_calipers', 'has_caliper_mask', 'label']
         
         return self._batch_upsert_helper(

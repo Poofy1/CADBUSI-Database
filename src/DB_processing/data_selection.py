@@ -8,16 +8,18 @@ tqdm.pandas()
 
 def choose_images_to_label(db):
     db['label'] = True
-    
+    db['exclusion_reason'] = None
+
     #Remove images that are too dark
     darkness_thresh = 75
     # Extract all darkness values rounded to 2 decimals
     darkness_values = db['darkness'].round(2).tolist()
     append_audit("image_processing.darkness_values", darkness_values)
     append_audit("image_processing.darkness_thresh", darkness_thresh)
-    
+
     dark_count_before = len(db[db['label']])
     db.loc[db['darkness'] > darkness_thresh, 'label'] = False
+    db.loc[db['darkness'] > darkness_thresh, 'exclusion_reason'] = 'too dark (>75)'
     dark_count_after = len(db[db['label']])
     dark_removed = dark_count_before - dark_count_after
     
@@ -31,18 +33,26 @@ def choose_images_to_label(db):
     area_count_before = len(db[db['label']])
     db.loc[(db['area'] == 'unknown') | (db['area'].isna()), 'area'] = 'breast'
     db.loc[(db['area'] != 'breast'), 'label'] = False
+    db.loc[(db['area'] != 'breast'), 'exclusion_reason'] = 'non-breast area'
     area_count_after = len(db[db['label']])
     area_removed = area_count_before - area_count_after
     
-    # Set label = False for all images with 'unknown' laterality
+    # Set label = False for images with 'unknown' laterality only when study laterality is BILATERAL
+    # For BILATERAL studies, we need to know which breast each image is from
     lat_count_before = len(db[db['label']])
-    db.loc[(db['laterality'] == 'unknown') | (db['laterality'].isna()), 'label'] = False
+    bilateral_unknown_mask = (
+        ((db['laterality'] == 'unknown') | (db['laterality'].isna())) &
+        (db['study_laterality'].str.upper() == 'BILATERAL')
+    )
+    db.loc[bilateral_unknown_mask, 'label'] = False
+    db.loc[bilateral_unknown_mask, 'exclusion_reason'] = 'unknown laterality (bilateral study)'
     lat_count_after = len(db[db['label']])
     lat_removed = lat_count_before - lat_count_after
     
     # Set label = False for all images with 'region_count' > 1
     region_count_before = len(db[db['label']])
     db.loc[db['region_count'] > 1, 'label'] = False
+    db.loc[db['region_count'] > 1, 'exclusion_reason'] = 'multiple regions'
     region_count_after = len(db[db['label']])
     region_removed = region_count_before - region_count_after
     
@@ -317,7 +327,7 @@ def Select_Data(database_path):
         append_audit("image_processing.missing_crop_removed", rows_before - rows_after)
 
         db_to_process = db_out
-        columns_to_update = ['image_name', 'label', 'crop_aspect_ratio', 'closest_fn', 'distance']
+        columns_to_update = ['image_name', 'label', 'crop_aspect_ratio', 'closest_fn', 'distance', 'exclusion_reason']
         accession_ids = db_to_process['accession_number'].unique()
 
         db_to_process['closest_fn'] = '' 
@@ -347,6 +357,13 @@ def Select_Data(database_path):
         if all_results:
             updated_df = pd.concat(all_results, ignore_index=False)
             db_to_process.update(updated_df)
+
+        # Merge study_laterality from breast_df for laterality filtering logic
+        db_to_process = db_to_process.merge(
+            breast_df[['accession_number', 'study_laterality']],
+            on='accession_number',
+            how='left'
+        )
 
         db_to_process = choose_images_to_label(db_to_process)
 
