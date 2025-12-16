@@ -727,6 +727,64 @@ def extract_addendum(row):
     
     return None
 
+def add_prior_biopsy_columns(radiology_df):
+    """
+    Add columns 'left_prior_breast_biopsies' and 'right_prior_breast_biopsies' to track:
+    - left_prior_breast_biopsies: count of previous biopsies on LEFT breast (Study_Laterality = LEFT or BILATERAL)
+    - right_prior_breast_biopsies: count of previous biopsies on RIGHT breast (Study_Laterality = RIGHT or BILATERAL)
+    """
+
+    print("Processing prior breast biopsies by laterality...")
+
+    # Convert RADIOLOGY_DTM to datetime if it isn't already
+    radiology_df['RADIOLOGY_DTM'] = pd.to_datetime(radiology_df['RADIOLOGY_DTM'], errors='coerce')
+
+    # Initialize the new columns
+    radiology_df['left_prior_breast_biopsies'] = 0
+    radiology_df['right_prior_breast_biopsies'] = 0
+
+    # Sort by patient and date for efficient processing
+    df_sorted = radiology_df.sort_values(['PATIENT_ID', 'RADIOLOGY_DTM']).copy()
+
+    # Group by patient
+    grouped = df_sorted.groupby('PATIENT_ID')
+
+    # Process each patient
+    for patient_id, group in grouped:
+        # Track number of biopsies separately for each breast
+        left_biopsy_count = 0
+        right_biopsy_count = 0
+
+        # Iterate through records in chronological order
+        for idx, row in group.iterrows():
+            # Set the prior values for this row (before updating counters)
+            radiology_df.loc[idx, 'left_prior_breast_biopsies'] = left_biopsy_count
+            radiology_df.loc[idx, 'right_prior_breast_biopsies'] = right_biopsy_count
+
+            # Check if current row is a biopsy and update counters
+            if row['is_biopsy'] == 'T':
+                laterality = str(row.get('Study_Laterality', '')).upper().strip()
+
+                if laterality == 'LEFT':
+                    left_biopsy_count += 1
+                elif laterality == 'RIGHT':
+                    right_biopsy_count += 1
+                elif laterality == 'BILATERAL':
+                    # Bilateral biopsy counts for both sides
+                    left_biopsy_count += 1
+                    right_biopsy_count += 1
+
+    # Count statistics
+    total_with_left_prior_biopsies = (radiology_df['left_prior_breast_biopsies'] > 0).sum()
+    total_with_right_prior_biopsies = (radiology_df['right_prior_breast_biopsies'] > 0).sum()
+
+    print(f"Records with left prior biopsies: {total_with_left_prior_biopsies}")
+    print(f"Records with right prior biopsies: {total_with_right_prior_biopsies}")
+    append_audit("query_clean_rad.records_with_left_prior_biopsies", int(total_with_left_prior_biopsies))
+    append_audit("query_clean_rad.records_with_right_prior_biopsies", int(total_with_right_prior_biopsies))
+
+    return radiology_df
+
 def remove_bad_data(radiology_df, output_path):
     # Count and remove rows with BI-RADS = '0'
     birads_zero_mask = radiology_df['BI-RADS'].isin(['0'])
@@ -823,6 +881,9 @@ def filter_rad_data(radiology_df, output_path):
 
     # Add previous worst MG column
     radiology_df = add_previous_worst_mg_column(radiology_df)
+
+    # Add prior biopsy and cancer columns
+    radiology_df = add_prior_biopsy_columns(radiology_df)
 
     # Remove bad data
     radiology_df = remove_bad_data(radiology_df, output_path)

@@ -86,6 +86,12 @@ class DatabaseManager:
                 echo TEXT,
                 posterior TEXT,
                 boundary TEXT,
+                left_prior_breast_biopsies INTEGER,
+                right_prior_breast_biopsies INTEGER,
+                left_prior_breast_cancer INTEGER,
+                right_prior_breast_cancer INTEGER,
+                left_diagnosis_source TEXT,
+                right_diagnosis_source TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -391,7 +397,10 @@ class DatabaseManager:
             'rad_pathology_txt', 'rad_impression', 'date',
             'bi_rads', 'biopsy', 'modality', 'modality_guidance', 'days_to_biopsy',
             'age_at_event', 'ethnicity', 'race', 'zipcode', 'margin', 'shape',
-            'orientation', 'echo', 'posterior', 'boundary'
+            'orientation', 'echo', 'posterior', 'boundary',
+            'left_prior_breast_biopsies', 'right_prior_breast_biopsies',
+            'left_prior_breast_cancer', 'right_prior_breast_cancer',
+            'left_diagnosis_source', 'right_diagnosis_source'
         ]
         
         string_columns = ['accession_number', 'patient_id']

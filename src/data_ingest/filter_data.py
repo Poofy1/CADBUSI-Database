@@ -310,20 +310,83 @@ def combine_dataframes(rad_df, path_df):
     
     return final_df
 
+def add_prior_breast_cancer(final_df):
+    """
+    Add columns 'left_prior_breast_cancer' and 'right_prior_breast_cancer' to track
+    if there was prior malignancy in each breast separately.
+    Tracks malignancy based on left_diagnosis/right_diagnosis columns.
+
+    Args:
+        final_df: DataFrame containing columns:
+                 PATIENT_ID, DATE, left_diagnosis, right_diagnosis
+
+    Returns:
+        DataFrame with added 'left_prior_breast_cancer' and 'right_prior_breast_cancer' columns (0/1)
+    """
+
+    print("Processing prior breast cancer by laterality...")
+
+    # Convert DATE to datetime if it isn't already
+    final_df['DATE'] = pd.to_datetime(final_df['DATE'], errors='coerce')
+
+    # Initialize the new columns
+    final_df['left_prior_breast_cancer'] = 0
+    final_df['right_prior_breast_cancer'] = 0
+
+    # Sort by patient and date for efficient processing
+    df_sorted = final_df.sort_values(['PATIENT_ID', 'DATE']).copy()
+
+    # Group by patient
+    grouped = df_sorted.groupby('PATIENT_ID')
+
+    # Process each patient
+    for patient_id, group in grouped:
+        # Track malignancy status separately for each breast
+        left_malignancy_found = False
+        right_malignancy_found = False
+
+        # Iterate through records in chronological order
+        for idx, row in group.iterrows():
+            # Set the prior values for this row (before updating flags)
+            final_df.loc[idx, 'left_prior_breast_cancer'] = 1 if left_malignancy_found else 0
+            final_df.loc[idx, 'right_prior_breast_cancer'] = 1 if right_malignancy_found else 0
+
+            # Now check if current row has malignancy and update flags
+            # Check left_diagnosis for malignancy
+            left_diag = str(row.get('left_diagnosis', '')).upper()
+            if 'MALIGNANT' in left_diag:
+                left_malignancy_found = True
+
+            # Check right_diagnosis for malignancy
+            right_diag = str(row.get('right_diagnosis', '')).upper()
+            if 'MALIGNANT' in right_diag:
+                right_malignancy_found = True
+
+    # Count statistics
+    total_with_left_prior_cancer = (final_df['left_prior_breast_cancer'] == 1).sum()
+    total_with_right_prior_cancer = (final_df['right_prior_breast_cancer'] == 1).sum()
+
+    print(f"Records with left prior breast cancer: {total_with_left_prior_cancer}")
+    print(f"Records with right prior breast cancer: {total_with_right_prior_cancer}")
+    append_audit("query_clean.records_with_left_prior_cancer", int(total_with_left_prior_cancer))
+    append_audit("query_clean.records_with_right_prior_cancer", int(total_with_right_prior_cancer))
+
+    return final_df
+
 def create_pathology_subset_csv(final_df):
     """
     Create a separate CSV containing only rows that have all pathology-related fields
     """
-    
+
     # Define the required columns
     required_columns = ['PATIENT_ID', 'ACCESSION_NUMBER', 'DATE', 'lesion_diag', 'SYNOPTIC_REPORT', 'Pathology_Laterality', 'path_interpretation']
-    
+
     # Select only the required columns
     pathology_subset = final_df[required_columns].copy()
-    
+
     # Remove rows with any null/NA values in any of the columns
     pathology_subset = pathology_subset.dropna()
-    
+
     # Also remove rows with empty strings
     for col in required_columns:
         pathology_subset = pathology_subset[pathology_subset[col] != '']
@@ -418,7 +481,10 @@ def create_final_dataset(rad_df, path_df, output_path):
     
     # Determine final interpretation
     final_df = determine_final_interpretation(final_df)
-    
+
+    # Add prior breast cancer column (tracks laterality)
+    final_df = add_prior_breast_cancer(final_df)
+
     # CREATE THE LESION PATHOLOGY SUBSET CSV
     pathology_subset = create_pathology_subset_csv(final_df)
     

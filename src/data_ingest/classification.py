@@ -132,6 +132,9 @@ def check_assumed_benign(final_df):
         diagnosis_cols = get_diagnosis_column(laterality)
         for col in diagnosis_cols:
             final_df.at[idx, col] = value
+            # Set the source column
+            source_col = col.replace('diagnosis', 'diagnosis_source')
+            final_df.at[idx, source_col] = 'assumed benign'
 
     return final_df
 
@@ -257,6 +260,9 @@ def check_assumed_benign_birads3(final_df):
         diagnosis_cols = get_diagnosis_column(laterality)
         for col in diagnosis_cols:
             final_df.at[idx, col] = value
+            # Set the source column
+            source_col = col.replace('diagnosis', 'diagnosis_source')
+            final_df.at[idx, source_col] = 'assumed benign - birads 3'
 
     return final_df
 
@@ -324,6 +330,9 @@ def check_malignant_from_biopsy(final_df):
             diagnosis_cols = get_diagnosis_column(laterality, pathology_laterality)
             for col in diagnosis_cols:
                 final_df.at[idx, col] = value
+                # Set the source column
+                source_col = col.replace('diagnosis', 'diagnosis_source')
+                final_df.at[idx, source_col] = 'birads 6 with malignancy'
 
     return final_df
 
@@ -457,6 +466,12 @@ def check_from_next_diagnosis(final_df, days=240):
     for idx, col_updates in updates.items():
         for col, value in col_updates.items():
             final_df.at[idx, col] = value
+            # Set the source column
+            source_col = col.replace('diagnosis', 'diagnosis_source')
+            if 'MALIGNANT' in value:
+                final_df.at[idx, source_col] = 'malignant pathology'
+            else:
+                final_df.at[idx, source_col] = 'benign pathology'
 
     return final_df
 
@@ -544,9 +559,21 @@ def check_pathology_override(final_df):
 
     # Apply all updates at once
     for idx, (value, laterality, path_laterality) in updates.items():
+        # Get the pathology source for this row
+        row = final_df.loc[idx]
+        pathology_source = None
+        if pd.notna(row.get('A2_PATHOLOGY_CATEGORY_DESC')) and str(row.get('A2_PATHOLOGY_CATEGORY_DESC')).strip():
+            pathology_source = 'addendum A2'
+        elif pd.notna(row.get('A1_PATHOLOGY_CATEGORY_DESC')) and str(row.get('A1_PATHOLOGY_CATEGORY_DESC')).strip():
+            pathology_source = 'addendum A1'
+
         diagnosis_cols = get_diagnosis_column(laterality, path_laterality)
         for col in diagnosis_cols:
             final_df.at[idx, col] = value
+            # Set the source column
+            if pathology_source:
+                source_col = col.replace('diagnosis', 'diagnosis_source')
+                final_df.at[idx, source_col] = pathology_source
 
     # Return dataframe, metrics, and disagreement records
     return final_df, filled_empty, equivalent_override, disagreement, disagreement_records
@@ -568,7 +595,7 @@ def _process_patient_batch_worker(args):
 
     # Only return rows that were actually modified
     modified_mask = batch_df['left_diagnosis'].notna() | batch_df['right_diagnosis'].notna()
-    result_df = batch_df.loc[modified_mask, ['PATIENT_ID', 'ACCESSION_NUMBER', 'left_diagnosis', 'right_diagnosis']]
+    result_df = batch_df.loc[modified_mask, ['PATIENT_ID', 'ACCESSION_NUMBER', 'left_diagnosis', 'right_diagnosis', 'left_diagnosis_source', 'right_diagnosis_source']]
 
     return result_df, filled_empty, equivalent_override, disagreement, disagreement_records
 
@@ -579,6 +606,10 @@ def determine_final_interpretation(final_df, batch_size=100, max_workers=None, u
         final_df['left_diagnosis'] = None
     if 'right_diagnosis' not in final_df.columns:
         final_df['right_diagnosis'] = None
+    if 'left_diagnosis_source' not in final_df.columns:
+        final_df['left_diagnosis_source'] = None
+    if 'right_diagnosis_source' not in final_df.columns:
+        final_df['right_diagnosis_source'] = None
 
     if 'BI-RADS' in final_df.columns:
         # Convert to string, remove .0, and replace 'nan' with empty string
@@ -603,7 +634,7 @@ def determine_final_interpretation(final_df, batch_size=100, max_workers=None, u
         'PATIENT_ID', 'DATE', 'BI-RADS', 'MODALITY', 'ACCESSION_NUMBER',
         'Study_Laterality', 'Pathology_Laterality', 'is_biopsy',
         'path_interpretation', 'A1_PATHOLOGY_CATEGORY_DESC', 'A2_PATHOLOGY_CATEGORY_DESC',
-        'left_diagnosis', 'right_diagnosis'
+        'left_diagnosis', 'right_diagnosis', 'left_diagnosis_source', 'right_diagnosis_source'
     ]
     existing_cols = [col for col in needed_cols if col in final_df.columns]
 
@@ -664,7 +695,7 @@ def determine_final_interpretation(final_df, batch_size=100, max_workers=None, u
     combined_results = pd.concat(results)
 
     # Update the original dataframe with the processed results
-    # We only update the 'left_diagnosis' and 'right_diagnosis' columns
+    # We update the diagnosis columns and their source columns
     final_df.update(combined_results)
 
     # Print aggregated pathology override metrics
