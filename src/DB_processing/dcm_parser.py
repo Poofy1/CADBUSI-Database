@@ -565,7 +565,7 @@ def to_snake_case(name):
     return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
 
 
-def parse_anon_file(anon_location, image_df, load_from_checkpoint=False):
+def parse_anon_file(anon_location, image_df):
     """
     Parse and insert data into database.
 
@@ -575,112 +575,94 @@ def parse_anon_file(anon_location, image_df, load_from_checkpoint=False):
         load_from_checkpoint: If True, loads processed data from checkpoint instead of using image_df
     """
 
-    if load_from_checkpoint:
-        # Load from checkpoint
-        checkpoint_dir = os.path.join(os.path.dirname(anon_location), 'checkpoints')
-        checkpoint_file = os.path.join(checkpoint_dir, 'processed_data.pkl')
 
-        if not os.path.exists(checkpoint_file):
-            raise FileNotFoundError(f"Checkpoint file not found: {checkpoint_file}\nRun without --skip-dicom-processing first to create checkpoint.")
+    # Original processing logic
+    # Convert all DataFrame columns to snake_case immediately
+    image_df.columns = [to_snake_case(col) for col in image_df.columns]
 
-        print(f"Loading from checkpoint: {checkpoint_file}...")
-        import pickle
-        with open(checkpoint_file, 'rb') as f:
-            data = pickle.load(f)
+    # Split into video and image dataframes
+    video_df = image_df[image_df['data_type'] == 'video']
+    image_df = image_df[image_df['data_type'] == 'image']
 
-        breast_csv = data['breast_csv']
-        image_df = data['image_df']
-        video_df = data['video_df']
-        print("Checkpoint loaded successfully! Skipping DICOM processing...")
+    # Define common columns (all snake_case now)
+    common_columns = [
+        'patient_id', 'accession_number', 'region_spatial_format', 'region_data_type',
+        'region_location_min_x0', 'region_location_min_y0', 'region_location_max_x1',
+        'region_location_max_y1', 'photometric_interpretation', 'rows', 'columns',
+        'file_name', 'dicom_hash', 'software_versions', 'manufacturer_model_name',
+        'physical_delta_x'
+    ]
 
+    # Keep only necessary columns from dataframes
+    if not video_df.empty:
+        video_df = video_df[common_columns + ['images_path', 'saved_frames']]
+
+    image_df = image_df[common_columns + ['image_name', 'region_count']]
+
+    # Read CSV and convert columns to snake_case
+    anon_location = os.path.normpath(anon_location)
+    breast_csv = pd.read_csv(anon_location)
+    breast_csv.columns = [to_snake_case(col) for col in breast_csv.columns]
+    breast_csv = breast_csv.sort_values('patient_id')
+
+    # Convert to str (no more manual renaming needed!)
+    image_df[['patient_id', 'accession_number']] = image_df[['patient_id', 'accession_number']].astype(str)
+    breast_csv[['patient_id', 'accession_number']] = breast_csv[['patient_id', 'accession_number']].astype(str)
+    if not video_df.empty:
+        video_df[['patient_id', 'accession_number']] = video_df[['patient_id', 'accession_number']].astype(str)
+
+    # Filter to only keep rows where patient_id has at least some images
+    # Get unique patient IDs that have images
+    image_patient_ids = set(image_df['patient_id'].unique())
+    if not video_df.empty:
+        video_patient_ids = set(video_df['patient_id'].unique())
+        all_patient_ids_with_images = image_patient_ids.union(video_patient_ids)
     else:
-        # Original processing logic
-        # Convert all DataFrame columns to snake_case immediately
-        image_df.columns = [to_snake_case(col) for col in image_df.columns]
+        all_patient_ids_with_images = image_patient_ids
 
-        # Split into video and image dataframes
-        video_df = image_df[image_df['data_type'] == 'video']
-        image_df = image_df[image_df['data_type'] == 'image']
+    breast_patient_ids = set(breast_csv['patient_id'].unique())
 
-        # Define common columns (all snake_case now)
-        common_columns = [
-            'patient_id', 'accession_number', 'region_spatial_format', 'region_data_type',
-            'region_location_min_x0', 'region_location_min_y0', 'region_location_max_x1',
-            'region_location_max_y1', 'photometric_interpretation', 'rows', 'columns',
-            'file_name', 'dicom_hash', 'software_versions', 'manufacturer_model_name',
-            'physical_delta_x'
-        ]
+    # Keep ALL rows from breast_csv for any patient_id that has at least one image
+    matching_patient_ids = all_patient_ids_with_images.intersection(breast_patient_ids)
 
-        # Keep only necessary columns from dataframes
-        if not video_df.empty:
-            video_df = video_df[common_columns + ['images_path', 'saved_frames']]
+    # Filter breast_csv to only patients with images (keeps all rows for those patients)
+    breast_csv = breast_csv[breast_csv['patient_id'].isin(matching_patient_ids)]
 
-        image_df = image_df[common_columns + ['image_name', 'region_count']]
+    # Filter image/video data to only patients in breast_csv
+    image_df = image_df[image_df['patient_id'].isin(matching_patient_ids)]
+    if not video_df.empty:
+        video_df = video_df[video_df['patient_id'].isin(matching_patient_ids)]
 
-        # Read CSV and convert columns to snake_case
-        anon_location = os.path.normpath(anon_location)
-        breast_csv = pd.read_csv(anon_location)
-        breast_csv.columns = [to_snake_case(col) for col in breast_csv.columns]
-        breast_csv = breast_csv.sort_values('patient_id')
+    total_breast_patients = len(breast_patient_ids)
+    non_matching_breast_patients = len(breast_patient_ids - matching_patient_ids)
+    percentage_without_images = (non_matching_breast_patients / total_breast_patients) * 100 if total_breast_patients > 0 else 0
+    print(f"{percentage_without_images:.1f}% of breast patients did not have images")
 
-        # Convert to str (no more manual renaming needed!)
-        image_df[['patient_id', 'accession_number']] = image_df[['patient_id', 'accession_number']].astype(str)
-        breast_csv[['patient_id', 'accession_number']] = breast_csv[['patient_id', 'accession_number']].astype(str)
-        if not video_df.empty:
-            video_df[['patient_id', 'accession_number']] = video_df[['patient_id', 'accession_number']].astype(str)
+    # Populate has_malignant and has_benign based on left_diagnosis and right_diagnosis
+    # Check if either column contains MALIGNANT or BENIGN diagnosis
+    breast_csv['has_malignant'] = (
+        breast_csv['left_diagnosis'].str.contains('MALIGNANT', na=False) |
+        breast_csv['right_diagnosis'].str.contains('MALIGNANT', na=False)
+    )
+    breast_csv['has_benign'] = (
+        breast_csv['left_diagnosis'].str.contains('BENIGN', na=False) |
+        breast_csv['right_diagnosis'].str.contains('BENIGN', na=False)
+    )
 
-        # Filter to only keep rows where patient_id has at least some images
-        # Get unique patient IDs that have images
-        image_patient_ids = set(image_df['patient_id'].unique())
-        if not video_df.empty:
-            video_patient_ids = set(video_df['patient_id'].unique())
-            all_patient_ids_with_images = image_patient_ids.union(video_patient_ids)
-        else:
-            all_patient_ids_with_images = image_patient_ids
+    # CHECKPOINT: Save processed dataframes for quick reprocessing
+    checkpoint_dir = os.path.join(os.path.dirname(anon_location), 'checkpoints')
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    checkpoint_file = os.path.join(checkpoint_dir, 'processed_data.pkl')
 
-        breast_patient_ids = set(breast_csv['patient_id'].unique())
-
-        # Keep ALL rows from breast_csv for any patient_id that has at least one image
-        matching_patient_ids = all_patient_ids_with_images.intersection(breast_patient_ids)
-
-        # Filter breast_csv to only patients with images (keeps all rows for those patients)
-        breast_csv = breast_csv[breast_csv['patient_id'].isin(matching_patient_ids)]
-
-        # Filter image/video data to only patients in breast_csv
-        image_df = image_df[image_df['patient_id'].isin(matching_patient_ids)]
-        if not video_df.empty:
-            video_df = video_df[video_df['patient_id'].isin(matching_patient_ids)]
-
-        total_breast_patients = len(breast_patient_ids)
-        non_matching_breast_patients = len(breast_patient_ids - matching_patient_ids)
-        percentage_without_images = (non_matching_breast_patients / total_breast_patients) * 100 if total_breast_patients > 0 else 0
-        print(f"{percentage_without_images:.1f}% of breast patients did not have images")
-
-        # Populate has_malignant and has_benign based on left_diagnosis and right_diagnosis
-        # Check if either column contains MALIGNANT or BENIGN diagnosis
-        breast_csv['has_malignant'] = (
-            breast_csv['left_diagnosis'].str.contains('MALIGNANT', na=False) |
-            breast_csv['right_diagnosis'].str.contains('MALIGNANT', na=False)
-        )
-        breast_csv['has_benign'] = (
-            breast_csv['left_diagnosis'].str.contains('BENIGN', na=False) |
-            breast_csv['right_diagnosis'].str.contains('BENIGN', na=False)
-        )
-
-        # CHECKPOINT: Save processed dataframes for quick reprocessing
-        checkpoint_dir = os.path.join(os.path.dirname(anon_location), 'checkpoints')
-        os.makedirs(checkpoint_dir, exist_ok=True)
-        checkpoint_file = os.path.join(checkpoint_dir, 'processed_data.pkl')
-
-        print(f"Saving checkpoint to {checkpoint_file}...")
-        import pickle
-        with open(checkpoint_file, 'wb') as f:
-            pickle.dump({
-                'breast_csv': breast_csv,
-                'image_df': image_df,
-                'video_df': video_df
-            }, f)
-        print(f"Checkpoint saved! Use load_from_checkpoint=True to load from checkpoint.")
+    print(f"Saving checkpoint to {checkpoint_file}...")
+    import pickle
+    with open(checkpoint_file, 'wb') as f:
+        pickle.dump({
+            'breast_csv': breast_csv,
+            'image_df': image_df,
+            'video_df': video_df
+        }, f)
+    print(f"Checkpoint saved! Use load_from_checkpoint=True to load from checkpoint.")
 
     # Use DatabaseManager to save to SQLite
     with DatabaseManager() as db:
@@ -871,7 +853,7 @@ def filter_dcm_files_by_anon_data(dcm_files_list, anon_location, encryption_key)
     return filtered_files
 
 # Main Method
-def Parse_Dicom_Files(CONFIG, anon_location, lesion_anon_file, raw_storage_database, encryption_key, skip_dicom_processing=False):
+def Parse_Dicom_Files(CONFIG, anon_location, lesion_anon_file, raw_storage_database, encryption_key):
     """
     Main DICOM processing function.
 
@@ -895,50 +877,44 @@ def Parse_Dicom_Files(CONFIG, anon_location, lesion_anon_file, raw_storage_datab
     make_dirs(f'{database_path}/images/')
     make_dirs(f'{database_path}/videos/')
 
-    if skip_dicom_processing:
-        print("=" * 80)
-        print("SKIPPING DICOM PROCESSING - Loading from checkpoint...")
-        print("=" * 80)
-        # Parse and insert study/image/video data from checkpoint
-        parse_anon_file(anon_location, image_df=None, load_from_checkpoint=True)
-    else:
-        # Get every Dicom File
-        dcm_files_list = get_files_by_extension(raw_storage_database, '.dcm')
-        append_audit("dicom_parsing.input_dicoms", len(dcm_files_list))
-        print(f'Total Dicoms in Input: {len(dcm_files_list)}')
 
-        # Apply data range only if it's specified
-        if data_range and len(data_range) == 2:
-            dcm_files_list = dcm_files_list[data_range[0]:data_range[1]]
-            print(f'Applied Data Range: {len(dcm_files_list)}')
-            append_audit("dicom_parsing.data_range", [data_range[0], data_range[1]])
+    # Get every Dicom File
+    dcm_files_list = get_files_by_extension(raw_storage_database, '.dcm')
+    append_audit("dicom_parsing.input_dicoms", len(dcm_files_list))
+    print(f'Total Dicoms in Input: {len(dcm_files_list)}')
 
-        # Remove duplicates from current file list
-        dcm_files_list = deduplicate_dcm_files(dcm_files_list)
-        print(f'Unique DICOM files to process: {len(dcm_files_list)}')
+    # Apply data range only if it's specified
+    if data_range and len(data_range) == 2:
+        dcm_files_list = dcm_files_list[data_range[0]:data_range[1]]
+        print(f'Applied Data Range: {len(dcm_files_list)}')
+        append_audit("dicom_parsing.data_range", [data_range[0], data_range[1]])
 
-        # Filter files to only process those in the anonymized input data
-        dcm_files_list = filter_dcm_files_by_anon_data(dcm_files_list, anon_location, encryption_key)
+    # Remove duplicates from current file list
+    dcm_files_list = deduplicate_dcm_files(dcm_files_list)
+    print(f'Unique DICOM files to process: {len(dcm_files_list)}')
 
-        # Get DCM Data (already returns snake_case columns from updated parse_files)
-        image_df = parse_files(CONFIG, dcm_files_list, database_path)
+    # Filter files to only process those in the anonymized input data
+    dcm_files_list = filter_dcm_files_by_anon_data(dcm_files_list, anon_location, encryption_key)
 
-        # Convert all columns to snake_case (defensive - in case parse_files missed any)
-        image_df.columns = [to_snake_case(col) for col in image_df.columns]
+    # Get DCM Data (already returns snake_case columns from updated parse_files)
+    image_df = parse_files(CONFIG, dcm_files_list, database_path)
 
-        # Remove missing IDs (now using snake_case)
-        original_row_count = len(image_df)
-        # Handle both NaN and empty strings
-        image_df['patient_id'] = image_df['patient_id'].replace('', np.nan)
-        image_df['accession_number'] = image_df['accession_number'].replace('', np.nan)
-        image_df = image_df.dropna(subset=['patient_id', 'accession_number'])
-        new_row_count = len(image_df)
-        removed_rows = original_row_count - new_row_count
-        print(f"Removed {removed_rows} rows with empty values.")
-        append_audit("dicom_parsing.missing_ID_removed", removed_rows)
+    # Convert all columns to snake_case (defensive - in case parse_files missed any)
+    image_df.columns = [to_snake_case(col) for col in image_df.columns]
 
-        # Parse and insert study/image/video data
-        parse_anon_file(anon_location, image_df, load_from_checkpoint=False)
+    # Remove missing IDs (now using snake_case)
+    original_row_count = len(image_df)
+    # Handle both NaN and empty strings
+    image_df['patient_id'] = image_df['patient_id'].replace('', np.nan)
+    image_df['accession_number'] = image_df['accession_number'].replace('', np.nan)
+    image_df = image_df.dropna(subset=['patient_id', 'accession_number'])
+    new_row_count = len(image_df)
+    removed_rows = original_row_count - new_row_count
+    print(f"Removed {removed_rows} rows with empty values.")
+    append_audit("dicom_parsing.missing_ID_removed", removed_rows)
+
+    # Parse and insert study/image/video data
+    parse_anon_file(anon_location, image_df)
 
     # Insert lesion/pathology data into database
     print("Inserting lesion/pathology data")

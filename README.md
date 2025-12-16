@@ -148,7 +148,7 @@ This will:
     - Labeled instance data will referenced and stored using the dicom data hash ID `'DicomHash'`, generated from the unanonymized raw dicom file.
 
 ### Exports
-- Exporting will create a new folder in the specified directory `EXPORT_DIR`, with todays date on it so that it does not overwrite previous exports.
+- Exporting will create a new folder in the appropriate database directory `DATABASE_DIR`, with todays date on it so that it does not overwrite previous exports.
     - The format will be similar to the original database architecture but will only include relevant data.
     - If there is labeled instance data inside the `LABELBOX_LABELS` dir then these will be added in the export as well.
     - `/export_12_26_2023/TrainData.csv`: This file contains refrences to the data formatted into bags for the [CADBUSI-Training](https://github.com/Poofy1/CADBUSI-Training) project to easily interpret.

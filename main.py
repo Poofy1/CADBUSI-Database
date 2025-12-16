@@ -29,7 +29,6 @@ def parse_arguments():
     # Anonymize arguments
     parser.add_argument('--database', action='store_true', help='Process database')
     parser.add_argument('--skip-inpaint', action='store_true', help='Skip the inpainting step')
-    parser.add_argument('--skip-dicom-processing', action='store_true', help='Skip DICOM processing and load from checkpoint')
 
     # Export arguments
     parser.add_argument('--export', action='store_true', help='Export current databse')
@@ -78,6 +77,7 @@ def main():
         from src.ML_processing.lesion_detection import Locate_Lesions
         from src.ML_processing.inpaint_N2N import Inpaint_Dataset_N2N
         from src.ML_processing.orientation_detection import Find_Orientation
+        from src.ML_processing.caliper_coordinates import Locate_Calipers
         from src.ML_processing.download_models import download_models
         
         lesion_pathology = f'{env}/data/lesion_pathology.csv'
@@ -98,11 +98,7 @@ def main():
         key = encrypt_ids(lesion_pathology, lesion_anon_file, key_output)
         
         # Step 2: Parse DICOM files
-        if args.skip_dicom_processing:
-            print("Step 2/5: Loading from checkpoint (skipping DICOM processing)...")
-        else:
-            print("Step 2/5: Parsing and anonymizing DICOM files...")
-        Parse_Dicom_Files(CONFIG, anon_file, lesion_anon_file, BUCKET_PATH, encryption_key=key, skip_dicom_processing=args.skip_dicom_processing)
+        Parse_Dicom_Files(CONFIG, anon_file, lesion_anon_file, BUCKET_PATH, encryption_key=key)
         
         # Step 3: Run OCR
         print("Step 3/5: Processing image data...")
@@ -119,6 +115,7 @@ def main():
             Inpaint_Dataset_N2N( f'{CONFIG["DATABASE_DIR"]}/images/')
             
         Locate_Lesions(f'{CONFIG["DATABASE_DIR"]}/images/')
+        Locate_Calipers(f'{CONFIG["DATABASE_DIR"]}/images/')
         
         # Step 5: Process video
         print("Step 5/5: Processing video data...")
