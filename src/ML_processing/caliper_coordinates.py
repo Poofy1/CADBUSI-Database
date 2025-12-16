@@ -453,8 +453,7 @@ def process_single_image_pair(pair, image_dir, image_data_row, save_debug=False,
         save_debug_image(caliper_img, caliper_centers, debug_path)
 
     return {
-        'caliper_coordinates': caliper_coordinates_str,
-        'has_caliper_mask': len(caliper_centers) > 0
+        'caliper_coordinates': caliper_coordinates_str
     }
 
 
@@ -501,6 +500,9 @@ def Locate_Calipers(image_dir, save_debug=False, debug_dir='debug_caliper_coords
     print("Starting caliper location using mask-based detection...")
 
     with DatabaseManager() as db:
+        # Ensure caliper_coordinates columns exist in the database
+        db.add_column_if_not_exists('Images', 'caliper_coordinates', 'TEXT')
+
         # Load image data from database
         image_data = db.get_images_dataframe()
 
@@ -549,11 +551,9 @@ def Locate_Calipers(image_dir, save_debug=False, debug_dir='debug_caliper_coords
 
                 cursor.execute("""
                     UPDATE Images
-                    SET caliper_coordinates = ?,
-                        has_caliper_mask = ?
+                    SET caliper_coordinates = ?
                     WHERE image_name = ?
                 """, (result['caliper_coordinates'],
-                      1 if result['has_caliper_mask'] else 0,
                       caliper_image_name))
 
                 processed_count += 1

@@ -531,3 +531,23 @@ class DatabaseManager:
             WHERE laterality IS NULL OR area IS NULL
         """)
         self.conn.commit()
+
+    def add_column_if_not_exists(self, table_name: str, column_name: str, column_type: str, default_value: str = None):
+        """Add a column to a table if it doesn't already exist."""
+        cursor = self.conn.cursor()
+
+        # Check if column exists
+        cursor.execute(f"PRAGMA table_info({table_name})")
+        columns = [row[1] for row in cursor.fetchall()]
+
+        if column_name not in columns:
+            # Build ALTER TABLE statement
+            alter_sql = f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}"
+            if default_value is not None:
+                alter_sql += f" DEFAULT {default_value}"
+
+            cursor.execute(alter_sql)
+            self.conn.commit()
+            print(f"Added column '{column_name}' to table '{table_name}'")
+            return True
+        return False
