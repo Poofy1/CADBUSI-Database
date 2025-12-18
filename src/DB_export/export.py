@@ -468,30 +468,38 @@ def split_bilateral_cases(breast_df, image_df):
     if bilateral_df.empty:
         return non_bilateral_df
 
+    # Pre-group images by accession_number to avoid repeated filtering (HUGE speedup!)
+    print(f"Pre-grouping {len(image_df)} images by accession number...")
+    image_groups = image_df.groupby('accession_number')['laterality'].apply(list).to_dict()
+
     split_rows = []
     converted_rows = []
     removed_count = 0
     flagged_unknown_laterality = 0
 
-    for _, row in bilateral_df.iterrows():
+    print(f"Processing {len(bilateral_df)} bilateral cases...")
+    for _, row in tqdm(bilateral_df.iterrows(), total=len(bilateral_df), desc="Splitting bilateral cases"):
         accession = row['accession_number']
 
-        # Check which lateralities have images
-        case_images = image_df[image_df['accession_number'] == accession]
+        # Get lateralities for this accession (much faster than filtering!)
+        lateralities = image_groups.get(accession, [])
 
-        # Check for unknown/null laterality images (NaN, empty string, or 'UNKNOWN')
-        has_unknown = (
-            case_images['laterality'].isna().any() or
-            (case_images['laterality'] == '').any() or
-            (case_images['laterality'].str.upper() == 'UNKNOWN').any()
+        if not lateralities:
+            # No images for this accession
+            removed_count += 1
+            continue
+
+        # Check for unknown/null laterality images
+        has_unknown = any(
+            pd.isna(lat) or lat == '' or str(lat).upper() == 'UNKNOWN'
+            for lat in lateralities
         )
 
         if has_unknown:
-            # Keep the case but flag it
             flagged_unknown_laterality += 1
 
-        has_left = (case_images['laterality'] == 'LEFT').any()
-        has_right = (case_images['laterality'] == 'RIGHT').any()
+        has_left = 'LEFT' in lateralities
+        has_right = 'RIGHT' in lateralities
 
         if has_left and has_right:
             # Split into two rows
@@ -649,9 +657,23 @@ def apply_filters(image_df, video_df, breast_df, CONFIG):
 
     # Update has_malignant for all cases based on diagnosis columns
     # (bilateral cases already have this set by split_bilateral_cases)
-    for idx, row in breast_df.iterrows():
-        if row['study_laterality'] in ['LEFT', 'RIGHT']:
-            breast_df.at[idx, 'has_malignant'] = determine_has_malignant(row, row['study_laterality'])
+    # Fully vectorized - no loops! Much faster than apply()
+
+    # Check if both diagnoses are NULL -> return -1
+    both_null = breast_df['left_diagnosis'].isna() & breast_df['right_diagnosis'].isna()
+
+    # For LEFT cases: check left_diagnosis
+    left_mask = breast_df['study_laterality'] == 'LEFT'
+    left_malignant = breast_df['left_diagnosis'].fillna('').str.upper().str.contains('MALIGNANT')
+
+    # For RIGHT cases: check right_diagnosis
+    right_mask = breast_df['study_laterality'] == 'RIGHT'
+    right_malignant = breast_df['right_diagnosis'].fillna('').str.upper().str.contains('MALIGNANT')
+
+    # Combine the conditions
+    breast_df.loc[both_null, 'has_malignant'] = -1
+    breast_df.loc[left_mask & ~both_null, 'has_malignant'] = left_malignant[left_mask & ~both_null].astype(int)
+    breast_df.loc[right_mask & ~both_null, 'has_malignant'] = right_malignant[right_mask & ~both_null].astype(int)
 
     # Only labeled images
     image_df = image_df[image_df['label'] == True]
@@ -785,6 +807,7 @@ def Export_Database(CONFIG, limit = None, reparse_images = True):
         image_df = db.get_images_dataframe()
         breast_df = db.get_study_cases_dataframe()
         pathology_df = db.get_pathology_dataframe()
+        print('Loaded database')
 
     # Apply test subset early if specified
     if limit:

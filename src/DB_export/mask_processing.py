@@ -444,13 +444,13 @@ def Mask_Lesions(database_path, output_dir, filtered_image_df=None, max_workers=
         if filtered_image_df is not None:
             valid_image_names = set(filtered_image_df['image_name'].unique())
             masked_images = masked_images[masked_images['image_name'].isin(valid_image_names)]
-            print(f"Filtered to {len(masked_images)} images based on upstream filters")
+            print(f"Filtered to {len(masked_images)} lesions based on upstream filters")
 
         if len(masked_images) == 0:
             print("No images found with masks")
             return pd.DataFrame(columns=['image_source', 'image_name', 'accession_number', 'patient_id', 'crop_w', 'crop_h'])
 
-        print(f"Found {len(masked_images)} images to process")
+        print(f"Found {len(masked_images)} lesions to process")
 
         image_dir = f"{database_path}/images/"
         mask_dir = f"{database_path}/lesion_masks/"
@@ -489,7 +489,7 @@ def Mask_Lesions(database_path, output_dir, filtered_image_df=None, max_workers=
             futures = {executor.submit(process_single_mask, args): args[0] for args in worker_args}
 
             # Process completed tasks with progress bar
-            with tqdm(total=len(futures), desc="Processing masked images") as pbar:
+            with tqdm(total=len(futures), desc="Processing lesion images") as pbar:
                 for future in as_completed(futures):
                     result = future.result()
                     idx = result['idx']
