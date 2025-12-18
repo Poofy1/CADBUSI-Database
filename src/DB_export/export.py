@@ -246,9 +246,11 @@ def PerformSplit(df):
 def create_train_set(breast_data, image_data, lesion_df=None):
     # Join breast_data and image_data on BOTH accession_number and laterality
     # This ensures split bilateral cases only get their respective images
+    # Use LEFT JOIN to keep ALL breast cases, even those without images (e.g., US-only studies)
     data = pd.merge(breast_data, image_data,
                     left_on=['accession_number', 'study_laterality'],
                     right_on=['accession_number', 'laterality'],
+                    how='left',
                     suffixes=('', '_image_data'))
 
     # Remove duplicate columns
@@ -293,8 +295,8 @@ def create_train_set(breast_data, image_data, lesion_df=None):
     def clean_list(img_list):
         if not isinstance(img_list, list):
             return []
-        return [str(img).strip() for img in img_list if img and str(img).strip()]
-    
+        return [str(img).strip() for img in img_list if pd.notna(img) and str(img).strip()]
+
     data['images'] = data['image_name'].apply(clean_list)
     data.drop(['image_name'], axis=1, inplace=True)
     
