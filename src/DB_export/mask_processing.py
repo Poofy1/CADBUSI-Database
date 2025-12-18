@@ -529,6 +529,10 @@ def Mask_Lesions(database_path, output_dir, filtered_image_df=None, max_workers=
                 yolo_confidence_str = original_row.get('yolo_confidence', '')
                 samus_confidence_str = original_row.get('samus_confidence', '')
 
+                # Get parent image crop offsets to adjust lesion coordinates
+                parent_crop_x = int(original_row.get('crop_x', 0))
+                parent_crop_y = int(original_row.get('crop_y', 0))
+
                 # Parse lesion images (comma-separated)
                 lesion_images_str = result['lesion_images']
                 lesion_images = [img.strip() for img in lesion_images_str.split(',') if img.strip()]
@@ -577,25 +581,29 @@ def Mask_Lesions(database_path, output_dir, filtered_image_df=None, max_workers=
                     samus_confidences = []
 
                 # Create a record for each lesion image
-                for i, lesion_img in enumerate(lesion_images):
+                for i, lesion_name in enumerate(lesion_images):
                     crop_w = widths[i] if i < len(widths) else 0
                     crop_h = heights[i] if i < len(heights) else 0
                     # Each lesion gets its corresponding confidence values
                     yolo_conf = yolo_confidences[i] if i < len(yolo_confidences) else ''
                     samus_conf = samus_confidences[i] if i < len(samus_confidences) else ''
-                    # Get crop coordinates for this lesion
-                    crop_x, crop_y = crop_coords_list[i] if i < len(crop_coords_list) else (0, 0)
+                    # Get crop coordinates for this lesion (relative to original DICOM)
+                    lesion_crop_x, lesion_crop_y = crop_coords_list[i] if i < len(crop_coords_list) else (0, 0)
+
+                    # Adjust lesion coordinates to be relative to the cropped parent image
+                    adjusted_crop_x = lesion_crop_x - parent_crop_x
+                    adjusted_crop_y = lesion_crop_y - parent_crop_y
 
                     lesion_records.append({
                         'image_source': source_image_name,
-                        'image_name': lesion_img,
+                        'lesion_name': lesion_name,
                         'accession_number': accession_number,
                         'patient_id': patient_id,
                         'laterality': laterality,
                         'crop_w': crop_w,
                         'crop_h': crop_h,
-                        'crop_x': crop_x,
-                        'crop_y': crop_y,
+                        'crop_x': adjusted_crop_x,
+                        'crop_y': adjusted_crop_y,
                         'yolo_confidence': yolo_conf,
                         'samus_confidence': samus_conf
                     })

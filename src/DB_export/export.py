@@ -259,42 +259,23 @@ def create_train_set(breast_data, image_data, lesion_df=None):
     if 'laterality' in data.columns:
         data.drop('laterality', axis=1, inplace=True)
 
-    # Add label columns to keep
-    columns_to_keep = ['patient_id', 'accession_number', 'study_laterality',
-                       'has_malignant', 'valid', 'age_at_event',
-                       'image_name', 'margin', 'shape', 'orientation', 'echo',
-                       'posterior', 'boundary', 'is_biopsy', 'is_us_biopsy',
-                       'findings', 'synoptic_report', 'death_date', 'density_desc',
-                       'rad_impression', 'date', 'was_bilateral', 'has_unknown_laterality', 'bi_rads']
-
-    data = data[columns_to_keep]
-
-    # Aggregation dictionary
+    # Build aggregation dictionary dynamically from breast_data columns only
     # Note: accession_number and study_laterality are groupby keys, so don't include them here
-    agg_dict = {
-        'patient_id': 'first',
-        'has_malignant': 'first',
-        'valid': 'first',
-        'age_at_event': 'first',
-        'image_name': lambda x: list(x),
-        'margin': 'first',
-        'shape': 'first',
-        'orientation': 'first',
-        'echo': 'first',
-        'posterior': 'first',
-        'boundary': 'first',
-        'is_biopsy': 'first',
-        'is_us_biopsy': 'first',
-        'findings': 'first',
-        'synoptic_report': 'first',
-        'death_date': 'first',
-        'density_desc': 'first',
-        'rad_impression': 'first',
-        'date': 'first',
-        'was_bilateral': 'first',
-        'has_unknown_laterality': 'first',
-        'bi_rads': 'first'
-    }
+    agg_dict = {}
+
+    # Special handling for image_name - convert to list
+    if 'image_name' in data.columns:
+        agg_dict['image_name'] = lambda x: list(x)
+
+    # Only include columns that were originally in breast_data (StudyCases table)
+    # This excludes image-specific columns like distance, closest_fn, crop_x, etc.
+    # Also exclude diagnosis columns that are not needed in final export
+    excluded_columns = ['accession_number', 'study_laterality', 'image_name',
+                       'has_benign', 'left_diagnosis', 'right_diagnosis']
+    breast_columns = set(breast_data.columns)
+    for col in data.columns:
+        if col in breast_columns and col not in excluded_columns:
+            agg_dict[col] = 'first'
 
     data = data.reset_index(drop=True)
     # Group by BOTH accession_number and study_laterality to keep split bilateral cases separate
@@ -359,16 +340,14 @@ def create_train_set(breast_data, image_data, lesion_df=None):
         # No lesion data available
         data['lesion_images'] = [[] for _ in range(len(data))]
     
-    # Filter out rows with empty images
+    # Keep ALL rows, including those without images
     data = data.reset_index(drop=True)
-    initial_count = len(data)
-    has_images_mask = data['images'].apply(lambda x: isinstance(x, list) and len(x) > 0)
-    data = data[has_images_mask].reset_index(drop=True)
-    
-    removed_count = initial_count - len(data)
-    if removed_count > 0:
-        print(f"Removed {removed_count} rows with no valid images")
-    
+
+    # Report how many rows have no images
+    no_images_count = data['images'].apply(lambda x: not isinstance(x, list) or len(x) == 0).sum()
+    if no_images_count > 0:
+        print(f"Note: {no_images_count} rows have no images (kept in export)")
+
     data.drop(['patient_id'], axis=1, inplace=True)
     data['id'] = range(len(data))
     columns = ['id'] + [col for col in data.columns if col != 'id']
@@ -567,6 +546,90 @@ def split_bilateral_cases(breast_df, image_df):
     return result_df
 
 
+def generate_pathology_data(pathology_df):
+    """
+    Generate pathology data CSV from pathology_df.
+
+    Args:
+        pathology_df: DataFrame from Pathology table
+
+    Returns:
+        DataFrame with columns: accession_number, patient_id, date, cancer_type
+    """
+    if pathology_df.empty:
+        return pd.DataFrame(columns=['accession_number', 'patient_id', 'date', 'cancer_type'])
+
+    # Select only needed columns
+    pathology_data = pathology_df[['accession_number', 'patient_id', 'date', 'cancer_type']].copy()
+
+    # Normalize data types
+    pathology_data['patient_id'] = pathology_data['patient_id'].astype(str)
+    pathology_data['accession_number'] = pathology_data['accession_number'].astype(str)
+
+    return pathology_data
+
+def generate_caliper_data(image_df):
+    """
+    Generate caliper data CSV from image_df containing caliper_coordinates column.
+    Adjusts coordinates to account for image cropping.
+
+    Args:
+        image_df: DataFrame with columns including caliper_coordinates, accession_number, patient_id, image_name, crop_x, crop_y
+
+    Returns:
+        DataFrame with columns: id, accession_number, patient_id, image_name, x, y
+    """
+    caliper_records = []
+    caliper_id = 1
+
+    for _, row in image_df.iterrows():
+        caliper_coords_str = row.get('caliper_coordinates', '')
+
+        # Skip if no caliper coordinates
+        if pd.isna(caliper_coords_str) or caliper_coords_str == '':
+            continue
+
+        accession_number = row['accession_number']
+        patient_id = row['patient_id']
+        image_name = row['image_name']
+
+        # Get crop offsets to adjust coordinates
+        crop_x = int(row.get('crop_x', 0))
+        crop_y = int(row.get('crop_y', 0))
+
+        # Parse caliper coordinates
+        # Format: "999,462;610,309;" - semicolons separate calipers, commas separate x,y
+        caliper_pairs = caliper_coords_str.strip().rstrip(';').split(';')
+
+        for pair in caliper_pairs:
+            pair = pair.strip()
+            if pair:
+                try:
+                    parts = pair.split(',')
+                    if len(parts) == 2:
+                        # Original coordinates from DICOM
+                        original_x = int(parts[0].strip())
+                        original_y = int(parts[1].strip())
+
+                        # Adjust for crop offset
+                        x = original_x - crop_x
+                        y = original_y - crop_y
+
+                        caliper_records.append({
+                            'id': caliper_id,
+                            'accession_number': accession_number,
+                            'patient_id': patient_id,
+                            'image_name': image_name,
+                            'x': x,
+                            'y': y
+                        })
+                        caliper_id += 1
+                except (ValueError, IndexError) as e:
+                    print(f"Warning: Could not parse caliper coordinate '{pair}' for image {image_name}: {e}")
+
+    caliper_df = pd.DataFrame(caliper_records)
+    return caliper_df
+
 def apply_filters(image_df, video_df, breast_df, CONFIG):
     """
     Apply all quality and relevance filters to the image and video data.
@@ -672,11 +735,18 @@ def build_instance_data(image_df, breast_df):
 
     # Add columns from Images table
     image_columns_to_add = ['area', 'orientation', 'photometric_interpretation',
-                             'has_calipers', 'has_calipers_prediction', 'inpainted_from']
+                             'has_calipers', 'has_calipers_prediction', 'inpainted_from',
+                             'laterality', 'description', 'crop_aspect_ratio', 'darkness',
+                             'software_versions', 'manufacturer_model_name']
     for col in image_columns_to_add:
         if col in image_df.columns:
             image_to_col_map = dict(zip(image_df['image_name'], image_df[col]))
             instance_data[col] = instance_data['image_name'].map(image_to_col_map)
+
+    # Add closest_fn as pair_image
+    if 'closest_fn' in image_df.columns:
+        image_to_pair_map = dict(zip(image_df['image_name'], image_df['closest_fn']))
+        instance_data['pair_image'] = instance_data['image_name'].map(image_to_pair_map)
 
     # Add physical_delta_x
     if 'physical_delta_x' in image_df.columns:
@@ -693,104 +763,6 @@ def build_instance_data(image_df, breast_df):
         instance_data['image_h'] = instance_data['image_name'].map(image_to_height_map)
     
     return instance_data
-
-
-def add_lesions_to_instance_data(instance_data, lesion_df, image_df, breast_df):
-    """
-    Add lesion images to instance_data with their specific dimensions.
-    Lesions inherit metadata from their source images.
-    
-    Args:
-        instance_data: Existing instance_data DataFrame
-        lesion_df: DataFrame with lesion images (has image_source, image_name, patient_id, accession_number)
-        image_df: Original image_df to get source image metadata
-        breast_df: Breast data for mapping
-    
-    Returns:
-        Updated instance_data with lesion rows added
-    """
-    if lesion_df.empty:
-        return instance_data
-    
-    # Create base lesion instance data
-    lesion_instances = lesion_df[['image_name']].copy()
-
-    # Add a placeholder dicom_hash (lesions don't have their own dicom_hash)
-    lesion_instances['dicom_hash'] = lesion_df['image_source']  # Use source image as reference
-
-    # Add is_lesion column (1 for lesion images)
-    lesion_instances['is_lesion'] = 1
-
-    # Map metadata from source images via image_source
-    source_to_metadata = {}
-    for _, row in image_df.iterrows():
-        source_name = row['image_name']
-        source_to_metadata[source_name] = {
-            'patient_id': row['patient_id'],
-            'accession_number': row['accession_number'],
-            'laterality': row['laterality'],
-            'physical_delta_x': row.get('physical_delta_x', None),
-            'area': row.get('area', None),
-            'orientation': row.get('orientation', None),
-            'photometric_interpretation': row.get('photometric_interpretation', None),
-            'has_calipers': row.get('has_calipers', None),
-            'has_calipers_prediction': row.get('has_calipers_prediction', None),
-            'inpainted_from': row.get('inpainted_from', None),
-            'yolo_confidence': row.get('yolo_confidence', None),
-            'samus_confidence': row.get('samus_confidence', None)
-        }
-
-    # Get metadata from source images
-    metadata_columns = ['patient_id', 'accession_number', 'laterality', 'physical_delta_x',
-                        'area', 'orientation', 'photometric_interpretation',
-                        'has_calipers', 'has_calipers_prediction', 'inpainted_from',
-                        'yolo_confidence', 'samus_confidence']
-    for col in metadata_columns:
-        lesion_instances[col] = lesion_df['image_source'].map(
-            lambda x: source_to_metadata.get(x, {}).get(col)
-        )
-    
-    # Map breast data columns (same as regular images)
-    column_mappings = {
-        'age_at_event': 'Age'
-    }
-    
-    # Get columns that exist in breast_df
-    available_columns = [col for col in column_mappings.keys() if col in breast_df.columns]
-    
-    if available_columns:
-        merge_columns = ['patient_id', 'accession_number', 'study_laterality'] + available_columns
-        
-        merged_data = lesion_instances[['image_name', 'patient_id', 'accession_number', 'laterality']].merge(
-            breast_df[merge_columns],
-            left_on=['patient_id', 'accession_number', 'laterality'],
-            right_on=['patient_id', 'accession_number', 'study_laterality'],
-            how='left'
-        )
-        
-        for breast_col, instance_col in column_mappings.items():
-            if breast_col in available_columns:
-                image_to_value_map = dict(zip(merged_data['image_name'], merged_data[breast_col]))
-                lesion_instances[instance_col] = lesion_instances['image_name'].map(image_to_value_map)
-    
-    # Get lesion-specific dimensions from lesion_df
-    lesion_name_to_dims = dict(zip(lesion_df['image_name'], 
-                                    zip(lesion_df['crop_w'], lesion_df['crop_h'])))
-    
-    lesion_instances['image_w'] = lesion_instances['image_name'].map(
-        lambda x: lesion_name_to_dims.get(x, (0, 0))[0]
-    )
-    lesion_instances['image_h'] = lesion_instances['image_name'].map(
-        lambda x: lesion_name_to_dims.get(x, (0, 0))[1]
-    )
-    
-    # Drop temporary columns
-    lesion_instances = lesion_instances.drop(['patient_id', 'accession_number', 'laterality'], axis=1, errors='ignore')
-    
-    # Combine with original instance_data
-    combined = pd.concat([instance_data, lesion_instances], ignore_index=True)
-    
-    return combined
 
 
 def Export_Database(CONFIG, limit = None, reparse_images = True):
@@ -812,6 +784,7 @@ def Export_Database(CONFIG, limit = None, reparse_images = True):
         video_df = db.get_videos_dataframe()
         image_df = db.get_images_dataframe()
         breast_df = db.get_study_cases_dataframe()
+        pathology_df = db.get_pathology_dataframe()
 
     # Apply test subset early if specified
     if limit:
@@ -836,22 +809,12 @@ def Export_Database(CONFIG, limit = None, reparse_images = True):
     
     instance_data = build_instance_data(image_df, breast_df)
     instance_data = merge_labelbox_labels(instance_data, instance_labels_csv_file)
-    instance_data = add_lesions_to_instance_data(instance_data, lesion_df, image_df, breast_df)
 
-    if reparse_images:   
+    if reparse_images:
         # Crop the images for the relevant studies
         Crop_images(image_df, database_dir, output_dir)
         Crop_Videos(video_df, database_dir, output_dir)
-    
-    # Filter out case and breast data that isn't relevant
-    initial_breast_count = len(breast_df)
-    image_patient_ids = image_df['patient_id'].unique()
-    breast_df = breast_df[breast_df['patient_id'].isin(image_patient_ids)]
-    remaining_breast_count = len(breast_df)
-    removed_breast_count = initial_breast_count - remaining_breast_count
-    append_audit("export.breasts_no_data_removed", removed_breast_count)
-    append_audit("export.final_breasts", remaining_breast_count)
-        
+
     # Val split for case data
     breast_df = PerformSplit(breast_df)
     
@@ -873,12 +836,22 @@ def Export_Database(CONFIG, limit = None, reparse_images = True):
         video_images_df = None
         print("No video data found - video_paths set to empty lists")
 
+    # Generate caliper data CSV
+    caliper_df = generate_caliper_data(image_df)
+    print(f"Generated {len(caliper_df)} caliper coordinate records from {caliper_df['image_name'].nunique() if not caliper_df.empty else 0} images")
+
+    # Generate pathology data CSV
+    pathology_data = generate_pathology_data(pathology_df)
+    print(f"Generated {len(pathology_data)} pathology records from {pathology_data['accession_number'].nunique() if not pathology_data.empty else 0} accessions")
+
     # Write the filtered dataframes to CSV files in the output directory
     save_data(video_df, os.path.join(output_dir, 'VideoData.csv'))
-    save_data(train_data, os.path.join(output_dir, 'TrainData.csv'))
-    save_data(lesion_df, os.path.join(output_dir, 'LesionLink.csv'))
+    save_data(train_data, os.path.join(output_dir, 'BreastData.csv'))
+    save_data(lesion_df, os.path.join(output_dir, 'LesionData.csv'))
+    save_data(caliper_df, os.path.join(output_dir, 'CaliperData.csv'))
+    save_data(pathology_data, os.path.join(output_dir, 'PathologyData.csv'))
     if instance_data is not None:
-        save_data(instance_data, os.path.join(output_dir, 'InstanceData.csv'))
+        save_data(instance_data, os.path.join(output_dir, 'ImageData.csv'))
     
     # Generate and save audit report
     generate_audit_report(image_df, breast_df, video_df, video_images_df if reparse_images else None)

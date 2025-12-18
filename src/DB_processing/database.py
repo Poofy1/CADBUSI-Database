@@ -277,7 +277,8 @@ class DatabaseManager:
                 for col in update_cols:
                     val = row.get(col)
                     if col in boolean_columns:
-                        values.append(1 if val else 0)
+                        # Properly handle string 'T'/'F' values and boolean types
+                        values.append(1 if val in ('T', True, 1, '1') else 0)
                     elif col in string_columns:
                         values.append(str(val) if val is not None else '')
                     else:
@@ -317,7 +318,8 @@ class DatabaseManager:
             for col in present_columns:
                 val = row.get(col)
                 if col in boolean_columns:
-                    values.append(1 if val else 0)
+                    # Properly handle string 'T'/'F' values and boolean types
+                    values.append(1 if val in ('T', True, 1, '1') else 0)
                 elif col in string_columns:
                     values.append(str(val) if val is not None else '')
                 else:
