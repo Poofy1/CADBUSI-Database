@@ -15,6 +15,7 @@ from src.DB_processing.database import DatabaseManager
 from src.DB_export.mask_processing import Mask_Lesions
 from src.DB_export.audit_report import generate_audit_report
 from src.DB_export.instance_data import *
+from src.DB_export.filter_images import apply_filters
 
 
 # Paths
@@ -418,140 +419,6 @@ def map_breast_data_to_instances(instance_data, image_df, breast_df, column_mapp
     
     return instance_data
         
-def determine_has_malignant(row, laterality):
-    """
-    Determine if a breast has malignancy based on diagnosis columns and laterality.
-
-    Args:
-        row: DataFrame row with left_diagnosis and right_diagnosis columns
-        laterality: 'LEFT' or 'RIGHT'
-
-    Returns:
-        1 if malignant, 0 if not malignant, -1 if both diagnoses are NULL
-    """
-    # Check if both diagnoses are NULL
-    left_diag = row.get('left_diagnosis', None)
-    right_diag = row.get('right_diagnosis', None)
-
-    if pd.isna(left_diag) and pd.isna(right_diag):
-        return -1
-
-    if laterality == 'LEFT':
-        diagnosis = left_diag
-    elif laterality == 'RIGHT':
-        diagnosis = right_diag
-    else:
-        return 0
-
-    # Check if diagnosis contains MALIGNANT
-    if pd.notna(diagnosis) and 'MALIGNANT' in str(diagnosis).upper():
-        return 1
-    return 0
-
-
-def split_bilateral_cases(breast_df, image_df):
-    """
-    Split bilateral cases into separate LEFT and RIGHT breast rows based on available images.
-    Only splits if images exist for both lateralities. Otherwise converts to single-sided.
-    Keeps bilateral cases with unknown laterality and flags them with has_unknown_laterality=1.
-
-    Returns:
-        Updated breast_df with bilateral cases split or converted
-    """
-    bilateral_df = breast_df[breast_df['study_laterality'] == 'BILATERAL'].copy()
-    non_bilateral_df = breast_df[breast_df['study_laterality'] != 'BILATERAL'].copy()
-
-    # Add was_bilateral and has_unknown_laterality columns to non-bilateral cases (set to 0)
-    non_bilateral_df['was_bilateral'] = 0
-    non_bilateral_df['has_unknown_laterality'] = 0
-
-    if bilateral_df.empty:
-        return non_bilateral_df
-
-    # Pre-group images by accession_number to avoid repeated filtering (HUGE speedup!)
-    print(f"Pre-grouping {len(image_df)} images by accession number...")
-    image_groups = image_df.groupby('accession_number')['laterality'].apply(list).to_dict()
-
-    split_rows = []
-    converted_rows = []
-    removed_count = 0
-    flagged_unknown_laterality = 0
-
-    print(f"Processing {len(bilateral_df)} bilateral cases...")
-    for _, row in tqdm(bilateral_df.iterrows(), total=len(bilateral_df), desc="Splitting bilateral cases"):
-        accession = row['accession_number']
-
-        # Get lateralities for this accession (much faster than filtering!)
-        lateralities = image_groups.get(accession, [])
-
-        if not lateralities:
-            # No images for this accession
-            removed_count += 1
-            continue
-
-        # Check for unknown/null laterality images
-        has_unknown = any(
-            pd.isna(lat) or lat == '' or str(lat).upper() == 'UNKNOWN'
-            for lat in lateralities
-        )
-
-        if has_unknown:
-            flagged_unknown_laterality += 1
-
-        has_left = 'LEFT' in lateralities
-        has_right = 'RIGHT' in lateralities
-
-        if has_left and has_right:
-            # Split into two rows
-            left_row = row.copy()
-            left_row['study_laterality'] = 'LEFT'
-            left_row['has_malignant'] = determine_has_malignant(row, 'LEFT')
-            left_row['was_bilateral'] = 1
-            left_row['has_unknown_laterality'] = 1 if has_unknown else 0
-
-            right_row = row.copy()
-            right_row['study_laterality'] = 'RIGHT'
-            right_row['has_malignant'] = determine_has_malignant(row, 'RIGHT')
-            right_row['was_bilateral'] = 1
-            right_row['has_unknown_laterality'] = 1 if has_unknown else 0
-
-            split_rows.extend([left_row, right_row])
-        elif has_left:
-            # Convert to LEFT only
-            converted_row = row.copy()
-            converted_row['study_laterality'] = 'LEFT'
-            converted_row['has_malignant'] = determine_has_malignant(row, 'LEFT')
-            converted_row['was_bilateral'] = 1
-            converted_row['has_unknown_laterality'] = 1 if has_unknown else 0
-            converted_rows.append(converted_row)
-        elif has_right:
-            # Convert to RIGHT only
-            converted_row = row.copy()
-            converted_row['study_laterality'] = 'RIGHT'
-            converted_row['has_malignant'] = determine_has_malignant(row, 'RIGHT')
-            converted_row['was_bilateral'] = 1
-            converted_row['has_unknown_laterality'] = 1 if has_unknown else 0
-            converted_rows.append(converted_row)
-        else:
-            # No images for either side, remove this case
-            removed_count += 1
-
-    # Combine all dataframes
-    result_dfs = [non_bilateral_df]
-    if split_rows:
-        result_dfs.append(pd.DataFrame(split_rows))
-    if converted_rows:
-        result_dfs.append(pd.DataFrame(converted_rows))
-
-    result_df = pd.concat(result_dfs, ignore_index=True)
-
-    print(f"Bilateral processing: {len(split_rows)//2} split into L+R, {len(converted_rows)} converted to single-sided, {removed_count} removed (no images), {flagged_unknown_laterality} flagged (unknown laterality)")
-    append_audit("export.bilateral_split", len(split_rows)//2)
-    append_audit("export.bilateral_converted", len(converted_rows))
-    append_audit("export.bilateral_removed_no_images", removed_count)
-    append_audit("export.bilateral_flagged_unknown_laterality", flagged_unknown_laterality)
-
-    return result_df
 
 
 def generate_pathology_data(pathology_df):
@@ -637,81 +504,6 @@ def generate_caliper_data(image_df):
 
     caliper_df = pd.DataFrame(caliper_records)
     return caliper_df
-
-def apply_filters(image_df, video_df, breast_df, CONFIG):
-    """
-    Apply all quality and relevance filters to the image and video data.
-
-    Returns:
-        tuple: (filtered_image_df, filtered_video_df, filtered_breast_df, audit_stats)
-    """
-    audit_stats = {}
-
-    # Track initial counts
-    audit_stats['init_images'] = len(image_df)
-    audit_stats['init_videos'] = len(video_df)
-    audit_stats['init_breasts'] = len(breast_df)
-
-    # Split or convert bilateral cases based on available images
-    breast_df = split_bilateral_cases(breast_df, image_df)
-
-    # Update has_malignant for all cases based on diagnosis columns
-    # (bilateral cases already have this set by split_bilateral_cases)
-    # Fully vectorized - no loops! Much faster than apply()
-
-    # Check if both diagnoses are NULL -> return -1
-    both_null = breast_df['left_diagnosis'].isna() & breast_df['right_diagnosis'].isna()
-
-    # For LEFT cases: check left_diagnosis
-    left_mask = breast_df['study_laterality'] == 'LEFT'
-    left_malignant = breast_df['left_diagnosis'].fillna('').str.upper().str.contains('MALIGNANT')
-
-    # For RIGHT cases: check right_diagnosis
-    right_mask = breast_df['study_laterality'] == 'RIGHT'
-    right_malignant = breast_df['right_diagnosis'].fillna('').str.upper().str.contains('MALIGNANT')
-
-    # Combine the conditions
-    breast_df.loc[both_null, 'has_malignant'] = -1
-    breast_df.loc[left_mask & ~both_null, 'has_malignant'] = left_malignant[left_mask & ~both_null].astype(int)
-    breast_df.loc[right_mask & ~both_null, 'has_malignant'] = right_malignant[right_mask & ~both_null].astype(int)
-
-    # Only labeled images
-    image_df = image_df[image_df['label'] == True]
-    image_df = image_df.drop(['label'], axis=1)
-    
-    # Only images/videos with valid patient ids (from filtered breast_df)
-    valid_patient_ids = breast_df['patient_id'].unique()
-    image_df = image_df[image_df['patient_id'].isin(valid_patient_ids)]
-    video_df = video_df[video_df['patient_id'].isin(valid_patient_ids)]
-    
-    # Remove bad aspect ratios
-    min_aspect_ratio = CONFIG.get('MIN_ASPECT_RATIO', 0.5)
-    max_aspect_ratio = CONFIG.get('MAX_ASPECT_RATIO', 4.0)
-    
-    before_aspect_count = len(image_df)
-    image_df = image_df[
-        (image_df['crop_aspect_ratio'] >= min_aspect_ratio) & 
-        (image_df['crop_aspect_ratio'] <= max_aspect_ratio)
-    ]
-    audit_stats['bad_aspect_removed'] = before_aspect_count - len(image_df)
-    
-    # Remove images that are too small
-    min_dimension = CONFIG.get('MIN_DIMENSION', 200)
-    
-    before_dimension_count = len(image_df)
-    image_df = image_df[
-        (image_df['crop_w'] >= min_dimension) & 
-        (image_df['crop_h'] >= min_dimension)
-    ]
-    audit_stats['too_small_removed'] = before_dimension_count - len(image_df)
-    
-    # Log audit statistics
-    for key, value in audit_stats.items():
-        append_audit(f"export.{key}", value)
-    
-    return image_df, video_df, breast_df
-
-
 
 
 
@@ -820,9 +612,13 @@ def Export_Database(CONFIG, limit = None, reparse_images = True):
         video_df = video_df[video_df['patient_id'].isin(subset_patient_ids)]
         print(f"Subset data sizes - Breast: {len(breast_df)}, Image: {len(image_df)}, Video: {len(video_df)}")
         
+    # Track which studies contained axilla images BEFORE filtering removes them
+    axilla_accessions = set(image_df[image_df['area'] == 'axilla']['accession_number'].unique())
+    breast_df['contained_axilla'] = breast_df['accession_number'].isin(axilla_accessions).astype(int)
+
     # Normalize image_df BEFORE building instance_data
     image_df, video_df, breast_df = normalize_dataframes(image_df, video_df, breast_df)
-    image_df, video_df, breast_df = apply_filters(image_df, video_df, breast_df, CONFIG)
+    image_df, video_df, breast_df = apply_filters(image_df, video_df, breast_df, CONFIG, output_dir)
     image_df = apply_reject_system(image_df, instance_labels_csv_file, use_reject_system)
     
     # Process lesion masks and get lesion data from database

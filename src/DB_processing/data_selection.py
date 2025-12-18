@@ -6,79 +6,6 @@ import concurrent.futures
 from functools import partial
 tqdm.pandas()
 
-def choose_images_to_label(db):
-    db['label'] = True
-    db['exclusion_reason'] = None
-
-    #Remove images that are too dark
-    darkness_thresh = 75
-    # Extract all darkness values rounded to 2 decimals
-    darkness_values = db['darkness'].round(2).tolist()
-    append_audit("image_processing.darkness_values", darkness_values)
-    append_audit("image_processing.darkness_thresh", darkness_thresh)
-
-    dark_count_before = len(db[db['label']])
-    db.loc[db['darkness'] > darkness_thresh, 'label'] = False
-    db.loc[db['darkness'] > darkness_thresh, 'exclusion_reason'] = 'too dark (>75)'
-    dark_count_after = len(db[db['label']])
-    dark_removed = dark_count_before - dark_count_after
-    
-    # Mark all rows with calipers as label = False
-    #caliper_count_before = len(db[db['label']])
-    #db.loc[db['has_calipers'] == 1, 'label'] = False
-    #caliper_count_after = len(db[db['label']])
-    #caliper_removed = caliper_count_before - caliper_count_after
-    
-    # set label = False for all non-breast images
-    area_count_before = len(db[db['label']])
-    db.loc[(db['area'] == 'unknown') | (db['area'].isna()), 'area'] = 'breast'
-    db.loc[(db['area'] != 'breast'), 'label'] = False
-    db.loc[(db['area'] != 'breast'), 'exclusion_reason'] = 'non-breast area'
-    area_count_after = len(db[db['label']])
-    area_removed = area_count_before - area_count_after
-    
-    # Set label = False for images with 'unknown' laterality only when study laterality is BILATERAL
-    # For BILATERAL studies, we need to know which breast each image is from
-    lat_count_before = len(db[db['label']])
-    bilateral_unknown_mask = (
-        ((db['laterality'] == 'unknown') | (db['laterality'].isna())) &
-        (db['study_laterality'].str.upper() == 'BILATERAL')
-    )
-    db.loc[bilateral_unknown_mask, 'label'] = False
-    db.loc[bilateral_unknown_mask, 'exclusion_reason'] = 'unknown laterality (bilateral study)'
-    lat_count_after = len(db[db['label']])
-    lat_removed = lat_count_before - lat_count_after
-    
-    # Set label = False for all images with 'region_count' > 1
-    region_count_before = len(db[db['label']])
-    db.loc[db['region_count'] > 1, 'label'] = False
-    db.loc[db['region_count'] > 1, 'exclusion_reason'] = 'multiple regions'
-    region_count_after = len(db[db['label']])
-    region_removed = region_count_before - region_count_after
-    
-    # Check the aspect ratio of the crop region
-    db['crop_aspect_ratio'] = (db['crop_w'] / db['crop_h']).round(2)
-    
-    # Create an audit log for all the filtering operations
-    append_audit("image_processing.too_dark_removed", dark_removed)
-    #append_audit("image_processing.caliper_issues_removed", caliper_removed) # same as caliper_with_duplicates?
-    append_audit("image_processing.non_breast_removed", area_removed)
-    append_audit("image_processing.unknown_lat_removed", lat_removed)
-    append_audit("image_processing.multi_region_removed", region_removed)
-    append_audit("image_processing.usable_images", len(db[db['label']]))
-    
-    total_caliper_images = len(db[db['has_calipers'] == 1])
-    append_audit("image_processing.total_caliper_images", total_caliper_images)
-    caliper_with_duplicates = len(db[(db['has_calipers'] == 1) & (db['distance'] <= 5)])
-    append_audit("image_processing.caliper_with_duplicates", caliper_with_duplicates)
-    total_near_duplicates = len(db[db['distance'] <= 5]) 
-    append_audit("image_processing.total_near_duplicates", total_near_duplicates)
-    
-    
-    return db
-
-
-
 
 
 def find_nearest_images(subset, image_folder_path):
@@ -365,7 +292,15 @@ def Select_Data(database_path):
             how='left'
         )
 
-        db_to_process = choose_images_to_label(db_to_process)
+        # Check the aspect ratio of the crop region
+        db_to_process['crop_aspect_ratio'] = (db_to_process['crop_w'] / db_to_process['crop_h']).round(2)
+        
+        total_caliper_images = len(db_to_process[db_to_process['has_calipers'] == 1])
+        append_audit("image_processing.total_caliper_images", total_caliper_images)
+        caliper_with_duplicates = len(db_to_process[(db_to_process['has_calipers'] == 1) & (db_to_process['distance'] <= 5)])
+        append_audit("image_processing.caliper_with_duplicates", caliper_with_duplicates)
+        total_near_duplicates = len(db_to_process[db_to_process['distance'] <= 5]) 
+        append_audit("image_processing.total_near_duplicates", total_near_duplicates)
 
         # Convert DataFrame to list of dicts for batch insert
         update_data = db_to_process[columns_to_update].to_dict('records')

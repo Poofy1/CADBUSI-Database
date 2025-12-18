@@ -362,7 +362,7 @@ def prepare_yolo_dataset(csv_path, source_images_dir, caliper_csv_path,
     
     # Filter to only include breast area
     print(f"Total images before area filtering: {len(df)}")
-    df = df[df['area'] == 'breast'].copy()
+    df = df[df['area'] != 'axilla'].copy()
     print(f"Images after filtering for area='breast': {len(df)}")
 
     # Filter rows with valid caliper_boxes
