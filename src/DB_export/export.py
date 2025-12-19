@@ -301,7 +301,7 @@ def create_train_set(breast_data, image_data, lesion_df=None):
     data.drop(['image_name'], axis=1, inplace=True)
     
     # Add lesion images if lesion_df is provided
-    if lesion_df is not None and not lesion_df.empty and 'image_name' in lesion_df.columns:
+    if lesion_df is not None and not lesion_df.empty and 'lesion_name' in lesion_df.columns:
         # Check if laterality column exists in lesion_df
         if 'laterality' in lesion_df.columns:
             # Handle missing laterality values - drop them as they can't be matched
@@ -310,7 +310,7 @@ def create_train_set(breast_data, image_data, lesion_df=None):
 
             if not lesion_df_with_lat.empty:
                 # Group lesions by BOTH accession_number and laterality for split bilateral cases
-                lesion_grouped = lesion_df_with_lat.groupby(['accession_number', 'laterality'])['image_name'].apply(list).reset_index()
+                lesion_grouped = lesion_df_with_lat.groupby(['accession_number', 'laterality'])['lesion_name'].apply(list).reset_index()
                 lesion_grouped.columns = ['accession_number', 'laterality', 'lesion_images']
 
                 # Merge lesion data with main data on both accession_number and laterality
@@ -328,7 +328,7 @@ def create_train_set(breast_data, image_data, lesion_df=None):
         else:
             # Fallback to old behavior if laterality not present
             print("Warning: laterality column not found in lesion_df, using old grouping")
-            lesion_grouped = lesion_df.groupby('accession_number')['image_name'].apply(list).reset_index()
+            lesion_grouped = lesion_df.groupby('accession_number')['lesion_name'].apply(list).reset_index()
             lesion_grouped.columns = ['accession_number', 'lesion_images']
             data = data.merge(lesion_grouped, on='accession_number', how='left')
 
