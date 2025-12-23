@@ -351,7 +351,6 @@ def create_train_set(breast_data, image_data, lesion_df=None):
     if no_images_count > 0:
         print(f"Note: {no_images_count} rows have no images (kept in export)")
 
-    data.drop(['patient_id'], axis=1, inplace=True)
     data['id'] = range(len(data))
     columns = ['id'] + [col for col in data.columns if col != 'id']
     data = data[columns]
