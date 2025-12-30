@@ -12,6 +12,9 @@ requests
 torch==2.7.1
 torchvision==0.22.1
 segmentation-models-pytorch
+transformers>=4.46.0
+accelerate
+sentencepiece
 google-cloud-storage
 google-cloud-pubsub
 google-cloud-bigquery

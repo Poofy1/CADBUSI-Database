@@ -4,6 +4,7 @@ import pandas as pd
 import re
 from src.DB_processing.tools import append_audit
 from src.data_ingest.findings_parser import add_ultrasound_classifications
+from src.ML_processing.findings_BERT import add_ultrasound_classifications_bert
 # Get the current script directory and go back one directory
 env = os.path.dirname(os.path.abspath(__file__))
 env = os.path.dirname(env)  # Go back one directory
@@ -898,6 +899,7 @@ def filter_rad_data(radiology_df, output_path):
     radiology_df = apply_biopsy_guidance_modality(radiology_df)
 
     radiology_df = add_ultrasound_classifications(radiology_df, output_path)
+    #radiology_df = add_ultrasound_classifications_bert(radiology_df, output_path)
 
     # Add previous worst MG column
     radiology_df = add_previous_worst_mg_column(radiology_df)
