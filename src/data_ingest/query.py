@@ -41,7 +41,7 @@ def get_radiology_data(limit=None):
       {limit_clause}
     )
     -- Then get radiology data for these patients with BREAST test descriptions
-    SELECT DISTINCT 
+    SELECT DISTINCT
       PAT_PATIENT.CLINIC_NUMBER AS PATIENT_ID,
       RAD_FACT_RADIOLOGY.ACCESSION_NBR AS ACCESSION_NUMBER,
       imaging_studies.DESCRIPTION,
@@ -54,6 +54,7 @@ def get_radiology_data(limit=None):
       RAD_FACT_RADIOLOGY.SERVICE_RESULT_STATUS,
       RAD_FACT_RADIOLOGY.RADIOLOGY_DTM,
       RAD_FACT_RADIOLOGY.RADIOLOGY_REVIEW_DTM,
+      RAD_FACT_RADIOLOGY.SITE_NAME AS SITE,
       RADTEST_DIM_RADIOLOGY_TEST_NAME.RADIOLOGY_TEST_DESCRIPTION AS TEST_DESCRIPTION,
       -- Added demographic fields
       PAT_DIM_PATIENT.PATIENT_ETHNICITY_NAME AS ETHNICITY,

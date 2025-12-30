@@ -22,6 +22,48 @@ from src.DB_export.filter_images import apply_filters
 labeled_data_dir = f'{env}/labeled_data_archive/'
 
 
+def crop_and_save_image(input_path, output_path, crop_x, crop_y, crop_w, crop_h, convert_to_grayscale=False):
+    """
+    Universal function to read, crop, and save an image.
+
+    Args:
+        input_path: Path to input image
+        output_path: Path to save cropped image
+        crop_x, crop_y, crop_w, crop_h: Crop coordinates
+        convert_to_grayscale: Whether to convert to grayscale before saving
+
+    Returns:
+        tuple: (success: bool, error_message: str or None)
+    """
+    # Check if input file exists
+    if not file_exists(input_path):
+        return False, f"File not found - {input_path}"
+
+    # Read the image
+    image = read_image(input_path)
+    if image is None:
+        return False, f"Failed to read image - {input_path}"
+
+    # Convert to grayscale if requested
+    if convert_to_grayscale and len(image.shape) == 3:
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    # Validate crop dimensions
+    if crop_x < 0 or crop_y < 0 or crop_w <= 0 or crop_h <= 0 or \
+       crop_x + crop_w > image.shape[1] or crop_y + crop_h > image.shape[0]:
+        return False, f"Invalid crop dimensions - x:{crop_x} y:{crop_y} w:{crop_w} h:{crop_h} image_size:{image.shape}"
+
+    # Crop the image
+    cropped = image[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
+
+    # Save the cropped image
+    try:
+        save_data(cropped, output_path)
+        return True, None
+    except Exception as e:
+        return False, f"Failed to save image - {str(e)}"
+
+
 def combine_labels(row):
     """Combine all present labels from margin, shape, orientation, echo, posterior, boundary columns into a single string"""
     label_columns = ['margin', 'shape', 'orientation', 'echo', 'posterior', 'boundary']
@@ -41,23 +83,8 @@ def combine_labels(row):
 def process_single_image(row, image_folder_path, image_output, mask_folder_input, mask_folder_output):
     try:
         image_name = row['image_name']
-        image_path = os.path.join(image_folder_path, image_name)
-        mask_path = os.path.join(mask_folder_input, 'mask_' + image_name)
-        
-        if not file_exists(image_path):
-            return f"Error: Image file not found - {image_path}"
-            
-        image = read_image(image_path)
-        if image is None:
-            return f"Error: Failed to read image - {image_path}"
-            
-        mask = None
-        if file_exists(mask_path):
-            mask = read_image(mask_path)
-            if mask is None:
-                return f"Warning: Failed to read mask - {mask_path}"
-            mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
-        
+
+        # Get crop coordinates
         try:
             x = int(row['crop_x'])
             y = int(row['crop_y'])
@@ -65,28 +92,26 @@ def process_single_image(row, image_folder_path, image_output, mask_folder_input
             h = int(row['crop_h'])
         except (ValueError, KeyError) as e:
             return f"Error: Invalid crop coordinates for {image_name} - {str(e)}"
-            
-        if x < 0 or y < 0 or w <= 0 or h <= 0 or \
-           x + w > image.shape[1] or y + h > image.shape[0]:
-            return f"Error: Invalid crop dimensions for {image_name} - x:{x} y:{y} w:{w} h:{h} image_size:{image.shape}"
-        
-        try:
-            cropped_image = image[y:y+h, x:x+w]
-            image_output_path = os.path.join(image_output, image_name)
-            save_data(cropped_image, image_output_path)
-        except Exception as e:
-            return f"Error: Failed to crop/save image {image_name} - {str(e)}"
-        
-        if mask is not None:
-            try:
-                cropped_mask = mask[y:y+h, x:x+w]
-                mask_output_path = os.path.join(mask_folder_output, 'mask_' + image_name)
-                save_data(cropped_mask, mask_output_path)
-            except Exception as e:
-                return f"Error: Failed to crop/save mask {image_name} - {str(e)}"
-        
+
+        # Crop and save the image
+        image_path = os.path.join(image_folder_path, image_name)
+        image_output_path = os.path.join(image_output, image_name)
+        success, error = crop_and_save_image(image_path, image_output_path, x, y, w, h)
+
+        if not success:
+            return f"Error: {error}"
+
+        # Crop and save the mask if it exists
+        mask_path = os.path.join(mask_folder_input, 'mask_' + image_name)
+        if file_exists(mask_path):
+            mask_output_path = os.path.join(mask_folder_output, 'mask_' + image_name)
+            success, error = crop_and_save_image(mask_path, mask_output_path, x, y, w, h, convert_to_grayscale=True)
+
+            if not success:
+                return f"Warning: Failed to process mask - {error}"
+
         return "Success"
-        
+
     except Exception as e:
         return f"Error: Unexpected error processing {row.get('image_name', 'unknown')} - {str(e)}"
 
@@ -133,27 +158,117 @@ def Crop_images(df, input_dir, output_dir):
     print(f"\nProcessing Complete: Success={results['success']}, Failed={results['failed']}")
     append_audit("export.failed_crops_removed", results['failed'])
     append_audit("export.exported_images", results['success'])
-    
-                
-                
-                
-                
-                
+
+
+def process_single_labeled_mask(row, mask_input_dir, mask_output_dir):
+    """Process and crop a single labeled lesion mask"""
+    try:
+        # Check if this row has a labeled_lesion_mask
+        mask_filename = row.get('labeled_lesion_mask')
+        if pd.isna(mask_filename) or not mask_filename:
+            return "Skip"  # No mask for this image
+
+        # Get crop coordinates
+        try:
+            x = int(row['crop_x'])
+            y = int(row['crop_y'])
+            w = int(row['crop_w'])
+            h = int(row['crop_h'])
+        except (ValueError, KeyError) as e:
+            return f"Error: Invalid crop coordinates - {str(e)}"
+
+        # Crop and save the mask
+        mask_input_path = os.path.join(mask_input_dir, mask_filename)
+        mask_output_path = os.path.join(mask_output_dir, mask_filename)
+        success, error = crop_and_save_image(mask_input_path, mask_output_path, x, y, w, h, convert_to_grayscale=True)
+
+        if not success:
+            return f"Error: {error}"
+
+        return "Success"
+
+    except Exception as e:
+        return f"Error: Unexpected error processing {row.get('labeled_lesion_mask', 'unknown')} - {str(e)}"
+
+
+def process_labeled_lesion_masks(instance_data, mask_input_dir, output_dir):
+    """
+    Process and crop labeled lesion masks from labelbox.
+
+    Args:
+        instance_data: DataFrame with labeled_lesion_mask column and crop coordinates
+        mask_input_dir: Path to labelbox masks folder
+        output_dir: Export output directory
+    """
+    # Create output directory for labeled masks
+    mask_output_dir = os.path.join(output_dir, "labeled_masks")
+    make_dirs(mask_output_dir)
+
+    # Filter to only rows with labeled_lesion_mask
+    has_mask = instance_data['labeled_lesion_mask'].notna()
+    rows_with_masks = instance_data[has_mask]
+
+    if len(rows_with_masks) == 0:
+        print("No labeled lesion masks found to process")
+        return
+
+    print(f"Processing {len(rows_with_masks)} labeled lesion masks...")
+
+    results = {'success': 0, 'failed': 0, 'skipped': 0}
+    failed_masks = []
+
+    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+        futures = {
+            executor.submit(
+                process_single_labeled_mask,
+                row,
+                mask_input_dir,
+                mask_output_dir
+            ): index for index, row in rows_with_masks.iterrows()
+        }
+
+        with tqdm(total=len(futures), desc="Processing labeled lesion masks") as pbar:
+            for future in as_completed(futures):
+                result = future.result()
+                if result == "Success":
+                    results['success'] += 1
+                elif result == "Skip":
+                    results['skipped'] += 1
+                else:
+                    results['failed'] += 1
+                    failed_masks.append(result)
+                pbar.update()
+
+    # Print errors and statistics
+    if failed_masks:
+        print("\nFailed masks and errors:")
+        for error in failed_masks:
+            print(error)
+
+    print(f"\nLabeled Mask Processing Complete: Success={results['success']}, Failed={results['failed']}, Skipped={results['skipped']}")
+    append_audit("export.labeled_masks_processed", results['success'])
+    append_audit("export.labeled_masks_failed", results['failed'])
+
+
+
+
+
+
 def process_single_video(row, video_folder_path, output_dir):
     # Get the folder name and crop data
     folder_name = row['images_path']
-    crop_y = int(row['crop_y'])
     crop_x = int(row['crop_x'])
+    crop_y = int(row['crop_y'])
     crop_w = int(row['crop_w'])
     crop_h = int(row['crop_h'])
 
     # Get all PNG files in the folder
     input_folder = os.path.join(video_folder_path, folder_name)
     all_images = list_files(input_folder, '.png')
-    
+
     if not all_images:
         return 0  # Return 0 if no images were processed
-        
+
     # Prepare output folder path
     output_folder = os.path.join(output_dir, folder_name)
     make_dirs(output_folder)
@@ -162,14 +277,11 @@ def process_single_video(row, video_folder_path, output_dir):
     for image_path in all_images:
         # Get just the filename for the output
         image_name = os.path.basename(image_path)
-        
-        # Read, crop and save
-        image = read_image(image_path)
-        if image is not None:
-            cropped_image = image[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
-            output_path = os.path.join(output_folder, image_name)
-            save_data(cropped_image, output_path)
-    
+        output_path = os.path.join(output_folder, image_name)
+
+        # Crop and save (silently skip failures to maintain original behavior)
+        crop_and_save_image(image_path, output_path, crop_x, crop_y, crop_w, crop_h)
+
     return 1  # Return 1 to indicate a successfully processed video
 
 
@@ -572,11 +684,17 @@ def build_instance_data(image_df, breast_df):
     if 'crop_w' in image_df.columns:
         image_to_width_map = dict(zip(image_df['image_name'], image_df['crop_w'].fillna(0).astype(int)))
         instance_data['image_w'] = instance_data['image_name'].map(image_to_width_map)
-    
+
     if 'crop_h' in image_df.columns:
         image_to_height_map = dict(zip(image_df['image_name'], image_df['crop_h'].fillna(0).astype(int)))
         instance_data['image_h'] = instance_data['image_name'].map(image_to_height_map)
-    
+
+    # Add crop coordinates for mask processing
+    for crop_col in ['crop_x', 'crop_y', 'crop_w', 'crop_h']:
+        if crop_col in image_df.columns:
+            image_to_crop_map = dict(zip(image_df['image_name'], image_df[crop_col]))
+            instance_data[crop_col] = instance_data['image_name'].map(image_to_crop_map)
+
     return instance_data
 
 
@@ -585,6 +703,7 @@ def Export_Database(CONFIG, limit = None, reparse_images = True):
     use_reject_system = False # True = removes rejects from training
     database_dir = CONFIG["DATABASE_DIR"]
     instance_labels_csv_file = os.path.join(CONFIG["LABELBOX_LABELS"], 'InstanceLabels.csv')
+    instance_labels_masks = os.path.join(CONFIG["LABELBOX_LABELS"], 'masks')
 
     date = datetime.datetime.now().strftime("%m_%d_%Y_%H_%M_%S")
     output_dir = os.path.join(database_dir, 'exports', f'export_{date}')
@@ -634,6 +753,9 @@ def Export_Database(CONFIG, limit = None, reparse_images = True):
         # Crop the images for the relevant studies
         Crop_images(image_df, database_dir, output_dir)
         Crop_Videos(video_df, database_dir, output_dir)
+
+        # Process and crop labeled lesion masks from labelbox
+        process_labeled_lesion_masks(instance_data, instance_labels_masks, output_dir)
 
     # Val split for case data
     breast_df = PerformSplit(breast_df)

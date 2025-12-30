@@ -101,9 +101,12 @@ def extract_birads_from_text(text):
     
     # Original patterns
     original_patterns = [
+        # "ACR code X Description" format
+        r'ACR\s+code:?\s+(\d+[a-z]?)\s+([^\.]+)',
+
         # "BI-RADS ASSESSMENT: CODE: X-DESCRIPTION" format
-        r'BI-?RADS\s+ASSESSMENT:\s*CODE:\s*(\d+[a-z]?)-([^\.\s]+)',
-        r'BI-?RADS:\s*Code\s*(\d+[a-z]?),\s*([^\.\s]+)',
+        r'BI-?RADS:?\s+ASSESSMENT:\s*CODE:\s*(\d+[a-z]?)-([^\.\s]+)',
+        r'BI-?RADS:?\s*Code\s*(\d+[a-z]?),\s*([^\.\s]+)',
         
         # Ultrasound-specific patterns with description
         r'(?:Ultrasound|US)\s+BI-?RADS:\s*\(?(\d+[a-z]?)\)?\s+([^\s\.]+)',
@@ -324,8 +327,8 @@ def extract_rad_impression(text):
     if pd.isna(text):
         return None
     
-    # Check if "IMPRESSION:" exists in the text
-    if "IMPRESSION:" not in text:
+    # Check if "IMPRESSION" exists in the text
+    if "IMPRESSION" not in text:
         return None
     
     # Check if "IMPRESSION:" or "IMPRESSION" exists in the text
@@ -335,9 +338,12 @@ def extract_rad_impression(text):
     elif "IMPRESSION" in text:
         # Split by "IMPRESSION" and get the content after it
         after_impression = text.split("IMPRESSION", 1)[1].strip()
-        # Remove leading colon if it exists
-        if after_impression.startswith(":"):
-            after_impression = after_impression[1:].strip()
+        # Remove any colons within the first 50 characters
+        if len(after_impression) > 50:
+            first_50 = after_impression[:50].replace(':', '')
+            after_impression = first_50 + after_impression[50:]
+        else:
+            after_impression = after_impression.replace(':', '')
     else:
         return None
     
@@ -634,13 +640,27 @@ def apply_biopsy_guidance_modality(radiology_df):
         for idx, row in group.iterrows():
             row_date = row['RADIOLOGY_DTM']
 
-            # Find the next biopsy after this row
-            future_biopsies = biopsy_rows[biopsy_rows['RADIOLOGY_DTM'] > row_date]
-            if not future_biopsies.empty:
-                next_biopsy = future_biopsies.iloc[0]
-                days_diff = (next_biopsy['RADIOLOGY_DTM'] - row_date).days
-                radiology_df.loc[idx, 'days_to_biopsy'] = days_diff
+            # If this row is itself a biopsy, days_to_biopsy is 0
+            if row['is_biopsy'] == 'T':
+                radiology_df.loc[idx, 'days_to_biopsy'] = 0
                 rows_with_days_to_biopsy += 1
+            else:
+                # Find the next biopsy after this row
+                future_biopsies = biopsy_rows[biopsy_rows['RADIOLOGY_DTM'] > row_date]
+                if not future_biopsies.empty:
+                    next_biopsy = future_biopsies.iloc[0]
+                    days_diff = (next_biopsy['RADIOLOGY_DTM'] - row_date).days
+                    radiology_df.loc[idx, 'days_to_biopsy'] = days_diff
+                    rows_with_days_to_biopsy += 1
+                else:
+                    # No future biopsy, check for past biopsies
+                    past_biopsies = biopsy_rows[biopsy_rows['RADIOLOGY_DTM'] < row_date]
+                    if not past_biopsies.empty:
+                        # Get the most recent past biopsy
+                        most_recent_past_biopsy = past_biopsies.iloc[-1]
+                        days_diff = (most_recent_past_biopsy['RADIOLOGY_DTM'] - row_date).days  # This will be negative
+                        radiology_df.loc[idx, 'days_to_biopsy'] = days_diff
+                        rows_with_days_to_biopsy += 1
 
             # Apply guidance modality from nearby biopsies (if current row doesn't have one)
             if pd.isna(row['MODALITY_GUIDANCE']) or row['MODALITY_GUIDANCE'] == '':

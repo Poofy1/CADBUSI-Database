@@ -19,34 +19,43 @@ def merge_labelbox_labels(instance_data, instance_labels_csv_file):
     # Read labelbox data
     labelbox_data = read_csv(instance_labels_csv_file)
     
-    # Rename DicomHash to dicom_hash for consistency
-    if 'DicomHash' in labelbox_data.columns:
-        labelbox_data = labelbox_data.rename(columns={'DicomHash': 'dicom_hash'})
-    
     # Select columns to merge (exclude Reject Image as it's handled separately)
     label_columns = [
         'dicom_hash',
-        'Only Normal Tissue',
-        'Cyst Lesion Present',
-        'Benign Lesion Present',
-        'Malignant Lesion Present'
+        'only_normal',
+        'cyst',
+        'benign',
+        'malignant',
+        'mask_image'
     ]
-    
+
     # Keep only columns that exist
     available_columns = [col for col in label_columns if col in labelbox_data.columns]
     labelbox_data = labelbox_data[available_columns]
-    
+
     # Merge with instance_data
     instance_data = instance_data.merge(
         labelbox_data,
         on='dicom_hash',
         how='left'
     )
-    
-    # Count how many images actually matched
+
+    # Count how many images actually matched (before renaming)
     matched_count = instance_data[available_columns[1:]].notna().any(axis=1).sum()
     total_count = len(instance_data)
     print(f"Merged labelbox labels for {matched_count}/{total_count} images ({total_count - matched_count} unmatched)")
+
+    # Rename columns
+    rename_map = {
+        'mask_image': 'labeled_lesion_mask',
+        'cyst': 'cyst_present',
+        'benign': 'benign_present',
+        'malignant': 'malignant_present'
+    }
+    # Only rename columns that exist
+    existing_renames = {k: v for k, v in rename_map.items() if k in instance_data.columns}
+    if existing_renames:
+        instance_data = instance_data.rename(columns=existing_renames)
     
     return instance_data
 
