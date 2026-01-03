@@ -10,9 +10,68 @@ Shape - oval, round, Irregular
 Orientation - parallel, not parallel
 Echo pattern - anechoic, hypoechoic, isoechoic, hyperechoic, complex, heterogeneous
 Posterior Features - No posterior features, enhancement, shadowing, combined pattern
-Lesion Boundary - abrupt interface, echogenic halo, architectural distortion 
+Lesion Boundary - abrupt interface, echogenic halo, architectural distortion
 (ignore multi lesion cases)
 """
+
+
+def extract_ultrasound_findings(text):
+    """
+    Extract ultrasound section from radiology findings text.
+
+    If text contains both MAMMO and ULTRASOUND sections, extracts only the
+    ULTRASOUND section. Otherwise returns the full text.
+
+    Args:
+        text: Raw radiology findings text
+
+    Returns:
+        str: Extracted ultrasound findings text, or None if input is null
+    """
+    if pd.isna(text):
+        return None
+
+    # Convert to uppercase for section search
+    text_upper = text.upper()
+
+    # Look for ULTRASOUND or SONOGRAPHIC section
+    ultrasound_match = re.search(r'\b(ULTRASOUND|SONO)\b', text_upper)
+
+    # Find all MAMMO matches
+    mammo_matches = list(re.finditer(r'\bMAMMO', text_upper))
+    
+    if not mammo_matches:
+        # return full text
+        return text
+    
+    # Filter out MAMMO matches in "due for mammo" or "correlat" context
+    valid_mammo_found = False
+    for mammo_match in mammo_matches:
+        # Look back from mammo to last period (or start of text)
+        lookback_start = text_upper.rfind('.', 0, mammo_match.start())
+        if lookback_start == -1:
+            lookback_start = 0
+
+        lookback_text = text_upper[lookback_start:mammo_match.start()]
+
+        # Check if "DUE" or "CORRELAT" appears between period and MAMMO
+        if 'DUE' not in lookback_text and 'CORRELAT' not in lookback_text:
+            # Valid MAMMO section found
+            valid_mammo_found = True
+            break
+
+    # Only extract ULTRASOUND section if valid MAMMO section exists AND ultrasound section found
+    if ultrasound_match:
+        # Extract text after ULTRASOUND keyword
+        section_start = ultrasound_match.start()
+        return text[section_start:].strip()
+    elif valid_mammo_found:
+        # MAMMO exists but no ULTRASOUND section - this is NOT an ultrasound report
+        return None  # Or return empty string to skip this record
+    else:
+        # No MAMMO section found - assume entire text is ultrasound
+        return text
+
 
 class UltrasoundNegationParser:
     """Custom parser for ultrasound findings with radiology-specific negation"""
@@ -387,43 +446,52 @@ class UltrasoundNegationParser:
 def add_ultrasound_classifications(radiology_df, output_path):
     """Add classifications using custom parser with audit saved as separate JSON file"""
     parser = UltrasoundNegationParser()
-    
+
     # Filter for ultrasound modality and RIGHT or LEFT laterality
     mask = (radiology_df['MODALITY'] == 'US') & (radiology_df['Study_Laterality'].isin(['RIGHT', 'LEFT']))
     filtered_df = radiology_df[mask].copy()
-    
+
     print(f"Processing {len(filtered_df)} records with custom parser...")
-    
-    # Ensure all feature columns exist
+
+    # Step 1: Extract ultrasound findings section and add to new column
+    print("Extracting ultrasound findings sections...")
+    if 'ultrasound_findings' not in radiology_df.columns:
+        radiology_df['ultrasound_findings'] = None
+
+    for idx in filtered_df.index:
+        findings_text = radiology_df.loc[idx, 'FINDINGS']
+        ultrasound_text = extract_ultrasound_findings(findings_text)
+        radiology_df.loc[idx, 'ultrasound_findings'] = ultrasound_text
+
+    # Step 2: Ensure all feature columns exist
     for feature_type in parser.feature_patterns.keys():
         if feature_type not in radiology_df.columns:
             radiology_df[feature_type] = None
-    
-    # Create audit dictionary with record ID as key
+
+    # Step 3: Parse extracted ultrasound findings
     audit_data = {}
-    
-    # Parse each row
+
     for idx, row in filtered_df.iterrows():
-        findings_text = row.get('FINDINGS', '')
-        result = parser.parse_findings(findings_text)
-        
+        # Use extracted ultrasound findings for parsing
+        ultrasound_text = radiology_df.loc[idx, 'ultrasound_findings']
+        result = parser.parse_findings(ultrasound_text)
+
         # Update feature columns with non-negated values only
         for feature_type, value in result['features'].items():
             radiology_df.loc[idx, feature_type] = value
-        
+
         # Add to audit data - use a unique identifier from the row
-        # Assuming there's a column like 'Study_ID' or similar
         record_id = row.get('Study_ID', str(idx))
         audit_data[record_id] = result['audit']
-    
+
     # Create output directory if it doesn't exist
     os.makedirs(output_path, exist_ok=True)
-    
+
     audit_output_path = f'{output_path}/ultrasound_parsing_audit.json'
     # Save audit data to JSON file
     with open(audit_output_path, 'w', encoding='utf-8') as f:
         json.dump(audit_data, f, indent=2)
-    
+
     print(f"Parsing audit saved to {os.path.abspath(audit_output_path)}")
-    
+
     return radiology_df

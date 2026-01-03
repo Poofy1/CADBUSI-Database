@@ -238,23 +238,38 @@ def extract_findings(text):
     if pd.isna(text):
         return None
     
-    # Check if "FINDINGS:" exists in the text
-    if "FINDINGS:" not in text:
+    # Case-sensitive patterns to search for
+    findings_patterns = ["FINDINGS", "Ultrasound Findings", "Findings:"]
+    findings_match = None
+    
+    # Find which pattern exists in the text (case-sensitive)
+    for pattern in findings_patterns:
+        if pattern in text:
+            findings_match = text.split(pattern, 1)  # Split only on first occurrence
+            break
+    
+    # If no findings pattern found, return None
+    if findings_match is None or len(findings_match) < 2:
         return None
     
-    # Split by "FINDINGS:" and get the content after it
-    after_findings = text.split("FINDINGS:")[1].strip()
+    # Get content after the findings keyword
+    after_findings = findings_match[1]
     
-    # Look specifically for "IMPRESSION:"
-    if "IMPRESSION:" in after_findings:
-        # Get position of "IMPRESSION:"
-        end_pos = after_findings.find("IMPRESSION:")
-        # Extract text from after "FINDINGS:" until "IMPRESSION:"
+    # Strip leading punctuation: ':', ' -', ': -', or whitespace combinations
+    after_findings = after_findings.lstrip()  # Remove leading whitespace first
+    
+    # Remove leading ':' or '-' characters
+    while after_findings and after_findings[0] in [':', '-']:
+        after_findings = after_findings[1:].lstrip()
+    
+    # Look for "IMPRESSION" to mark the end
+    if "IMPRESSION" in after_findings:
+        end_pos = after_findings.find("IMPRESSION")
         findings_text = after_findings[:end_pos].strip()
         return findings_text
     else:
-        # If "IMPRESSION:" is not found, return all text after "FINDINGS:"
-        return after_findings
+        # No IMPRESSION found, return all text after FINDINGS
+        return after_findings.strip()
 
 def extract_rad_pathology_txt(text):
     if pd.isna(text):

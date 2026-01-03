@@ -18,6 +18,8 @@
 *.pkl
 *.pt 
 *.pth
+*.txt
+*.jsonl
 
 config.py
 src/ML_processing/models/*
