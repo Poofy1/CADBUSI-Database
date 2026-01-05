@@ -393,11 +393,114 @@ def create_pathology_subset_csv(final_df):
 
     return pathology_subset
     
+def handle_duplicate_accessions(df):
+    """
+    Handle duplicate accessions based on modality with specific business rules:
+    1. If duplicates include modality = US row, remove all other modality rows for that accession
+    2. If duplicates include 2+ rows with modality = US, remove entire accession
+    3. If duplicates include 0 modality = US, collapse into one row with comma-separated modalities
+    """
+    print("\nHandling duplicate accessions based on modality...")
+
+    # Find all duplicate accessions
+    duplicate_mask = df.duplicated(subset=['ACCESSION_NUMBER'], keep=False)
+    duplicate_accessions = df[duplicate_mask]['ACCESSION_NUMBER'].unique()
+
+    if len(duplicate_accessions) == 0:
+        print("No duplicate accessions found")
+        return df
+
+    print(f"Found {len(duplicate_accessions)} accessions with duplicates - processing with vectorized operations...")
+
+    # Separate duplicates from non-duplicates for faster processing
+    duplicates_df = df[duplicate_mask].copy()
+    non_duplicates_df = df[~duplicate_mask].copy()
+
+    # Add is_us flag for faster processing
+    duplicates_df['is_us'] = duplicates_df['MODALITY'] == 'US'
+
+    # Group by accession and count US rows (vectorized)
+    grouped = duplicates_df.groupby('ACCESSION_NUMBER')
+    us_counts = grouped['is_us'].sum()
+
+    # Classify each accession into one of the three cases
+    case1_accessions = us_counts[us_counts == 1].index  # Exactly 1 US
+    case2_accessions = us_counts[us_counts >= 2].index  # 2+ US
+    case3_accessions = us_counts[us_counts == 0].index  # 0 US
+
+    rows_to_keep = []
+
+    # Case 1: Keep only US rows (vectorized)
+    if len(case1_accessions) > 0:
+        case1_mask = duplicates_df['ACCESSION_NUMBER'].isin(case1_accessions)
+        case1_us_mask = case1_mask & duplicates_df['is_us']
+        case1_keep = duplicates_df[case1_us_mask].copy()
+        case1_keep.drop(columns=['is_us'], inplace=True)
+        rows_to_keep.append(case1_keep)
+        us_only_kept_count = (case1_mask & ~duplicates_df['is_us']).sum()
+    else:
+        us_only_kept_count = 0
+
+    # Case 2: Remove all rows (count them but don't keep any)
+    if len(case2_accessions) > 0:
+        case2_mask = duplicates_df['ACCESSION_NUMBER'].isin(case2_accessions)
+        multiple_us_removed_count = case2_mask.sum()
+    else:
+        multiple_us_removed_count = 0
+
+    # Case 3: Collapse into one row with combined modalities (vectorized)
+    if len(case3_accessions) > 0:
+        case3_df = duplicates_df[duplicates_df['ACCESSION_NUMBER'].isin(case3_accessions)]
+
+        # Get first row of each accession
+        first_rows = case3_df.groupby('ACCESSION_NUMBER').first()
+
+        # Get combined modalities for each accession
+        combined_modalities = case3_df.groupby('ACCESSION_NUMBER')['MODALITY'].apply(
+            lambda x: ', '.join(sorted(x.dropna().unique()))
+        )
+
+        # Update the modality column in first_rows
+        first_rows['MODALITY'] = combined_modalities
+        first_rows.drop(columns=['is_us'], inplace=True)
+
+        rows_to_keep.append(first_rows.reset_index(drop=True))
+
+        # Count removed rows (total case3 rows minus one kept per accession)
+        non_us_collapsed_count = len(case3_df) - len(case3_accessions)
+    else:
+        non_us_collapsed_count = 0
+
+    # Combine all rows to keep
+    if rows_to_keep:
+        kept_duplicates = pd.concat(rows_to_keep, ignore_index=True)
+        df_filtered = pd.concat([non_duplicates_df, kept_duplicates], ignore_index=True)
+    else:
+        df_filtered = non_duplicates_df
+
+    # Calculate total rows removed
+    total_removed = us_only_kept_count + multiple_us_removed_count + non_us_collapsed_count
+
+    # Print metrics
+    print(f"\nDuplicate handling metrics:")
+    print(f"  Case 1 (US only kept): Removed {us_only_kept_count} non-US rows from accessions with 1 US row")
+    print(f"  Case 2 (Multiple US): Removed {multiple_us_removed_count} total rows from accessions with 2+ US rows")
+    print(f"  Case 3 (No US collapsed): Collapsed {non_us_collapsed_count} duplicate rows into combined modality entries")
+    print(f"  Total rows removed: {total_removed}")
+
+    # Audit logging
+    append_audit("query_clean.duplicate_us_only_kept_removed", us_only_kept_count)
+    append_audit("query_clean.duplicate_multiple_us_removed", multiple_us_removed_count)
+    append_audit("query_clean.duplicate_non_us_collapsed", non_us_collapsed_count)
+    append_audit("query_clean.rad_duplicates_removed", total_removed)
+
+    return df_filtered
+
 def audit_pathology_dates(df):
     """
     Calculate days from biopsy to pathology SPECIMEN_RESULT_DTM for each patient and record in the audit.
     Only considers cases where the DATE vs DATE difference is within 2 weeks.
-    
+
     Also audits day distance from biopsy to the most recent row before that biopsy.
     """
     # Ensure DATE column is in datetime format
@@ -514,11 +617,8 @@ def create_final_dataset(rad_df, path_df, output_path):
     append_audit("query_clean.us_rows", us_count)
     append_audit("query_clean.non_us_with_diagnosis", non_us_with_diagnosis)
 
-    # Remove duplicate rows based on Accession_Number
-    duplicate_accessions = final_df_filtered[final_df_filtered.duplicated(subset=['ACCESSION_NUMBER'], keep=False)]['ACCESSION_NUMBER']
-    duplicate_count = len(final_df_filtered[final_df_filtered['ACCESSION_NUMBER'].isin(duplicate_accessions)])
-    final_df_filtered = final_df_filtered[~final_df_filtered['ACCESSION_NUMBER'].isin(duplicate_accessions)]
-    append_audit("query_clean.rad_duplicates_removed", duplicate_count)
+    # Handle duplicate accessions based on modality
+    final_df_filtered = handle_duplicate_accessions(final_df_filtered)
 
     # Remove US rows with empty ENDPOINT_ADDRESS (non-US rows already have cleared endpoints, so skip those)
     us_rows = final_df_filtered['MODALITY'].str.contains('US', na=False, case=False)
@@ -526,11 +626,6 @@ def create_final_dataset(rad_df, path_df, output_path):
     empty_endpoint_count = sum(empty_endpoint_in_us)
     final_df_filtered = final_df_filtered[~empty_endpoint_in_us]
     append_audit("query_clean.rad_us_missing_address_removed", empty_endpoint_count)
-    
-    # Remove rows with empty BI-RADS
-    #empty_birads_count = sum(final_df_us['BI-RADS'].isna())
-    #final_df_us = final_df_us[final_df_us['BI-RADS'].notna()]
-    #append_audit("query_clean.rad_missing_birads_removed", empty_birads_count)
     
     # Count total interpretations
     audit_interpretations(final_df_filtered)
