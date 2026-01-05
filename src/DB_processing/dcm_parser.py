@@ -599,15 +599,16 @@ def parse_anon_file(anon_location, image_df):
 
     image_df = image_df[common_columns + ['image_name', 'region_count']]
 
-    # Read CSV and convert columns to snake_case
+    # Read CSV and convert columns to snake_case, preserving leading zeros
     anon_location = os.path.normpath(anon_location)
-    breast_csv = pd.read_csv(anon_location)
+    breast_csv = pd.read_csv(anon_location, dtype={'PATIENT_ID': str, 'ACCESSION_NUMBER': str})
     breast_csv.columns = [to_snake_case(col) for col in breast_csv.columns]
     breast_csv = breast_csv.sort_values('patient_id')
 
-    # Convert to str (no more manual renaming needed!)
+    # Strip whitespace and ensure strings
     image_df[['patient_id', 'accession_number']] = image_df[['patient_id', 'accession_number']].astype(str)
-    breast_csv[['patient_id', 'accession_number']] = breast_csv[['patient_id', 'accession_number']].astype(str)
+    breast_csv['patient_id'] = breast_csv['patient_id'].astype(str).str.strip()
+    breast_csv['accession_number'] = breast_csv['accession_number'].astype(str).str.strip()
     if not video_df.empty:
         video_df[['patient_id', 'accession_number']] = video_df[['patient_id', 'accession_number']].astype(str)
 
@@ -782,14 +783,14 @@ def filter_dcm_files_by_anon_data(dcm_files_list, anon_location, encryption_key)
     """
     print("Filtering DICOM files based on anonymized input data...")
 
-    # Read the anonymized CSV
-    anon_csv = pd.read_csv(anon_location)
+    # Read the anonymized CSV with dtype=str to preserve leading zeros
+    anon_csv = pd.read_csv(anon_location, dtype={'PATIENT_ID': str, 'ACCESSION_NUMBER': str})
     anon_csv.columns = [to_snake_case(col) for col in anon_csv.columns]
 
-    # Convert to strings and remove leading zeros
-    anon_csv['patient_id'] = anon_csv['patient_id'].astype(str)
-    anon_csv['accession_number'] = anon_csv['accession_number'].astype(str)
-    
+    # Strip whitespace and ensure strings
+    anon_csv['patient_id'] = anon_csv['patient_id'].astype(str).str.strip()
+    anon_csv['accession_number'] = anon_csv['accession_number'].astype(str).str.strip()
+
     # Create set of anonymized pairs for fast lookup
     anon_pairs = set(zip(anon_csv['patient_id'], anon_csv['accession_number']))
 

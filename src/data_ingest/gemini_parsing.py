@@ -32,7 +32,7 @@ Each lesion should have these fields:
 - direction: clock position (e.g., "2:00", "12:00") or "na" if not specified
 - distance: distance from nipple (e.g., "4cm", "2cm") or "na" if not specified  
 - size: maximum dimension (e.g., "5mm", "1.2cm") or "na" if not specified
-- type: lesion type (e.g., "mass", "cyst", "nodule", "complex") or "na" if unclear
+- type: lesion description (e.g., "oval circumscribed mass") or "na" if unclear. Include lesion type: "mass, lymph node, cyst, etc.". Other characteristics of interest include: "circumscribed, macrolobulated, microlobulated, indistinct, angular, spiculated, oval, round, irregular, parallel, not parallel, anechoic, hypoechoic, isoechoic, hyperechoic, complex, heterogeneous, no posterior features, enhancement, shadowing, combined pattern, abrupt interface, echogenic halo, architectural distortion"
 
 CRITICAL RULES:
 1. When multiple locations share the same size/type (distributed attributes), create separate entries for EACH location with the shared attributes repeated.
@@ -59,8 +59,8 @@ FEW_SHOT_EXAMPLES = [
         periareolar position. No suspicious masses or other abnormalities 
         are identified.""",
         [
-            {"direction": "2:00", "distance": "4cm", "size": "5mm", "type": "mass"},
-            {"direction": "6:30", "distance": "0cm", "size": "3mm", "type": "cyst"}
+            {"direction": "2:00", "distance": "4cm", "size": "5mm", "type": "circumscribed ovoid mass"},
+            {"direction": "6:30", "distance": "0cm", "size": "3mm", "type": "circumscribed fibrocystic complex"}
         ]
     ),
     (
@@ -69,9 +69,9 @@ FEW_SHOT_EXAMPLES = [
         show multiple small benign cysts measuring up to 3 mm x 3 mm x 2 mm 
         which account for the mammographic findings.""",
         [
-            {"direction": "1:00", "distance": "2cm", "size": "3mm", "type": "cyst"},
-            {"direction": "2:00", "distance": "3cm", "size": "3mm", "type": "cyst"},
-            {"direction": "3:00", "distance": "6cm", "size": "3mm", "type": "cyst"}
+            {"direction": "1:00", "distance": "2cm", "size": "3mm", "type": "benign cyst"},
+            {"direction": "2:00", "distance": "3cm", "size": "3mm", "type": "benign cyst"},
+            {"direction": "3:00", "distance": "6cm", "size": "3mm", "type": "benign cyst"}
         ]
     ),
     (
@@ -84,7 +84,7 @@ FEW_SHOT_EXAMPLES = [
         (Refer to pathology report for detailed description.) This is a benign, concordant and specific diagnosis. Given size of lesion, 
         surgical consult recommended for excision.""",
         [
-            {"direction": "10:00", "distance": "na", "size": "3.8cm", "type": "mass"}
+            {"direction": "10:00", "distance": "na", "size": "3.8cm", "type": "parallel oval hypoechoic mass"}
         ]
     ),
 ]
