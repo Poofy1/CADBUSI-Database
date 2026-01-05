@@ -84,7 +84,7 @@ FEW_SHOT_EXAMPLES = [
         (Refer to pathology report for detailed description.) This is a benign, concordant and specific diagnosis. Given size of lesion, 
         surgical consult recommended for excision.""",
         [
-            {"direction": "2:00", "distance": "na", "size": "3.8cm", "type": "mass"}
+            {"direction": "10:00", "distance": "na", "size": "3.8cm", "type": "mass"}
         ]
     ),
 ]
@@ -567,7 +567,7 @@ if __name__ == "__main__":
         csv_path=f'{parent_dir}/training/dataset/t5_data/train.csv',
         gcs_bucket=CONFIG['BUCKET'],
         text_column='ultrasound_findings',
-        model='gemini-2.5-flash-lite',
+        model='gemini-2.5-flash',
         output_dir='batch_results_gemini',
         gcs_input_prefix='cadbusi/batch_input',
         gcs_output_prefix='cadbusi/batch_output',
