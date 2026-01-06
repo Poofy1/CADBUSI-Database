@@ -25,7 +25,10 @@ def parse_arguments():
     parser.add_argument('--deploy', action='store_true', help='Deploy FastAPI to Cloud Run')
     parser.add_argument('--rerun', action='store_true', help='Send message to pre-deployed FastAPI on Cloud Run')
     parser.add_argument('--cleanup', action='store_true', help='Clean up resources')
-    
+
+    # BIRAD parsing arguments
+    parser.add_argument('--birad_parsing', action='store_true', help='Run Gemini BIRAD lesion parsing on endpoint data')
+
     # Anonymize arguments
     parser.add_argument('--database', action='store_true', help='Process database')
     parser.add_argument('--skip-inpaint', action='store_true', help='Skip the inpainting step')
@@ -68,7 +71,44 @@ def main():
     elif args.deploy or args.cleanup or args.rerun:
         from src.dicom_downloader.dicom_download import dicom_download_remote_start
         dicom_download_remote_start(DICOM_QUERY_PATH, args.deploy, args.cleanup)
-        
+
+    elif args.birad_parsing:
+        from src.data_ingest.gemini_parsing import run_batch_pipeline
+
+        print("="*60)
+        print("BIRAD LESION PARSING WITH GEMINI")
+        print("="*60)
+
+        # Set paths
+        input_csv = DICOM_QUERY_PATH  # /data/endpoint_data.csv
+        output_csv = os.path.join(OUTPUT_PATH, 'birads.csv')
+
+        if args.limit:
+            print(f"Processing with limit: {args.limit} rows")
+        else:
+            print("Processing all rows")
+
+        # Run batch pipeline
+        result = run_batch_pipeline(
+            csv_path=input_csv,
+            gcs_bucket=CONFIG['BUCKET'],
+            text_column='ultrasound_findings',
+            model='gemini-2.5-flash',
+            output_dir='batch_results_gemini',
+            gcs_input_prefix='cadbusi/batch_input',
+            gcs_output_prefix='cadbusi/batch_output',
+            wait=True,
+            batch_size=200000,
+            limit=args.limit,
+            final_output_csv=output_csv
+        )
+
+        print("\n" + "="*60)
+        print("BIRAD PARSING COMPLETE")
+        print("="*60)
+        print(f"Output saved to: {output_csv}")
+        print("="*60)
+
     elif args.database:
         from src.DB_processing.image_processing import analyze_images
         from src.DB_processing.data_selection import Select_Data

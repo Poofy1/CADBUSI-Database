@@ -307,44 +307,49 @@ def create_batch_jsonl(
     text_column: str = "ultrasound_findings",
     model: str = "gemini-2.5-flash-lite"
 ):
-    """Create JSONL with custom_id for result mapping."""
     print(f"Loading data from: {csv_path}")
     df = pd.read_csv(csv_path)
     print(f"Total rows: {len(df)}")
     
-    row_indices = []
+    # Build few-shot examples ONCE (not system instruction - put in contents)
+    few_shot_contents = []
+    for example_input, example_output in FEW_SHOT_EXAMPLES:
+        few_shot_contents.extend([
+            {"role": "user", "parts": [{"text": example_input.strip()}]},
+            {"role": "model", "parts": [{"text": json.dumps(example_output)}]}
+        ])
     
+    num_requests = 0
     with open(output_jsonl, 'w', encoding='utf-8') as f:
         for idx, row in df.iterrows():
             text = row[text_column]
-            
             if pd.isna(text) or not str(text).strip():
                 continue
             
             anonymized_text = anonymize_dates_times_and_names(str(text))
-            contents = build_vertex_contents(anonymized_text)
             
-            # ADD custom_id to track which row this is
+            # Few-shot + actual query
+            contents = few_shot_contents + [
+                {"role": "user", "parts": [{"text": anonymized_text}]}
+            ]
+            
             batch_request = {
-                "custom_id": f"row_{int(idx)}",  # <-- FIX HERE
+                "custom_id": f"row_{int(idx)}",
                 "request": {
+                    "system_instruction": {
+                        "parts": [{"text": SYSTEM_PROMPT}]
+                    },
                     "contents": contents
                 }
             }
             
             f.write(json.dumps(batch_request) + '\n')
-            row_indices.append(int(idx))
-    
-    # Still save indices file for reference
-    index_file = output_jsonl.replace('.jsonl', '_indices.json')
-    with open(index_file, 'w') as f:
-        json.dump(row_indices, f)
+            num_requests += 1
     
     print(f"\nCreated batch file: {output_jsonl}")
-    print(f"Row index mapping: {index_file}")
-    print(f"Total requests: {len(row_indices)}")
+    print(f"Total requests: {num_requests}")
     
-    return len(row_indices)
+    return num_requests
 
 
 def parse_batch_results_with_comparison(
@@ -456,11 +461,14 @@ def run_batch_pipeline(
     output_dir: str = "batch_results",
     gcs_input_prefix: str = "batch_input",
     gcs_output_prefix: str = "batch_output",
-    wait: bool = True
+    wait: bool = True,
+    batch_size: int = 200000,
+    limit: int = None,
+    final_output_csv: str = None
 ):
     """
     Complete Vertex AI batch pipeline.
-    
+
     Args:
         csv_path: Path to input CSV
         gcs_bucket: GCS bucket name (without gs://)
@@ -470,92 +478,191 @@ def run_batch_pipeline(
         gcs_input_prefix: GCS prefix for input files
         gcs_output_prefix: GCS prefix for output files
         wait: Whether to wait for batch completion
-    
+        batch_size: Number of rows to process per batch (default: 200000)
+        limit: Optional limit on number of rows to process (default: None processes all rows)
+        final_output_csv: Path to save final consolidated results CSV (default: None)
+
     Returns:
         Dictionary with job info and output paths
     """
     # Create output directory
     output_path = Path(output_dir)
     output_path.mkdir(exist_ok=True)
-    
-    # Generate filenames
-    timestamp = time.strftime("%Y%m%d_%H%M%S")
-    batch_jsonl = output_path / f"batch_input_{timestamp}.jsonl"
-    results_csv = output_path / f"batch_results_{timestamp}.csv"
-    
+
+    # Load CSV to determine batching
+    print(f"Loading CSV to determine batching: {csv_path}")
+    df_full = pd.read_csv(csv_path)
+
+    # Apply limit if specified
+    if limit is not None:
+        df_full = df_full.head(limit)
+        print(f"Limiting to first {limit} rows")
+
+    # Filter out rows where ultrasound_findings is empty
+    initial_count = len(df_full)
+    df_full = df_full[df_full[text_column].notna() & (df_full[text_column].astype(str).str.strip() != '')]
+    df_full = df_full.reset_index(drop=True)
+    filtered_count = initial_count - len(df_full)
+
+    if filtered_count > 0:
+        print(f"Filtered out {filtered_count} rows with empty {text_column}")
+
+    total_rows = len(df_full)
+
+    if total_rows == 0:
+        print("No valid rows to process!")
+        return {
+            'total_batches': 0,
+            'batch_results': []
+        }
+
+    num_batches = (total_rows + batch_size - 1) // batch_size
+
     print("="*60)
     print("VERTEX AI GEMINI BATCH PIPELINE")
     print("="*60)
     print(f"Model: {model}")
     print(f"GCS Bucket: gs://{gcs_bucket}")
+    print(f"Total rows: {total_rows}")
+    print(f"Batch size: {batch_size}")
+    print(f"Number of batches: {num_batches}")
     print("="*60)
-    
-    # Step 1: Create batch file
-    num_requests = create_batch_jsonl(csv_path, str(batch_jsonl), text_column, model)
-    
-    # Step 2: Submit batch
-    job, output_uri = submit_batch(
-        str(batch_jsonl),
-        gcs_bucket,
-        gcs_input_prefix,
-        gcs_output_prefix,
-        model
-    )
-    
-    # Save job name to file
-    job_name_file = output_path / f"job_name_{timestamp}.txt"
-    with open(job_name_file, 'w') as f:
-        f.write(job.name)
-    print(f"\nJob name saved to: {job_name_file}")
-    
-    if not wait:
-        print("\n" + "="*60)
-        print("Batch submitted! Not waiting for completion.")
-        print(f"To check status later, use: check_batch_status('{job.name}')")
-        print("="*60)
-        return {
+
+    all_results = []
+
+    # Process each batch
+    for batch_num in range(num_batches):
+        start_idx = batch_num * batch_size
+        end_idx = min((batch_num + 1) * batch_size, total_rows)
+
+        print(f"\n{'='*60}")
+        print(f"PROCESSING BATCH {batch_num + 1}/{num_batches}")
+        print(f"Rows {start_idx} to {end_idx-1}")
+        print(f"{'='*60}")
+
+        # Create temp CSV for this batch
+        batch_csv = output_path / f"temp_batch_{batch_num}.csv"
+        df_batch = df_full.iloc[start_idx:end_idx]
+        df_batch.to_csv(batch_csv, index=False)
+
+        # Generate filenames for this batch
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        batch_jsonl = output_path / f"batch_input_{timestamp}_batch{batch_num}.jsonl"
+        results_csv = output_path / f"batch_results_{timestamp}_batch{batch_num}.csv"
+
+        # Step 1: Create batch file
+        num_requests = create_batch_jsonl(str(batch_csv), str(batch_jsonl), text_column, model)
+
+        # Step 2: Submit batch
+        job, output_uri = submit_batch(
+            str(batch_jsonl),
+            gcs_bucket,
+            gcs_input_prefix,
+            gcs_output_prefix,
+            model
+        )
+
+        # Save job name to file
+        job_name_file = output_path / f"job_name_{timestamp}_batch{batch_num}.txt"
+        with open(job_name_file, 'w') as f:
+            f.write(job.name)
+        print(f"\nJob name saved to: {job_name_file}")
+
+        if not wait:
+            print(f"\nBatch {batch_num + 1} submitted! Not waiting for completion.")
+            all_results.append({
+                'batch_num': batch_num,
+                'job_name': job.name,
+                'job_name_file': str(job_name_file),
+                'output_uri': output_uri,
+                'rows': f"{start_idx}-{end_idx-1}"
+            })
+            continue
+
+        # Step 3: Wait for completion
+        job = wait_for_batch(job.name)
+
+        if job.state != JobState.JOB_STATE_SUCCEEDED:
+            print(f"\nBatch {batch_num + 1} did not succeed: {job.state}")
+            get_batch_error_details(job)
+            all_results.append({
+                'batch_num': batch_num,
+                'job_name': job.name,
+                'status': job.state,
+                'output_uri': output_uri,
+                'rows': f"{start_idx}-{end_idx-1}"
+            })
+            continue
+
+        # Step 4: Download results
+        result_files = download_batch_results(output_uri, str(output_path))
+
+        # Step 5: Parse results with comparison
+        df_batch_results = parse_batch_results_with_comparison(
+            result_files,
+            str(batch_csv),
+            str(results_csv),
+        )
+
+        all_results.append({
+            'batch_num': batch_num,
             'job_name': job.name,
-            'job_name_file': str(job_name_file),
-            'output_uri': output_uri
-        }
-    
-    # Step 3: Wait for completion
-    job = wait_for_batch(job.name)
-    
-    if job.state != JobState.JOB_STATE_SUCCEEDED:
-        print(f"\nBatch did not succeed: {job.state}")
-        get_batch_error_details(job)
-        return {
-            'job_name': job.name,
-            'status': job.state,
-            'output_uri': output_uri
-        }
-    
-    # Step 4: Download results
-    result_files = download_batch_results(output_uri, str(output_path))
-    
-    # Step 5: Parse results with comparison
-    df = parse_batch_results_with_comparison(
-        result_files,
-        csv_path,
-        str(results_csv),
-    )
-    
+            'batch_input': str(batch_jsonl),
+            'results_csv': str(results_csv),
+            'output_uri': output_uri,
+            'rows': f"{start_idx}-{end_idx-1}",
+            'num_results': len(df_batch_results)
+        })
+
+        # Clean up temp batch CSV
+        batch_csv.unlink()
+
     print("\n" + "="*60)
-    print("PIPELINE COMPLETE!")
+    print("ALL BATCHES COMPLETE!")
     print("="*60)
-    print(f"Job name: {job.name}")
-    print(f"Input file: {batch_jsonl}")
-    print(f"Results CSV: {results_csv}")
-    print(f"GCS output: {output_uri}")
+    for result in all_results:
+        print(f"Batch {result['batch_num'] + 1}: {result.get('num_results', 'pending')} results | Rows {result['rows']}")
     print("="*60)
-    
+
+    # If final_output_csv is specified, combine all batch results into final format
+    if final_output_csv and wait:
+        print(f"\nCreating final output CSV: {final_output_csv}")
+
+        # Collect all batch result DataFrames
+        all_batch_dfs = []
+        for result in all_results:
+            if 'results_csv' in result:
+                df_batch = pd.read_csv(result['results_csv'])
+                all_batch_dfs.append(df_batch)
+
+        if all_batch_dfs:
+            # Combine all batch results
+            df_combined = pd.concat(all_batch_dfs, ignore_index=True)
+            df_combined = df_combined.sort_values('row_index')
+
+            # Use the filtered df_full (already has limit applied and empty rows removed)
+            # Create final output with only required columns
+            df_final = pd.DataFrame({
+                'PATIENT_ID': df_full['PATIENT_ID'].values,
+                'ACCESSION_NUMBER': df_full['ACCESSION_NUMBER'].values,
+                'lesions': df_combined['prediction'].values
+            })
+
+            # Save final CSV
+            df_final.to_csv(final_output_csv, index=False)
+            print(f"Saved final results to: {final_output_csv}")
+            print(f"Total rows: {len(df_final)}")
+
+            return {
+                'total_batches': num_batches,
+                'batch_results': all_results,
+                'final_output_csv': final_output_csv,
+                'final_dataframe': df_final
+            }
+
     return {
-        'job_name': job.name,
-        'batch_input': str(batch_jsonl),
-        'results_csv': str(results_csv),
-        'output_uri': output_uri,
-        'dataframe': df
+        'total_batches': num_batches,
+        'batch_results': all_results
     }
 
 
@@ -564,12 +671,15 @@ def run_batch_pipeline(
 # =============================================================================
 if __name__ == "__main__":
     result = run_batch_pipeline(
-        csv_path=f'{parent_dir}/training/dataset/t5_data/train.csv',
+        csv_path='/data/endpoint_data.csv',
         gcs_bucket=CONFIG['BUCKET'],
         text_column='ultrasound_findings',
         model='gemini-2.5-flash',
         output_dir='batch_results_gemini',
         gcs_input_prefix='cadbusi/batch_input',
         gcs_output_prefix='cadbusi/batch_output',
-        wait=True
+        wait=True,
+        batch_size=200000,
+        limit=None,  # Set to a number like 1000 to process only first N rows
+        final_output_csv='/data/birads.csv'
     )
