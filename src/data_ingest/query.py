@@ -69,7 +69,16 @@ def get_radiology_data(limit=None):
       breast_results.A1_PATHOLOGY_TXT,
       breast_results.A1_PATHOLOGY_CATEGORY_DESC,
       breast_results.A2_PATHOLGY_TXT,
-      breast_results.A2_PATHOLOGY_CATEGORY_DESC
+      breast_results.A2_PATHOLOGY_CATEGORY_DESC,
+      -- Added location fields
+      rad_exam.LOCATION_ID,
+      location.name AS LOCATION_NAME,
+      location.address_city AS LOCATION_CITY,
+      location.address_state AS LOCATION_STATE,
+      location.address_zip AS LOCATION_ZIP,
+      location.address_line AS LOCATION_ADDRESS,
+      location.physical_type_text AS LOCATION_TYPE,
+      dim_location.LOCATION_DESCRIPTION
     FROM us_imaging_patients
     INNER JOIN 
       `ml-mps-adl-intfhr-phi-p-3b6e.phi_secondary_use_fhir_clinicnumber_us_p.Patient` PAT_PATIENT 
@@ -98,6 +107,12 @@ def get_radiology_data(limit=None):
     LEFT JOIN 
       `ml-mps-adl-intudp-phi-p-d5cb.phi_rad_udpwh_us_p.DIM_RADIOLOGY_EXAM_RESULTS_BREAST` breast_results
       ON (rad_exam.RADIOLOGY_EXAM_DK = breast_results.RADIOLOGY_EXAM_DK)
+    LEFT JOIN
+      `ml-mps-adl-intfhr-phi-p-3b6e.phi_secondary_use_fhir_clinicnumber_us_p.Location` location
+      ON (rad_exam.LOCATION_ID = location.identifier_value)
+    LEFT JOIN
+      `ml-mps-adl-intudp-phi-p-d5cb.phi_udpwh_etl_us_p.DIM_LOCATION` dim_location
+      ON (RAD_FACT_RADIOLOGY.LOCATION_DK = dim_location.LOCATION_DK)
     WHERE RADTEST_DIM_RADIOLOGY_TEST_NAME.RADIOLOGY_TEST_DESCRIPTION LIKE '%BREAST%'
       AND imaging_studies.DESCRIPTION LIKE '%BREAST%'
     """
