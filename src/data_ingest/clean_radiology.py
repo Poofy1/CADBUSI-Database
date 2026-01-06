@@ -19,17 +19,18 @@ def determine_laterality(row):
         
         text = text.upper()
         
+        
+        # Check for BILATERAL indicators
+        if "BILAT" in text or "BOTH" in text:
+            return "BILATERAL"
+        
         # Check for clear RIGHT indicators
-        if any(x in text for x in right_text) and "BILATERAL" not in text:
+        elif any(x in text for x in right_text) and "BILAT" not in text:
             return "RIGHT"
         
         # Check for clear LEFT indicators
-        elif any(x in text for x in left_text) and "BILATERAL" not in text:
+        elif any(x in text for x in left_text) and "BILAT" not in text:
             return "LEFT"
-        
-        # Check for BILATERAL indicators
-        elif "BILATERAL" in text or "BOTH" in text:
-            return "BILATERAL"
         
         # If no laterality is found, return None
         else:
