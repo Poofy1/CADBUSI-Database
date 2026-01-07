@@ -933,14 +933,15 @@ def Parse_Dicom_Files(CONFIG, anon_location, lesion_anon_file, birads_anon_file,
         inserted_pathology = db.insert_pathology_batch(pathology_data)
         print(f"Inserted {inserted_pathology} pathology records")
 
-        # Update Images table with lesion_descriptions from birads CSV
+        # Update StudyCases table with lesion_descriptions from birads CSV
         if not birads_csv.empty:
             # Rename the description column to match our database schema
             if 'birad_descriptions' in birads_csv.columns:
                 birads_csv = birads_csv.rename(columns={'birad_descriptions': 'lesion_descriptions'})
 
-            # Update images by accession_number
-            updated_images = db.update_images_by_accession(birads_csv, ['lesion_descriptions'])
-            print(f"Updated {updated_images} images with lesion descriptions")
+            # Update study cases with lesion_descriptions
+            study_update_data = birads_csv.to_dict('records')
+            updated_studies = db.insert_study_cases_batch(study_update_data, update_only=True)
+            print(f"Updated {updated_studies} study cases with lesion descriptions")
         else:
             print("Skipping lesion descriptions update - no birads data available")
