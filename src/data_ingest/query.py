@@ -28,14 +28,25 @@ def get_radiology_data(limit=None):
     limit_clause = f"LIMIT {limit}" if limit is not None else ""
     
     query = f"""
+    -- Deduplicate Patient table first, preferring non-null US_CORE_BIRTHSEX
+    WITH deduplicated_patients AS (
+      SELECT 
+        CLINIC_NUMBER,
+        US_CORE_BIRTHSEX,
+        ROW_NUMBER() OVER (
+          PARTITION BY CLINIC_NUMBER 
+          ORDER BY CASE WHEN US_CORE_BIRTHSEX IS NOT NULL THEN 0 ELSE 1 END
+        ) AS rn
+      FROM `ml-mps-adl-intfhr-phi-p-3b6e.phi_secondary_use_fhir_clinicnumber_us_p.Patient`
+    ),
     -- First identify ALL patients with US modality at series level (excluding males)
-    WITH us_imaging_patients AS (
+    us_imaging_patients AS (
       SELECT DISTINCT PAT_PATIENT.CLINIC_NUMBER AS PATIENT_ID
       FROM `ml-mps-adl-intfhr-phi-p-3b6e.phi_secondary_use_fhir_clinicnumber_us_p.ImagingStudy` imaging
       INNER JOIN `ml-mps-adl-intfhr-phi-p-3b6e.phi_secondary_use_fhir_clinicnumber_us_p.ImagingStudySeries` imaging_series
         ON (imaging.id = imaging_series.imaging_study_id)
-      INNER JOIN `ml-mps-adl-intfhr-phi-p-3b6e.phi_secondary_use_fhir_clinicnumber_us_p.Patient` PAT_PATIENT 
-        ON (imaging.clinic_number = PAT_PATIENT.clinic_number)
+      INNER JOIN deduplicated_patients PAT_PATIENT 
+        ON (imaging.clinic_number = PAT_PATIENT.CLINIC_NUMBER AND PAT_PATIENT.rn = 1)
       WHERE imaging_series.SERIES_MODALITY_CODE = 'US'
         AND PAT_PATIENT.US_CORE_BIRTHSEX != 'M'
       {limit_clause}
@@ -81,8 +92,8 @@ def get_radiology_data(limit=None):
       dim_location.LOCATION_DESCRIPTION
     FROM us_imaging_patients
     INNER JOIN 
-      `ml-mps-adl-intfhr-phi-p-3b6e.phi_secondary_use_fhir_clinicnumber_us_p.Patient` PAT_PATIENT 
-      ON us_imaging_patients.PATIENT_ID = PAT_PATIENT.CLINIC_NUMBER
+      deduplicated_patients PAT_PATIENT 
+      ON us_imaging_patients.PATIENT_ID = PAT_PATIENT.CLINIC_NUMBER AND PAT_PATIENT.rn = 1
     INNER JOIN 
       `ml-mps-adl-intudp-phi-p-d5cb.phi_udpwh_etl_us_p.DIM_PATIENT` PAT_DIM_PATIENT
       ON PAT_PATIENT.CLINIC_NUMBER = PAT_DIM_PATIENT.PATIENT_CLINIC_NUMBER
@@ -115,6 +126,7 @@ def get_radiology_data(limit=None):
       ON (RAD_FACT_RADIOLOGY.LOCATION_DK = dim_location.LOCATION_DK)
     WHERE RADTEST_DIM_RADIOLOGY_TEST_NAME.RADIOLOGY_TEST_DESCRIPTION LIKE '%BREAST%'
       AND imaging_studies.DESCRIPTION LIKE '%BREAST%'
+      AND (IMAGINGSTUDYSERIES.SERIES_MODALITY_CODE IS NULL OR IMAGINGSTUDYSERIES.SERIES_MODALITY_CODE NOT IN ('SR', 'PR', 'KO'))
     """
 
     query_start_time = time.time()
