@@ -645,7 +645,7 @@ def run_batch_pipeline(
             df_final = pd.DataFrame({
                 'PATIENT_ID': df_full['PATIENT_ID'].values,
                 'ACCESSION_NUMBER': df_full['ACCESSION_NUMBER'].values,
-                'lesions': df_combined['prediction'].values
+                'lesion_descriptions': df_combined['prediction'].values
             })
 
             # Save final CSV

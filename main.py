@@ -122,6 +122,8 @@ def main():
         
         lesion_pathology = f'{env}/data/lesion_pathology.csv'
         lesion_anon_file = f'{env}/data/lesion_anon_data.csv'
+        birads_descriptions = f'{env}/data/birads.csv'
+        birads_anon_file = f'{env}/data/birads_anon_data.csv'
         anon_file = f'{env}/data/anon_data.csv'
         key_output = f'{env}/encryption_key.pkl'
         BUCKET_PATH = f'{CONFIG["storage"]["download_path"]}/'
@@ -136,9 +138,10 @@ def main():
         print("Step 1/5: Encrypting IDs...")
         key = encrypt_ids(DICOM_QUERY_PATH, anon_file, key_output)
         key = encrypt_ids(lesion_pathology, lesion_anon_file, key_output)
+        key = encrypt_ids(birads_descriptions, birads_anon_file, key_output)
         
         # Step 2: Parse DICOM files
-        Parse_Dicom_Files(CONFIG, anon_file, lesion_anon_file, BUCKET_PATH, encryption_key=key)
+        Parse_Dicom_Files(CONFIG, anon_file, lesion_anon_file, birads_anon_file, BUCKET_PATH, encryption_key=key)
         
         # Step 3: Run OCR
         print("Step 3/5: Processing image data...")

@@ -854,7 +854,7 @@ def filter_dcm_files_by_anon_data(dcm_files_list, anon_location, encryption_key)
     return filtered_files
 
 # Main Method
-def Parse_Dicom_Files(CONFIG, anon_location, lesion_anon_file, raw_storage_database, encryption_key):
+def Parse_Dicom_Files(CONFIG, anon_location, lesion_anon_file, birads_anon_file, raw_storage_database, encryption_key):
     """
     Main DICOM processing function.
 
@@ -920,12 +920,27 @@ def Parse_Dicom_Files(CONFIG, anon_location, lesion_anon_file, raw_storage_datab
     # Insert lesion/pathology data into database
     print("Inserting lesion/pathology data")
     lesion_csv = pd.read_csv(lesion_anon_file)
-    
-    # Convert lesion CSV columns to snake_case
     lesion_csv.columns = [to_snake_case(col) for col in lesion_csv.columns]
+    
+    # Insert lesion/description data into database
+    print("Inserting birad/description data")
+    birads_csv = pd.read_csv(birads_anon_file)
+    birads_csv.columns = [to_snake_case(col) for col in birads_csv.columns]
 
     with DatabaseManager() as db:
         # Insert pathology data (dict keys now match DB schema)
         pathology_data = lesion_csv.to_dict('records')
         inserted_pathology = db.insert_pathology_batch(pathology_data)
         print(f"Inserted {inserted_pathology} pathology records")
+
+        # Update Images table with lesion_descriptions from birads CSV
+        if not birads_csv.empty:
+            # Rename the description column to match our database schema
+            if 'birad_descriptions' in birads_csv.columns:
+                birads_csv = birads_csv.rename(columns={'birad_descriptions': 'lesion_descriptions'})
+
+            # Update images by accession_number
+            updated_images = db.update_images_by_accession(birads_csv, ['lesion_descriptions'])
+            print(f"Updated {updated_images} images with lesion descriptions")
+        else:
+            print("Skipping lesion descriptions update - no birads data available")

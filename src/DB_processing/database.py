@@ -93,6 +93,14 @@ class DatabaseManager:
                 right_prior_breast_cancer INTEGER,
                 left_diagnosis_source TEXT,
                 right_diagnosis_source TEXT,
+                location_id TEXT,
+                location_name TEXT,
+                location_city TEXT,
+                location_state TEXT,
+                location_zip TEXT,
+                location_address TEXT,
+                location_type TEXT,
+                location_description TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -143,6 +151,7 @@ class DatabaseManager:
                 software_versions TEXT,
                 manufacturer_model_name TEXT,
                 exclusion_reason TEXT,
+                lesion_descriptions TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (accession_number) REFERENCES StudyCases(accession_number) ON DELETE CASCADE
             )
@@ -344,10 +353,11 @@ class DatabaseManager:
             'photometric_interpretation', 'rows', 'columns', 'physical_delta_x',
             'has_calipers', 'has_calipers_prediction', 'caliper_boxes', 'caliper_coordinates', 'yolo_confidence', 'has_caliper_mask', 'samus_confidence',
             'darkness', 'label', 'region_count', 'closest_fn', 'distance',
-            'file_name', 'software_versions', 'manufacturer_model_name', 'exclusion_reason'
+            'file_name', 'software_versions', 'manufacturer_model_name', 'exclusion_reason',
+            'lesion_descriptions'
         ]
 
-        string_columns = ['accession_number', 'patient_id', 'image_name', 'dicom_hash', 'caliper_boxes', 'caliper_coordinates', 'yolo_confidence', 'samus_confidence', 'inpainted_from', 'exclusion_reason']
+        string_columns = ['accession_number', 'patient_id', 'image_name', 'dicom_hash', 'caliper_boxes', 'caliper_coordinates', 'yolo_confidence', 'samus_confidence', 'inpainted_from', 'exclusion_reason', 'lesion_descriptions']
         boolean_columns = ['has_calipers', 'has_caliper_mask', 'label']
         
         return self._batch_upsert_helper(
@@ -404,7 +414,9 @@ class DatabaseManager:
             'orientation', 'echo', 'posterior', 'boundary',
             'left_prior_breast_biopsies', 'right_prior_breast_biopsies',
             'left_prior_breast_cancer', 'right_prior_breast_cancer',
-            'left_diagnosis_source', 'right_diagnosis_source'
+            'left_diagnosis_source', 'right_diagnosis_source',
+            'location_id', 'location_name', 'location_city', 'location_state',
+            'location_zip', 'location_address', 'location_type', 'location_description'
         ]
         
         string_columns = ['accession_number', 'patient_id']
@@ -554,3 +566,50 @@ class DatabaseManager:
             print(f"Added column '{column_name}' to table '{table_name}'")
             return True
         return False
+
+    def update_images_by_accession(self, data: pd.DataFrame, columns_to_update: List[str]) -> int:
+        """
+        Update Images table by joining on accession_number.
+
+        Args:
+            data: DataFrame with 'accession_number' and columns to update
+            columns_to_update: List of column names to update (e.g., ['lesion_descriptions'])
+
+        Returns:
+            Number of rows updated
+        """
+        if data.empty:
+            return 0
+
+        # Ensure accession_number exists
+        if 'accession_number' not in data.columns:
+            raise ValueError("DataFrame must contain 'accession_number' column")
+
+        # Verify all update columns exist in the data
+        for col in columns_to_update:
+            if col not in data.columns:
+                raise ValueError(f"Column '{col}' not found in data")
+
+        cursor = self.conn.cursor()
+
+        # Build SET clause for SQL UPDATE
+        set_clause = ', '.join([f"{col} = ?" for col in columns_to_update])
+
+        # SQL: UPDATE Images SET col1 = ?, col2 = ? WHERE accession_number = ?
+        update_query = f"""
+            UPDATE Images
+            SET {set_clause}
+            WHERE accession_number = ?
+        """
+
+        # Prepare update data: (col1_value, col2_value, ..., accession_number)
+        update_rows = []
+        for _, row in data.iterrows():
+            values = [row[col] for col in columns_to_update]
+            values.append(str(row['accession_number']).strip())
+            update_rows.append(tuple(values))
+
+        cursor.executemany(update_query, update_rows)
+        self.conn.commit()
+
+        return cursor.rowcount
