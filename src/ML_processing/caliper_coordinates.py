@@ -135,7 +135,7 @@ def create_difference_mask(caliper_path, clean_path, input_folder, threshold=30)
     return caliper_img, clean_img, mask_img
 
 
-def detect_calipers_from_mask(difference_mask, min_area=1, max_area=1000, merge_distance=20, 
+def detect_calipers_from_mask(difference_mask, min_area=1, max_area=1000, merge_distance=20,
                             crop_x=None, crop_y=None, crop_x2=None, crop_y2=None, edge_margin=20):
     """
     Improved caliper detection with more lenient parameters and multi-pass detection.
@@ -145,38 +145,56 @@ def detect_calipers_from_mask(difference_mask, min_area=1, max_area=1000, merge_
         mask_array = np.array(difference_mask)
     else:
         mask_array = difference_mask.copy()
-    
+
     # Ensure binary mask
     if len(mask_array.shape) == 3:
         mask_array = cv2.cvtColor(mask_array, cv2.COLOR_RGB2GRAY)
-    
+
+    # Get image dimensions first for validation
+    img_height, img_width = mask_array.shape
+
+    # Validate and clamp crop parameters to image bounds
+    if crop_x is not None:
+        crop_x = max(0, min(crop_x, img_width - 1))
+    if crop_y is not None:
+        crop_y = max(0, min(crop_y, img_height - 1))
+    if crop_x2 is not None:
+        crop_x2 = max(0, min(crop_x2, img_width))
+    if crop_y2 is not None:
+        crop_y2 = max(0, min(crop_y2, img_height))
+
     # Try multiple binary thresholds to catch different intensities
     thresholds = [30, 50, 80, 127]  # Multiple sensitivity levels
     all_caliper_centers = []
-    
+
     for threshold in thresholds:
         binary_mask = (mask_array > threshold).astype(np.uint8) * 255
-        
+
         # Preprocess to enhance thin structures
         kernel = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
         enhanced_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_CLOSE, kernel)
-        
-        # Get image dimensions for tile calculation
-        img_height, img_width = enhanced_mask.shape
+
+        # Tile dimensions for exclusion zones
         tile_height = img_height // 3
         tile_width = img_width // 3
-        
+
         # Calculate exclusion zones
         bottom_right_x_start = 2 * tile_width
         bottom_right_y_start = 2 * tile_height
         bottom_left_x_end = tile_width
         bottom_left_y_start = 2 * tile_height
-        
+
         # Calculate safe zone within crop region
         safe_crop_x = crop_x + edge_margin if crop_x is not None else edge_margin
         safe_crop_y = crop_y + edge_margin if crop_y is not None else edge_margin
         safe_crop_x2 = crop_x2 - edge_margin if crop_x2 is not None else img_width - edge_margin
         safe_crop_y2 = crop_y2 - edge_margin if crop_y2 is not None else img_height - edge_margin
+
+        # Clamp safe crop zone to image bounds
+        safe_crop_x = max(0, min(safe_crop_x, img_width - 1))
+        safe_crop_y = max(0, min(safe_crop_y, img_height - 1))
+        safe_crop_x2 = max(0, min(safe_crop_x2, img_width))
+        safe_crop_y2 = max(0, min(safe_crop_y2, img_height))
         
         # Find contours
         contours, _ = cv2.findContours(enhanced_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -207,28 +225,42 @@ def detect_calipers_from_mask(difference_mask, min_area=1, max_area=1000, merge_
                     if M["m00"] != 0:
                         cx = int(M["m10"] / M["m00"])
                         cy = int(M["m01"] / M["m00"])
-                        
+
+                        # CRITICAL: Validate coordinates are within image bounds
+                        if cx < 0 or cx >= img_width or cy < 0 or cy >= img_height:
+                            continue
+
                         # Apply exclusion filters
-                        if (bottom_right_x_start <= cx < img_width and 
+                        if (bottom_right_x_start <= cx < img_width and
                             bottom_right_y_start <= cy < img_height):
                             continue
-                        
-                        if (0 <= cx < bottom_left_x_end and 
+
+                        if (0 <= cx < bottom_left_x_end and
                             bottom_left_y_start <= cy < img_height):
                             continue
-                        
-                        if (crop_x is not None and crop_y is not None and 
+
+                        if (crop_x is not None and crop_y is not None and
                             crop_x2 is not None and crop_y2 is not None):
-                            if not (safe_crop_x <= cx <= safe_crop_x2 and 
+                            if not (safe_crop_x <= cx <= safe_crop_x2 and
                                    safe_crop_y <= cy <= safe_crop_y2):
                                 continue
-                        
+
                         all_caliper_centers.append((cx, cy))
     
     # Remove duplicates from multiple thresholds
     if all_caliper_centers:
         all_caliper_centers = merge_nearby_centers(all_caliper_centers, merge_distance)
-    
+
+        # Final validation: ensure all coordinates are within bounds after merging
+        validated_centers = []
+        for cx, cy in all_caliper_centers:
+            if 0 <= cx < img_width and 0 <= cy < img_height:
+                validated_centers.append((cx, cy))
+            else:
+                print(f"Warning: Merged coordinate ({cx},{cy}) out of bounds ({img_width},{img_height}). Skipping.")
+
+        all_caliper_centers = validated_centers
+
     return all_caliper_centers
 
 def merge_nearby_centers(centers, merge_distance):
@@ -371,23 +403,24 @@ def is_cross_crosshair_or_x_shape(roi):
     
     return False
 
-def save_debug_image(caliper_img, caliper_centers, output_path):
-    """
-    Save caliper image with dots drawn at detected coordinates.
-    """
+def save_debug_image(caliper_img, mask_img, caliper_centers, output_path):
     # Convert PIL to numpy array for drawing
     img_array = np.array(caliper_img.convert('RGB'))
 
-    # Draw dots at each caliper center
+    # Draw circle and coordinates at each caliper center
     for cx, cy in caliper_centers:
-        # Draw a circle at the center
         cv2.circle(img_array, (cx, cy), radius=5, color=(0, 255, 0), thickness=-1)  # Green filled circle
-        # Draw a crosshair
-        cv2.line(img_array, (cx - 10, cy), (cx + 10, cy), color=(255, 0, 0), thickness=2)  # Red horizontal line
-        cv2.line(img_array, (cx, cy - 10), (cx, cy + 10), color=(255, 0, 0), thickness=2)  # Red vertical line
+        cv2.putText(img_array, f"({cx},{cy})", (cx + 10, cy - 10), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1, cv2.LINE_AA)
 
+    # Convert mask to RGB for side-by-side comparison
+    mask_array = np.array(mask_img.convert('RGB'))
+    
+    # Concatenate horizontally
+    combined = np.hstack([img_array, mask_array])
+    
     # Convert back to PIL and save
-    debug_img = Image.fromarray(img_array)
+    debug_img = Image.fromarray(combined)
     debug_img.save(output_path)
 
 
@@ -404,6 +437,8 @@ def process_single_image_pair(pair, image_dir, image_data_row, save_debug=False,
     # Find Calipers
     # Mask out everything outside the crop region
     crop_x, crop_y, crop_w, crop_h = None, None, None, None
+    crop_x2, crop_y2 = None, None  # Initialize to None to avoid undefined variable error
+
     if all(col in image_data_row for col in ['crop_x', 'crop_y', 'crop_h', 'crop_w']):
         crop_x = int(image_data_row['crop_x']) if pd.notna(image_data_row['crop_x']) else 0
         crop_y = int(image_data_row['crop_y']) if pd.notna(image_data_row['crop_y']) else 0
@@ -450,7 +485,7 @@ def process_single_image_pair(pair, image_dir, image_data_row, save_debug=False,
         # Use just the base filename to avoid path issues
         base_filename = os.path.basename(caliper_path)
         debug_path = os.path.join(debug_dir, f"debug_{base_filename}")
-        save_debug_image(caliper_img, caliper_centers, debug_path)
+        save_debug_image(caliper_img, mask_img, caliper_centers, debug_path)
 
     return {
         'caliper_coordinates': caliper_coordinates_str
@@ -476,25 +511,30 @@ def process_image_pairs_multithreading(pairs, image_dir, image_data_df, num_thre
 
         return process_single_image_pair(pair, image_dir, image_data_row, save_debug, debug_dir)
 
-    results = []
+    results = {}
     with ThreadPoolExecutor(max_workers=num_threads) as executor:
-        # Submit all tasks
-        future_to_pair = {executor.submit(worker, pair): pair for pair in pairs}
+        # Submit all tasks with index tracking
+        future_to_index = {}
+        for i, pair in enumerate(pairs):
+            future = executor.submit(worker, pair)
+            future_to_index[future] = i
 
         # Collect results with tqdm progress bar
         with tqdm(total=len(pairs), desc="Processing image pairs") as pbar:
-            for future in as_completed(future_to_pair):
-                pair = future_to_pair[future]
+            for future in as_completed(future_to_index):
+                idx = future_to_index[future]
                 try:
                     result = future.result()
-                    results.append(result)
+                    results[idx] = result
                 except Exception as e:
+                    pair = pairs[idx]
                     print(f"Error processing {pair['caliper_image']}: {e}")
-                    results.append(None)
+                    results[idx] = None
 
                 pbar.update(1)
 
-    return results
+    # Convert back to list in correct order
+    return [results[i] for i in range(len(pairs))]
     
 def Locate_Calipers(image_dir, save_debug=False, debug_dir='debug_caliper_coords'):
     print("Starting caliper location using mask-based detection...")
