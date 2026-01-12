@@ -5,6 +5,7 @@ import numpy as np
 from PIL import Image
 import cv2
 import pandas as pd
+import json
 from tqdm import tqdm
 from src.ML_processing.lesion_detection import clamp_coordinates
 from tools.storage_adapter import *
@@ -269,15 +270,15 @@ def merge_nearby_centers(centers, merge_distance):
     """
     if len(centers) <= 1:
         return centers
-    
+
     centers = np.array(centers)
     merged_centers = []
     used = set()
-    
+
     for i, center in enumerate(centers):
         if i in used:
             continue
-            
+
         # Find all centers within merge_distance of this center
         cluster = [i]
         for j, other_center in enumerate(centers):
@@ -285,16 +286,166 @@ def merge_nearby_centers(centers, merge_distance):
                 distance = np.linalg.norm(center - other_center)
                 if distance <= merge_distance:
                     cluster.append(j)
-        
+
         # Mark all centers in this cluster as used
         used.update(cluster)
-        
+
         # Calculate average position of the cluster
         cluster_centers = centers[cluster]
         avg_center = np.mean(cluster_centers, axis=0)
         merged_centers.append((int(avg_center[0]), int(avg_center[1])))
-    
+
     return merged_centers
+
+
+def find_smallest_perpendicular_pairs(caliper_centers):
+    """
+    Find perpendicular pairs of calipers.
+
+    Rule: A lesion can ONLY have 2 lines if they are perpendicular to each other.
+    Otherwise, each pair of calipers is a separate lesion.
+
+    Returns:
+        List of lesion groups, each containing:
+        - 'indices': caliper indices belonging to this lesion (2 or 4 calipers)
+        - 'connections': list of (i, j) pairs to draw (1 or 2 lines)
+        - 'perpendicular': True only if this lesion has exactly 2 perpendicular lines
+    """
+    n = len(caliper_centers)
+    if n < 2:
+        return []
+
+    points = np.array(caliper_centers)
+
+    # Calculate all pairwise info
+    all_pairs = []
+    for i in range(n):
+        for j in range(i + 1, n):
+            vec = points[j] - points[i]
+            dist = np.linalg.norm(vec)
+            all_pairs.append({
+                'indices': (i, j),
+                'distance': dist,
+                'vector': vec
+            })
+
+    lesion_groups = []
+    used_points = set()
+
+    # STEP 1: Find all perpendicular 4-point combinations
+    # (Skip if we have fewer than 4 points - can't form perpendicular pairs)
+    perp_combos = []
+    if n >= 4:
+        for idx1, pair1 in enumerate(all_pairs):
+            for idx2 in range(idx1 + 1, len(all_pairs)):
+                pair2 = all_pairs[idx2]
+
+                # Must use exactly 4 different points
+                points_set = set(pair1['indices'] + pair2['indices'])
+                if len(points_set) != 4:
+                    continue
+
+                # Check perpendicularity using dot product
+                v1_norm = pair1['vector'] / (np.linalg.norm(pair1['vector']) + 1e-10)
+                v2_norm = pair2['vector'] / (np.linalg.norm(pair2['vector']) + 1e-10)
+                dot_product = abs(np.dot(v1_norm, v2_norm))
+
+                # Within 45 degrees: cos(45°) ≈ 0.707
+                if dot_product < 0.707:
+                    # IMPORTANT: Check spatial proximity - all 4 points should be close together
+                    # Calculate the bounding box of the 4 points
+                    point_indices = list(points_set)
+                    point_coords = points[point_indices]
+
+                    # Get min/max x and y coordinates
+                    min_x, min_y = point_coords.min(axis=0)
+                    max_x, max_y = point_coords.max(axis=0)
+                    bbox_width = max_x - min_x
+                    bbox_height = max_y - min_y
+                    bbox_diagonal = np.sqrt(bbox_width**2 + bbox_height**2)
+
+                    # The bounding box diagonal should be reasonable compared to line lengths
+                    # If the 4 points are too spread out, they're likely from different lesions
+                    max_line_length = max(pair1['distance'], pair2['distance'])
+
+                    # Allow bbox diagonal to be at most 1.8x the longest line
+                    # This ensures the 4 points form a very compact cluster
+                    if bbox_diagonal <= 1.8 * max_line_length:
+                        # CRITICAL: Check if the lines actually intersect or nearly intersect
+                        # Get the line segment endpoints
+                        i1, j1 = pair1['indices']
+                        i2, j2 = pair2['indices']
+                        p1, p2 = points[i1], points[j1]  # Line 1
+                        p3, p4 = points[i2], points[j2]  # Line 2
+
+                        # Calculate intersection point of infinite lines using parametric form
+                        # Line 1: p1 + t*(p2-p1), Line 2: p3 + s*(p4-p3)
+                        d1 = p2 - p1  # Direction vector of line 1
+                        d2 = p4 - p3  # Direction vector of line 2
+
+                        # Solve: p1 + t*d1 = p3 + s*d2
+                        # Cross product to find intersection
+                        cross = d1[0] * d2[1] - d1[1] * d2[0]
+
+                        if abs(cross) > 1e-6:  # Lines are not parallel
+                            # Calculate parameter t for line 1
+                            diff = p3 - p1
+                            t = (diff[0] * d2[1] - diff[1] * d2[0]) / cross
+                            s = (diff[0] * d1[1] - diff[1] * d1[0]) / cross
+
+                            # Check if intersection is within both segments (strict)
+                            # For perpendicular caliper measurements of the same lesion,
+                            # the lines MUST actually cross each other
+                            # t=0 is p1, t=1 is p2; s=0 is p3, s=1 is p4
+                            # Allow only tiny tolerance for numerical errors
+                            if -0.05 <= t <= 1.05 and -0.05 <= s <= 1.05:
+                                # Lines intersect or nearly intersect - this is a valid perpendicular pair
+                                perp_combos.append({
+                                    'pair1': pair1,
+                                    'pair2': pair2,
+                                    'points': points_set,
+                                    'perpendicularity': dot_product,  # Lower is better
+                                    'avg_distance': (pair1['distance'] + pair2['distance']) / 2,
+                                    'bbox_diagonal': bbox_diagonal,
+                                    'intersection_t': t,
+                                    'intersection_s': s
+                                })
+
+    # Sort by closest pairs (smallest average distance first)
+    perp_combos.sort(key=lambda x: x['avg_distance'])
+
+    # STEP 2: Assign perpendicular pairs as lesions (these get 2 lines each)
+    for combo in perp_combos:
+        # Skip if any of these points are already assigned
+        if combo['points'] & used_points:
+            continue
+
+        lesion_groups.append({
+            'indices': list(combo['points']),
+            'connections': [combo['pair1']['indices'], combo['pair2']['indices']],
+            'perpendicular': True
+        })
+        used_points.update(combo['points'])
+
+    # STEP 3: All remaining pairs become separate single-line lesions
+    # Sort by smallest distance first
+    remaining_pairs = [p for p in all_pairs if not (set(p['indices']) & used_points)]
+    remaining_pairs.sort(key=lambda x: x['distance'])
+
+    for pair in remaining_pairs:
+        # Skip if either point is already used
+        if pair['indices'][0] in used_points or pair['indices'][1] in used_points:
+            continue
+
+        # Each remaining pair is a separate lesion with 1 line
+        lesion_groups.append({
+            'indices': list(pair['indices']),
+            'connections': [pair['indices']],
+            'perpendicular': False
+        })
+        used_points.update(pair['indices'])
+
+    return lesion_groups
 
 
 def is_cross_crosshair_or_x_shape(roi):
@@ -403,21 +554,106 @@ def is_cross_crosshair_or_x_shape(roi):
     
     return False
 
-def save_debug_image(caliper_img, mask_img, caliper_centers, output_path, max_distance_cm=None):
+def save_debug_image(caliper_img, mask_img, caliper_centers, output_path, cluster_info=None):
+    """
+    Save debug image with caliper centers and cluster connections visualized.
+
+    Args:
+        caliper_img: Original image with calipers
+        mask_img: Difference mask
+        caliper_centers: List of all caliper center coordinates
+        output_path: Where to save the debug image
+        cluster_info: List of dicts with cluster analysis results, each containing:
+            - 'indices': List of caliper indices in this cluster
+            - 'measurements': List of measurements in pixels
+            - 'measurements_cm': List of measurements in cm
+            - 'connections': List of (i1, i2) tuples for drawing lines
+            - 'perpendicular': Boolean indicating perpendicular measurements
+    """
     # Convert PIL to numpy array for drawing
     img_array = np.array(caliper_img.convert('RGB'))
 
-    # Draw circle and coordinates at each caliper center
-    for cx, cy in caliper_centers:
-        cv2.circle(img_array, (cx, cy), radius=5, color=(0, 255, 0), thickness=-1)  # Green filled circle
-        cv2.putText(img_array, f"({cx},{cy})", (cx + 10, cy - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1, cv2.LINE_AA)
+    # Define colors for different clusters (BGR format for OpenCV)
+    cluster_colors = [
+        (0, 255, 0),      # Green
+        (255, 0, 0),      # Blue
+        (0, 255, 255),    # Yellow
+        (255, 0, 255),    # Magenta
+        (0, 165, 255),    # Orange
+        (255, 255, 0),    # Cyan
+        (128, 0, 128),    # Purple
+        (0, 128, 255),    # Light Orange
+    ]
 
-    # Display max distance in cm if available
-    if max_distance_cm is not None:
-        text = f"Max Distance: {max_distance_cm:.2f} cm"
-        cv2.putText(img_array, text, (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2, cv2.LINE_AA)
+    if cluster_info:
+        # Draw clusters with connections
+        for cluster_idx, cluster_data in enumerate(cluster_info):
+            color = cluster_colors[cluster_idx % len(cluster_colors)]
+            indices = cluster_data['indices']
+            connections = cluster_data['connections']
+            measurements_cm = cluster_data.get('measurements_cm', [])
+            perpendicular = cluster_data.get('perpendicular', False)
+
+            # Draw connection lines first (so they appear behind circles)
+            for conn_idx, (i1, i2) in enumerate(connections):
+                # Connections now use global indices directly
+                p1 = caliper_centers[i1]
+                p2 = caliper_centers[i2]
+
+                # Draw line
+                cv2.line(img_array, p1, p2, color, 2)
+
+                # Draw measurement text at midpoint
+                if conn_idx < len(measurements_cm):
+                    mid_x = (p1[0] + p2[0]) // 2
+                    mid_y = (p1[1] + p2[1]) // 2
+                    text = f"{measurements_cm[conn_idx]:.2f} cm"
+                    cv2.putText(img_array, text, (mid_x + 5, mid_y - 5),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2, cv2.LINE_AA)
+
+            # Draw circles at caliper centers
+            for global_idx in indices:
+                cx, cy = caliper_centers[global_idx]
+                cv2.circle(img_array, (cx, cy), radius=6, color=color, thickness=-1)
+                cv2.circle(img_array, (cx, cy), radius=8, color=(255, 255, 255), thickness=1)  # White border
+
+            # Draw cluster label
+            if indices:
+                # Label near the first caliper of the cluster
+                first_idx = indices[0]
+                cx, cy = caliper_centers[first_idx]
+                label = f"L{cluster_idx + 1}"
+                if perpendicular:
+                    label += " (⊥)"
+                cv2.putText(img_array, label, (cx - 30, cy - 15),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
+    else:
+        # Legacy mode: just draw circles without clustering
+        for cx, cy in caliper_centers:
+            cv2.circle(img_array, (cx, cy), radius=5, color=(0, 255, 0), thickness=-1)
+            cv2.putText(img_array, f"({cx},{cy})", (cx + 10, cy - 10),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1, cv2.LINE_AA)
+
+    # Draw summary info at top
+    if cluster_info:
+        y_offset = 25
+        cv2.putText(img_array, f"Found {len(cluster_info)} lesion(s)", (10, y_offset),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
+
+        for cluster_idx, cluster_data in enumerate(cluster_info):
+            y_offset += 25
+            measurements_cm = cluster_data.get('measurements_cm', [])
+            n_calipers = len(cluster_data['indices'])
+
+            if measurements_cm:
+                max_measurement = max(measurements_cm)
+                text = f"L{cluster_idx + 1}: {max_measurement:.2f} cm ({n_calipers} cal)"
+            else:
+                text = f"L{cluster_idx + 1}: {n_calipers} cal"
+
+            color = cluster_colors[cluster_idx % len(cluster_colors)]
+            cv2.putText(img_array, text, (10, y_offset),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
 
     # Convert mask to RGB for side-by-side comparison
     mask_array = np.array(mask_img.convert('RGB'))
@@ -432,7 +668,12 @@ def save_debug_image(caliper_img, mask_img, caliper_centers, output_path, max_di
 
 def process_single_image_pair(pair, image_dir, image_data_row, save_debug=False, debug_dir=None):
     """
-    Process a single image pair to detect calipers and get their center coordinates.
+    Process a single image pair to detect calipers, cluster them by lesion, and calculate measurements.
+
+    Returns:
+        Dictionary with:
+        - 'caliper_coordinates': String format "x,y;x,y;..." for all calipers
+        - 'lesion_measurements': JSON string with per-lesion measurements
     """
     caliper_path = pair['caliper_image']
     clean_path = pair['clean_image']
@@ -489,26 +730,67 @@ def process_single_image_pair(pair, image_dir, image_data_row, save_debug=False,
     else:
         caliper_coordinates_str = ''
 
-    # Calculate max distance between caliper centers in cm
-    max_distance_cm = None
-    if len(caliper_centers) >= 2:
-        # Get physical_delta_x from the image metadata (distance per pixel)
-        physical_delta_x = image_data_row.get('physical_delta_x')
+    # NEW: Find perpendicular pairs and group by lesion
+    cluster_info_list = []
+    lesion_measurements_json = None
 
+    if len(caliper_centers) >= 2:
+        # Get physical_delta_x for converting pixels to cm
+        physical_delta_x = image_data_row.get('physical_delta_x')
         if physical_delta_x is not None and not pd.isna(physical_delta_x):
             physical_delta_x = float(physical_delta_x)
+        else:
+            physical_delta_x = None
 
-            # Calculate all pairwise distances and find the maximum
-            max_distance_pixels = 0
-            for i in range(len(caliper_centers)):
-                for j in range(i + 1, len(caliper_centers)):
-                    cx1, cy1 = caliper_centers[i]
-                    cx2, cy2 = caliper_centers[j]
-                    distance = np.sqrt((cx2 - cx1)**2 + (cy2 - cy1)**2)
-                    max_distance_pixels = max(max_distance_pixels, distance)
+        # Find smallest perpendicular pairs
+        lesion_groups = find_smallest_perpendicular_pairs(caliper_centers)
 
-            # Convert to cm (physical_delta_x is already in cm per pixel)
-            max_distance_cm = max_distance_pixels * physical_delta_x
+        # Process each lesion group
+        lesion_data = []
+        points = np.array(caliper_centers)
+
+        for group in lesion_groups:
+            indices = group['indices']
+            connections = group['connections']
+            perpendicular = group['perpendicular']
+
+            # Calculate distances for each connection
+            measurements_px = []
+            for i, j in connections:
+                dist = np.linalg.norm(points[i] - points[j])
+                measurements_px.append(dist)
+
+            # Convert to cm if possible
+            measurements_cm = []
+            if physical_delta_x:
+                measurements_cm = [m * physical_delta_x for m in measurements_px]
+
+            # Store cluster info for debug visualization (keep all measurements for lines)
+            cluster_info = {
+                'indices': indices,
+                'measurements': measurements_px,
+                'measurements_cm': measurements_cm,
+                'connections': connections,
+                'perpendicular': perpendicular
+            }
+            cluster_info_list.append(cluster_info)
+
+            # Store lesion data for database - use only MAX measurement
+            max_measurement_px = max(measurements_px) if measurements_px else 0
+            lesion_entry = {
+                'caliper_count': len(indices),
+                'measurement_px': float(max_measurement_px),  # Single max value
+                'perpendicular': perpendicular
+            }
+            if physical_delta_x and measurements_cm:
+                max_measurement_cm = max(measurements_cm)
+                lesion_entry['measurement_cm'] = float(max_measurement_cm)  # Single max value
+
+            lesion_data.append(lesion_entry)
+
+        # Convert to JSON string for database storage
+        if lesion_data:
+            lesion_measurements_json = json.dumps(lesion_data)
 
     # Save debug image if requested
     if save_debug and debug_dir and caliper_centers:
@@ -516,10 +798,14 @@ def process_single_image_pair(pair, image_dir, image_data_row, save_debug=False,
         # Use just the base filename to avoid path issues
         base_filename = os.path.basename(caliper_path)
         debug_path = os.path.join(debug_dir, f"debug_{base_filename}")
-        save_debug_image(caliper_img, mask_img, caliper_centers, debug_path, max_distance_cm)
+
+        # Pass cluster info to debug visualization
+        save_debug_image(caliper_img, mask_img, caliper_centers, debug_path,
+                        cluster_info=cluster_info_list if cluster_info_list else None)
 
     return {
-        'caliper_coordinates': caliper_coordinates_str
+        'caliper_coordinates': caliper_coordinates_str,
+        'lesion_measurements': lesion_measurements_json
     }
 
 
@@ -568,11 +854,12 @@ def process_image_pairs_multithreading(pairs, image_dir, image_data_df, num_thre
     return [results[i] for i in range(len(pairs))]
     
 def Locate_Calipers(image_dir, save_debug=False, debug_dir='debug_caliper_coords'):
-    print("Starting caliper location using mask-based detection...")
+    print("Starting caliper location using mask-based detection with multi-lesion clustering...")
 
     with DatabaseManager() as db:
-        # Ensure caliper_coordinates columns exist in the database
+        # Ensure columns exist in the database
         db.add_column_if_not_exists('Images', 'caliper_coordinates', 'TEXT')
+        db.add_column_if_not_exists('Images', 'lesion_measurements', 'TEXT')  # New column for JSON data
 
         # Load image data from database
         image_data = db.get_images_dataframe()
@@ -615,21 +902,56 @@ def Locate_Calipers(image_dir, save_debug=False, debug_dir='debug_caliper_coords
         # Update the database with results
         cursor = db.conn.cursor()
         processed_count = 0
+        multi_lesion_count = 0
+        all_lesion_records = []
 
         for i, result in enumerate(results):
             if result is not None:
                 caliper_image_name = valid_pairs[i]['caliper_image']
 
+                # Get accession_number and patient_id from image data
+                image_row = image_data[image_data['image_name'] == caliper_image_name].iloc[0]
+                accession_number = image_row['accession_number']
+                patient_id = image_row['patient_id']
+
+                # Update Images table with caliper coordinates
                 cursor.execute("""
                     UPDATE Images
                     SET caliper_coordinates = ?
                     WHERE image_name = ?
-                """, (result['caliper_coordinates'],
-                      caliper_image_name))
+                """, (result['caliper_coordinates'], caliper_image_name))
+
+                # Delete existing lesion records for this image
+                cursor.execute("""
+                    DELETE FROM Lesions
+                    WHERE image_name = ?
+                """, (caliper_image_name,))
+
+                # Insert lesion records into Lesions table
+                if result.get('lesion_measurements'):
+                    lesion_data = json.loads(result['lesion_measurements'])
+
+                    if len(lesion_data) > 1:
+                        multi_lesion_count += 1
+
+                    for lesion in lesion_data:
+                        lesion_record = {
+                            'accession_number': accession_number,
+                            'patient_id': patient_id,
+                            'image_name': caliper_image_name,
+                            'lesion_measurement_cm': lesion.get('measurement_cm')
+                        }
+                        all_lesion_records.append(lesion_record)
 
                 processed_count += 1
             else:
                 print(f"Warning: Failed to process pair {i}")
 
+        # Batch insert all lesion records
+        if all_lesion_records:
+            db.insert_lesions_batch(all_lesion_records)
+
         db.conn.commit()
         print(f"Processed {processed_count} image pairs with caliper coordinate detection")
+        print(f"Found {multi_lesion_count} images with multiple lesions")
+        print(f"Inserted {len(all_lesion_records)} lesion records into Lesions table")

@@ -210,6 +210,20 @@ class DatabaseManager:
             )
         """)
 
+        # Lesions table (Individual lesion measurements from caliper detection)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS Lesions (
+                lesion_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                accession_number TEXT NOT NULL,
+                patient_id TEXT NOT NULL,
+                image_name TEXT NOT NULL,
+                lesion_measurement_cm REAL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (accession_number) REFERENCES StudyCases(accession_number) ON DELETE CASCADE,
+                FOREIGN KEY (image_name) REFERENCES Images(image_name) ON DELETE CASCADE
+            )
+        """)
+
         # Create indexes for performance
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_images_accession ON Images(accession_number)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_images_patient ON Images(patient_id)")
@@ -225,6 +239,10 @@ class DatabaseManager:
 
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_path_patient ON Pathology(patient_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_path_accession ON Pathology(accession_number)")
+
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_lesions_accession ON Lesions(accession_number)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_lesions_patient ON Lesions(patient_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_lesions_image ON Lesions(image_name)")
 
         self.conn.commit()
 
@@ -459,7 +477,32 @@ class DatabaseManager:
         cursor.executemany(insert_query, rows_to_insert)
         self.conn.commit()
         return cursor.rowcount
-    
+
+    def insert_lesions_batch(self, lesion_data: List[Dict[str, Any]]) -> int:
+        """Insert multiple lesion records in a single transaction."""
+        cursor = self.conn.cursor()
+
+        insert_query = """
+            INSERT INTO Lesions (
+                accession_number, patient_id, image_name,
+                lesion_measurement_cm
+            ) VALUES (?, ?, ?, ?)
+        """
+
+        rows_to_insert = [
+            (
+                str(row.get('accession_number', '')),
+                str(row.get('patient_id', '')),
+                str(row.get('image_name', '')),
+                row.get('lesion_measurement_cm')
+            )
+            for row in lesion_data
+        ]
+
+        cursor.executemany(insert_query, rows_to_insert)
+        self.conn.commit()
+        return cursor.rowcount
+
     def get_images_dataframe(self, where_clause: str = "", params: tuple = ()) -> pd.DataFrame:
         """Get images as a pandas DataFrame with optional filtering."""
         query = "SELECT * FROM Images"
