@@ -403,22 +403,28 @@ def is_cross_crosshair_or_x_shape(roi):
     
     return False
 
-def save_debug_image(caliper_img, mask_img, caliper_centers, output_path):
+def save_debug_image(caliper_img, mask_img, caliper_centers, output_path, max_distance_cm=None):
     # Convert PIL to numpy array for drawing
     img_array = np.array(caliper_img.convert('RGB'))
 
     # Draw circle and coordinates at each caliper center
     for cx, cy in caliper_centers:
         cv2.circle(img_array, (cx, cy), radius=5, color=(0, 255, 0), thickness=-1)  # Green filled circle
-        cv2.putText(img_array, f"({cx},{cy})", (cx + 10, cy - 10), 
+        cv2.putText(img_array, f"({cx},{cy})", (cx + 10, cy - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1, cv2.LINE_AA)
+
+    # Display max distance in cm if available
+    if max_distance_cm is not None:
+        text = f"Max Distance: {max_distance_cm:.2f} cm"
+        cv2.putText(img_array, text, (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2, cv2.LINE_AA)
 
     # Convert mask to RGB for side-by-side comparison
     mask_array = np.array(mask_img.convert('RGB'))
-    
+
     # Concatenate horizontally
     combined = np.hstack([img_array, mask_array])
-    
+
     # Convert back to PIL and save
     debug_img = Image.fromarray(combined)
     debug_img.save(output_path)
@@ -473,11 +479,36 @@ def process_single_image_pair(pair, image_dir, image_data_row, save_debug=False,
         edge_margin=30
     )
 
+    # Filter out instances with 10 or more caliper centers (likely false positives)
+    if len(caliper_centers) >= 10:
+        caliper_centers = []
+
     # Format coordinates as "x,y;x,y;x,y;" string
     if caliper_centers:
         caliper_coordinates_str = ';'.join([f"{cx},{cy}" for cx, cy in caliper_centers]) + ';'
     else:
         caliper_coordinates_str = ''
+
+    # Calculate max distance between caliper centers in cm
+    max_distance_cm = None
+    if len(caliper_centers) >= 2:
+        # Get physical_delta_x from the image metadata (distance per pixel)
+        physical_delta_x = image_data_row.get('physical_delta_x')
+
+        if physical_delta_x is not None and not pd.isna(physical_delta_x):
+            physical_delta_x = float(physical_delta_x)
+
+            # Calculate all pairwise distances and find the maximum
+            max_distance_pixels = 0
+            for i in range(len(caliper_centers)):
+                for j in range(i + 1, len(caliper_centers)):
+                    cx1, cy1 = caliper_centers[i]
+                    cx2, cy2 = caliper_centers[j]
+                    distance = np.sqrt((cx2 - cx1)**2 + (cy2 - cy1)**2)
+                    max_distance_pixels = max(max_distance_pixels, distance)
+
+            # Convert to cm (physical_delta_x is already in cm per pixel)
+            max_distance_cm = max_distance_pixels * physical_delta_x
 
     # Save debug image if requested
     if save_debug and debug_dir and caliper_centers:
@@ -485,7 +516,7 @@ def process_single_image_pair(pair, image_dir, image_data_row, save_debug=False,
         # Use just the base filename to avoid path issues
         base_filename = os.path.basename(caliper_path)
         debug_path = os.path.join(debug_dir, f"debug_{base_filename}")
-        save_debug_image(caliper_img, mask_img, caliper_centers, debug_path)
+        save_debug_image(caliper_img, mask_img, caliper_centers, debug_path, max_distance_cm)
 
     return {
         'caliper_coordinates': caliper_coordinates_str

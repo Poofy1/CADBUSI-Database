@@ -49,6 +49,72 @@ NAMES_TO_ANON_TIME = frozenset({
     'Study Time', 'Series Time', 'Content Time',
 })
 
+# Machine-specific coordinates (as ratios of width, height) to check for color
+# Structure: {'Machine Name': {region_count: (x_ratio, y_ratio)}}
+MACHINE_COLOR_CHECK_COORDS = {
+    'HDI 5000': {
+        1: (0.9734, 0.3067),
+    },
+    'LOGIQE9': {
+        1: (0.0219, 0.5278),
+        2: (0.0135, 0.4662),
+    },
+    'LOGIQS8': {
+        1: (0.0266, 0.4696),
+        2: (0.0117, 0.4708),
+    },
+    'LOGIQE10': {
+        1: (0.0335, 0.45),
+        2: (0.0103, 0.45),
+    },
+    'EPIQ 5G': {
+        1: (0.9785, 0.2344),
+        2: (0.9932, 0.1888),
+    },
+    'EPIQ 7G': {
+        1: (0.9765, 0.2253),
+        2: (0.4912, 0.1940),
+    },
+    'EPIQ Elite': {
+        1: (0.9765, 0.2201),
+        2: (0.9893, 0.1836),
+    },
+    'S3000': {
+        2: (0.0049, 0.2747),
+    },
+    'RS85': {
+        1: (0.9703, 0.1747),
+    },
+    'CX50': {
+        1: (0.9625, 0.1917),
+    },
+    'iU22': {
+        1: (0.9697, 0.2148),
+    },
+    'TUS-AI800': {
+        1: (0.9531, 0.2187),
+    },
+    'TUS-A500': {
+        1: (0.0219, 0.1833),
+    },
+}
+
+@jit(nopython=True)
+def is_pixel_colored(image, x, y, min_channel_diff=15):
+    """Check if a specific pixel has color (RGB channels differ significantly)"""
+    b = image[y, x, 0]
+    g = image[y, x, 1]
+    r = image[y, x, 2]
+
+    # Check if channels differ significantly (not grayscale)
+    max_val = max(r, g, b)
+    min_val = min(r, g, b)
+
+    # Has color if: channels differ AND not too dark
+    if max_val - min_val >= min_channel_diff:
+        return True
+    return False
+
 def anon_callback(ds, element):
     # Use faster membership testing with frozensets
     if element.name in NAMES_TO_REMOVE:
@@ -457,9 +523,29 @@ def parse_single_dcm(dcm, current_index, parsed_database, video_n_frames, max_re
         np_im = np.array(im)
 
 
+        # Check if there are any colored pixels (indicating Doppler flow)
+        # Use machine-specific coordinates if available
+        if manufacturer_model in MACHINE_COLOR_CHECK_COORDS:
+            machine_coords = MACHINE_COLOR_CHECK_COORDS[manufacturer_model]
+            coords = None
+            is_doppler = False
+            
+            if region_count in machine_coords:
+                coords = machine_coords[region_count]
 
+            if coords is not None:
+                height, width = np_im.shape[:2]
+                x_ratio, y_ratio = coords
+                x = int(width * x_ratio)
+                y = int(height * y_ratio)
+                is_doppler = is_pixel_colored(np_im, x, y)
+                
         # check if there is any blue pixel
-        if has_red_pixels(np_im) and has_blue_pixels(np_im):
+        if not is_doppler and has_red_pixels(np_im) and has_blue_pixels(np_im):
+            is_doppler = True
+            
+
+        if is_doppler:
             im = cv2.cvtColor(np_im, cv2.COLOR_BGR2RGB)
         else:
             # Convert yellow pixels to white and convert to grayscale
