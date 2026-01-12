@@ -99,6 +99,10 @@ MACHINE_COLOR_CHECK_COORDS = {
     },
 }
 
+
+# Optimized vectorized color detection using numba for JIT compilation
+from numba import jit
+
 @jit(nopython=True)
 def is_pixel_colored(image, x, y, min_channel_diff=15):
     """Check if a specific pixel has color (RGB channels differ significantly)"""
@@ -114,18 +118,6 @@ def is_pixel_colored(image, x, y, min_channel_diff=15):
     if max_val - min_val >= min_channel_diff:
         return True
     return False
-
-def anon_callback(ds, element):
-    # Use faster membership testing with frozensets
-    if element.name in NAMES_TO_REMOVE:
-        del ds[element.tag]
-    elif element.VR == "DA":
-        element.value = element.value[:4] + "0101"
-    elif element.VR == "TM" and element.name not in NAMES_TO_ANON_TIME:
-        element.value = "000000"
-
-# Optimized vectorized color detection using numba for JIT compilation
-from numba import jit
 
 @jit(nopython=True)
 def has_blue_pixels(image, n=100, min_b=200):
@@ -146,6 +138,17 @@ def has_red_pixels(image, n=100, min_r=200):
             if r >= min_r and r - b >= n and r - g >= n:
                 return True
     return False
+
+
+def anon_callback(ds, element):
+    # Use faster membership testing with frozensets
+    if element.name in NAMES_TO_REMOVE:
+        del ds[element.tag]
+    elif element.VR == "DA":
+        element.value = element.value[:4] + "0101"
+    elif element.VR == "TM" and element.name not in NAMES_TO_ANON_TIME:
+        element.value = "000000"
+
 
 '''
 def manual_decompress(ds):
