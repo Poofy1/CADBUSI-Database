@@ -218,6 +218,10 @@ class DatabaseManager:
                 patient_id TEXT NOT NULL,
                 image_name TEXT NOT NULL,
                 lesion_measurement_cm REAL,
+                parsed_lesion_measurement_cm REAL,
+                description TEXT,
+                clock TEXT,
+                distance_cm REAL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (accession_number) REFERENCES StudyCases(accession_number) ON DELETE CASCADE,
                 FOREIGN KEY (image_name) REFERENCES Images(image_name) ON DELETE CASCADE
@@ -485,8 +489,9 @@ class DatabaseManager:
         insert_query = """
             INSERT INTO Lesions (
                 accession_number, patient_id, image_name,
-                lesion_measurement_cm
-            ) VALUES (?, ?, ?, ?)
+                lesion_measurement_cm, parsed_lesion_measurement_cm,
+                description, clock, distance_cm
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """
 
         rows_to_insert = [
@@ -494,7 +499,11 @@ class DatabaseManager:
                 str(row.get('accession_number', '')),
                 str(row.get('patient_id', '')),
                 str(row.get('image_name', '')),
-                row.get('lesion_measurement_cm')
+                row.get('lesion_measurement_cm'),
+                row.get('parsed_lesion_measurement_cm'),
+                row.get('description'),
+                row.get('clock'),
+                row.get('distance_cm')
             )
             for row in lesion_data
         ]
