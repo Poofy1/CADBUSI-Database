@@ -998,13 +998,13 @@ def Parse_Dicom_Files(CONFIG, anon_location, lesion_anon_file, birads_anon_file,
         anon_csv = pd.read_csv(anon_location, dtype={'PATIENT_ID': str, 'ACCESSION_NUMBER': str})
         anon_csv.columns = [to_snake_case(col) for col in anon_csv.columns]
 
-        if 'birads' in anon_csv.columns:
+        if 'bi_rads' in anon_csv.columns:
             # Filter to BI-RADS 4 (includes 4, 4A, 4B, 4C, etc.)
-            birads_4_df = anon_csv[anon_csv['birads'].astype(str).str.contains('4', na=False)]
+            birads_4_df = anon_csv[anon_csv['bi_rads'].astype(str).str.contains('4', na=False)]
             birads_4_accessions = set(birads_4_df['accession_number'].astype(str).str.strip())
             print(f"Found {len(birads_4_accessions)} BI-RADS 4 accessions - videos will be filtered to these cases only")
         else:
-            print("Warning: 'birads' column not found in CSV, all videos will be processed")
+            print("Warning: 'bi_rads' column not found in CSV, all videos will be processed")
     except Exception as e:
         print(f"Warning: Could not load BI-RADS filter data: {e}")
 
