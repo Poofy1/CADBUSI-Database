@@ -57,16 +57,16 @@ def find_time_substring(text):
     if text is None:  # If the input is None, return 'unknown'
         return 'unknown'
     
-    # Regular expression to match time substrings of the form HH:MM or H.MM
+    # Regular expression to match time substrings of the form HH:MM, H.MM, or H*MM
     # with optional spaces
-    pattern = r'\d{1,2}\s*[:.]\s*\d{1,2}'
+    pattern = r'\d{1,2}\s*[:.*]\s*\d{1,2}'
     
     # Find all matches in the input text
     matches = re.findall(pattern, text)
     
     if len(matches) > 0:
-        # Remove spaces from the first match, convert period to colon
-        time = re.sub(r'\s', '', matches[0]).replace('.', ':')
+        # Remove spaces from the first match, convert period and asterisk to colon
+        time = re.sub(r'\s', '', matches[0]).replace('.', ':').replace('*', ':')
         return time
     
     # Check for alternative substrings

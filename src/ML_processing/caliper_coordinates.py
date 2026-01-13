@@ -859,7 +859,6 @@ def Locate_Calipers(image_dir, save_debug=False, debug_dir='debug_caliper_coords
     with DatabaseManager() as db:
         # Ensure columns exist in the database
         db.add_column_if_not_exists('Images', 'caliper_coordinates', 'TEXT')
-        db.add_column_if_not_exists('Images', 'lesion_measurements', 'TEXT')  # New column for JSON data
 
         # Load image data from database
         image_data = db.get_images_dataframe()

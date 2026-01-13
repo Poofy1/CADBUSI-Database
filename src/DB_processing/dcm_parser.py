@@ -357,10 +357,16 @@ def deidentify_dicom(ds, is_video, is_secondary):
 
 
 
-def parse_video_data(dcm, dataset, current_index, parsed_database, video_n_frames):
-    
+def parse_video_data(dcm, dataset, current_index, parsed_database, video_n_frames, birads_4_accessions=None):
+
     if video_n_frames <= 0:
         return None
+
+    # Check if we should filter by BI-RADS 4 for videos
+    if birads_4_accessions is not None:
+        accession = str(dataset.AccessionNumber).strip() if hasattr(dataset, 'AccessionNumber') else None
+        if accession and accession not in birads_4_accessions:
+            return None  # Skip videos that are not BI-RADS 4
     
     # Extract Software Version
     software_version = ""
@@ -434,7 +440,7 @@ def parse_video_data(dcm, dataset, current_index, parsed_database, video_n_frame
 
 
 
-def parse_single_dcm(dcm, current_index, parsed_database, video_n_frames, max_retries=3):
+def parse_single_dcm(dcm, current_index, parsed_database, video_n_frames, birads_4_accessions=None, max_retries=3):
     for attempt in range(max_retries):
         try:
             # Read the DICOM file
@@ -482,7 +488,7 @@ def parse_single_dcm(dcm, current_index, parsed_database, video_n_frames, max_re
     
     # Safely check for Multi-frame content
     if is_video:
-        return parse_video_data(dcm, dataset, current_index, parsed_database, video_n_frames)
+        return parse_video_data(dcm, dataset, current_index, parsed_database, video_n_frames, birads_4_accessions)
 
     
     # Extract Software Version
@@ -580,30 +586,30 @@ def parse_single_dcm(dcm, current_index, parsed_database, video_n_frames, max_re
 def process_batch(batch_data):
     """Process a batch of DICOM files"""
     results = []
-    for dcm, current_index, parsed_database, video_n_frames in batch_data:
+    for dcm, current_index, parsed_database, video_n_frames, birads_4_accessions in batch_data:
         try:
-            result = parse_single_dcm(dcm, current_index, parsed_database, video_n_frames)
+            result = parse_single_dcm(dcm, current_index, parsed_database, video_n_frames, birads_4_accessions)
             if result is not None:
                 results.append(result)
         except Exception as e:
             print(f"Error processing {dcm}: {e}")
     return results
 
-def parse_files(CONFIG, dcm_files_list, database_path, batch_size=100):
+def parse_files(CONFIG, dcm_files_list, database_path, birads_4_accessions=None, batch_size=100):
     """Optimized parsing with batching and process pooling"""
     print("Parsing DCM Data")
     video_n_frames = CONFIG["VIDEO_SAMPLING"]
-    
+
     # Check if there are no new files to process
     if len(dcm_files_list) == 0:
         raise ValueError("No *new* DICOM files found to process.")
-    
+
     # Prepare batches
     batches = []
     for i in range(0, len(dcm_files_list), batch_size):
         batch = []
         for j, dcm in enumerate(dcm_files_list[i:i+batch_size]):
-            batch.append((dcm, i+j, database_path, video_n_frames))
+            batch.append((dcm, i+j, database_path, video_n_frames, birads_4_accessions))
         batches.append(batch)
     
     # Process batches in parallel using ProcessPoolExecutor
@@ -986,8 +992,24 @@ def Parse_Dicom_Files(CONFIG, anon_location, lesion_anon_file, birads_anon_file,
     # Filter files to only process those in the anonymized input data
     dcm_files_list = filter_dcm_files_by_anon_data(dcm_files_list, anon_location, encryption_key)
 
+    # Read anon CSV to get BI-RADS 4 accessions for video filtering
+    birads_4_accessions = None
+    try:
+        anon_csv = pd.read_csv(anon_location, dtype={'PATIENT_ID': str, 'ACCESSION_NUMBER': str})
+        anon_csv.columns = [to_snake_case(col) for col in anon_csv.columns]
+
+        if 'birads' in anon_csv.columns:
+            # Filter to BI-RADS 4 (includes 4, 4A, 4B, 4C, etc.)
+            birads_4_df = anon_csv[anon_csv['birads'].astype(str).str.contains('4', na=False)]
+            birads_4_accessions = set(birads_4_df['accession_number'].astype(str).str.strip())
+            print(f"Found {len(birads_4_accessions)} BI-RADS 4 accessions - videos will be filtered to these cases only")
+        else:
+            print("Warning: 'birads' column not found in CSV, all videos will be processed")
+    except Exception as e:
+        print(f"Warning: Could not load BI-RADS filter data: {e}")
+
     # Get DCM Data (already returns snake_case columns from updated parse_files)
-    image_df = parse_files(CONFIG, dcm_files_list, database_path)
+    image_df = parse_files(CONFIG, dcm_files_list, database_path, birads_4_accessions)
 
     # Convert all columns to snake_case (defensive - in case parse_files missed any)
     image_df.columns = [to_snake_case(col) for col in image_df.columns]
