@@ -534,10 +534,10 @@ def parse_single_dcm(dcm, current_index, parsed_database, video_n_frames, birads
 
         # Check if there are any colored pixels (indicating Doppler flow)
         # Use machine-specific coordinates if available
+        is_doppler = False  # Initialize before conditional
         if manufacturer_model in MACHINE_COLOR_CHECK_COORDS:
             machine_coords = MACHINE_COLOR_CHECK_COORDS[manufacturer_model]
             coords = None
-            is_doppler = False
             
             if region_count in machine_coords:
                 coords = machine_coords[region_count]
