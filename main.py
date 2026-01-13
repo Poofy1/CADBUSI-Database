@@ -114,6 +114,7 @@ def main():
         from src.DB_processing.data_selection import Select_Data
         from src.DB_processing.dcm_parser import Parse_Dicom_Files
         from src.DB_processing.video_processing import ProcessVideoData
+        from src.DB_processing.lesion_matching import Match_Lesions
         from src.ML_processing.lesion_detection import Locate_Lesions
         from src.ML_processing.inpaint_N2N import Inpaint_Dataset_N2N
         from src.ML_processing.orientation_detection import Find_Orientation
@@ -159,7 +160,8 @@ def main():
             
         Locate_Lesions(f'{CONFIG["DATABASE_DIR"]}/images/')
         Locate_Calipers(f'{CONFIG["DATABASE_DIR"]}/images/')
-        
+        Match_Lesions()
+
         # Step 5: Process video
         print("Step 5/5: Processing video data...")
         ProcessVideoData(CONFIG["DATABASE_DIR"])
