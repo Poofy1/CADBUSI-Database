@@ -20,6 +20,8 @@
 *.pth
 *.txt
 *.jsonl
+*.ndjson
+*.log
 
 config.py
 src/ML_processing/models/*
