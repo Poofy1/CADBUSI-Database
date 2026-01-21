@@ -14,42 +14,40 @@ from config import CONFIG
 
 client = lb.Client(api_key=CONFIG['LABELBOX_API_KEY'])
 
-# === TWO PROJECTS ===
-project_accept = client.get_project("cmkhda98508i10725fz3e4fbr")  # Accept
-project_review = client.get_project("cmkhdavvv196i072s626j559t")  # Needs Review
+# === SINGLE PROJECT ===
+project = client.get_project("cmkn2bljg1ehp07v909jr9zbx")
+dataset_name = "2026_1_20_lesion_seg"
+mask_dir = "C:/Users/Tristan/Desktop/gold_biopsy_masks/"
+df = pd.read_csv("C:/Users/Tristan/Desktop/seg_data2.csv")
 
-print(f"Project 1 (Accept): {project_accept.name}")
-print(f"Project 2 (Needs Review): {project_review.name}")
+print(f"Project: {project.name}")
 
-# === ENSURE BOTH PROJECTS HAVE ONTOLOGY (Segmentation tool) ===
-for proj in [project_accept, project_review]:
-    if not proj.ontology():
-        print(f"\nCreating ontology for {proj.name}...")
-        ontology_builder = lb.OntologyBuilder(
-            tools=[lb.Tool(tool=lb.Tool.Type.RASTER_SEGMENTATION, name="lesion_seg")]
-        )
-        ontology = client.create_ontology(
-            f"Segmentation Ontology - {proj.name}",
-            ontology_builder.asdict(),
-            media_type=lb.MediaType.Image
-        )
-        proj.connect_ontology(ontology)
-        print(f"  Ontology attached!")
-    else:
-        print(f"\n{proj.name} already has ontology: {proj.ontology().name}")
+# === ENSURE PROJECT HAS ONTOLOGY ===
+if not project.ontology():
+    print(f"\nCreating ontology for {project.name}...")
+    ontology_builder = lb.OntologyBuilder(
+        tools=[lb.Tool(tool=lb.Tool.Type.RASTER_SEGMENTATION, name="lesion_seg")]
+    )
+    ontology = client.create_ontology(
+        f"Segmentation Ontology - {project.name}",
+        ontology_builder.asdict(),
+        media_type=lb.MediaType.Image
+    )
+    project.connect_ontology(ontology)
+    print(f"  Ontology attached!")
+else:
+    print(f"\n{project.name} already has ontology: {project.ontology().name}")
 
-# === DELETE ALL EXISTING BATCHES FROM BOTH ===
-print("\nDeleting batches from both projects...")
-for proj in [project_accept, project_review]:
-    for batch in proj.batches():
-        try:
-            batch.delete()
-            print(f"  Deleted: {batch.name} from {proj.name}")
-        except Exception as e:
-            print(f"  Failed: {e}")
+# === DELETE ALL EXISTING BATCHES ===
+print("\nDeleting existing batches...")
+for batch in project.batches():
+    try:
+        batch.delete()
+        print(f"  Deleted: {batch.name}")
+    except Exception as e:
+        print(f"  Failed: {e}")
 
 # === GET DATASET MAPPING ===
-dataset_name = "2026_1_15_lesion_crop+seg"
 dataset = None
 for ds in client.get_datasets():
     if ds.name == dataset_name:
@@ -61,35 +59,28 @@ for dr in dataset.data_rows():
     dataset_mapping[dr.external_id] = dr.uid
 
 # === READ CSV ===
-mask_dir = "C:/Users/Tristan/Desktop/masks/"
-df = pd.read_csv("C:/Users/Tristan/Desktop/seg_data.csv")
 df['data_row_id'] = df['caliper_image'].map(dataset_mapping)
 df = df[df['data_row_id'].notna()].copy()
 
-df_accept = df[df['status'] == 'Accept'].sample(n=130, random_state=42).reset_index(drop=True)
+df_accept = df[df['status'] == 'Accept'].copy()
 df_review = df[df['status'] == 'Needs Review'].copy()
 
-print(f"\nAccept rows (sampled): {len(df_accept)}")
-print(f"Needs Review rows (all): {len(df_review)}")
+print(f"\nAccept rows: {len(df_accept)}")
+print(f"Needs Review rows: {len(df_review)}")
 
 
 def mask_to_base64_png(mask_path):
-    """Load binary mask and convert to base64-encoded PNG.
-    Labelbox requires 2D grayscale PNG with values 0 and 1 only.
-    """
-    img = Image.open(mask_path).convert('L')  # Grayscale
+    """Load binary mask and convert to base64-encoded PNG."""
+    img = Image.open(mask_path).convert('L')
     arr = np.array(img)
     
-    # Convert to strict binary (0 or 1)
     if arr.max() > 1:
         arr = (arr > 127).astype(np.uint8)
     else:
         arr = arr.astype(np.uint8)
     
-    # Create grayscale image with values 0 and 1
     mask_img = Image.fromarray(arr, mode='L')
     
-    # Encode to base64
     buffer = BytesIO()
     mask_img.save(buffer, format='PNG')
     b64_str = base64.b64encode(buffer.getvalue()).decode('utf-8')
@@ -97,27 +88,27 @@ def mask_to_base64_png(mask_path):
     return b64_str
 
 
-# === HELPER FUNCTION ===
-def process_project(project, df_source, label_name):
+def create_batch_and_upload(project, df_source, batch_name, priority):
     """Create batch and upload mask annotations."""
     
     print(f"\n{'='*50}")
-    print(f"Processing: {project.name} ({label_name})")
+    print(f"Processing: {batch_name}")
     print(f"{'='*50}")
     
     # Create batch
     data_row_ids = df_source['data_row_id'].unique().tolist()
-    print(f"Creating batch with {len(data_row_ids)} data rows...")
+    print(f"Creating batch with {len(data_row_ids)} data rows (priority={priority})...")
     
     try:
         batch = project.create_batch(
-            f"{label_name}-batch",
+            batch_name,
             data_rows=data_row_ids,
-            priority=5
+            priority=priority
         )
         print(f"Created batch: {batch.uid}")
     except Exception as e:
         print(f"Batch error: {e}")
+        return 0, 0
     
     # Build annotations
     labels_ndjson = []
@@ -161,7 +152,7 @@ def process_project(project, df_source, label_name):
     upload_job = lb.MALPredictionImport.create_from_objects(
         client=client,
         project_id=project.uid,
-        name=f"seg_annotations_{label_name}_{timestamp}",
+        name=f"seg_annotations_{batch_name}_{timestamp}",
         predictions=labels_ndjson
     )
     
@@ -173,11 +164,9 @@ def process_project(project, df_source, label_name):
     print(f"State: {upload_job.state}")
     print(f"Success: {successes}/{len(labels_ndjson)}")
     
-    # Print first few errors for debugging
     if upload_job.errors:
         print(f"Errors: {upload_job.errors[:5]}")
     
-    # Check individual statuses for error messages
     failure_reasons = [s for s in upload_job.statuses if s.get('status') == 'FAILURE']
     if failure_reasons:
         print(f"First 3 failure details:")
@@ -190,15 +179,18 @@ def process_project(project, df_source, label_name):
     return successes, failures + skipped
 
 
-# === PROCESS BOTH PROJECTS ===
-successes1, failures1 = process_project(project_accept, df_accept, "Accept")
-successes2, failures2 = process_project(project_review, df_review, "NeedsReview")
+# === PROCESS BOTH BATCHES (Needs Review first with higher priority) ===
+successes_review, failures_review = create_batch_and_upload(
+    project, df_review, "NeedsReview-batch", priority=10
+)
+successes_accept, failures_accept = create_batch_and_upload(
+    project, df_accept, "Accept-batch", priority=5
+)
 
 # === SUMMARY ===
 print(f"\n{'='*50}")
 print("SUMMARY")
 print(f"{'='*50}")
-print(f"Project 1 (Accept):       {successes1} success, {failures1} failed/skipped")
-print(f"Project 2 (Needs Review): {successes2} success, {failures2} failed/skipped")
-print(f"\nProject 1 URL: https://app.labelbox.com/projects/{project_accept.uid}")
-print(f"Project 2 URL: https://app.labelbox.com/projects/{project_review.uid}")
+print(f"Needs Review batch: {successes_review} success, {failures_review} failed/skipped")
+print(f"Accept batch:       {successes_accept} success, {failures_accept} failed/skipped")
+print(f"\nProject URL: https://app.labelbox.com/projects/{project.uid}")
