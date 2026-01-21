@@ -16,7 +16,7 @@ def single_video_region(base_path, image_path):
     # Read image and convert to grayscale
     image = read_image(target_path)
     if image is None:
-        return None, None
+        return None
         
     image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     

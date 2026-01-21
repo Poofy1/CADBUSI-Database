@@ -70,10 +70,13 @@ class MyDataset(Dataset):
     def __getitem__(self, idx):
         img_name = os.path.join(self.root_dir, self.images[idx])
         image = read_image(img_name, use_pil=True)
-        
+
+        if image is None:
+            return None
+
         img_before_pad = self.preprocess(image)
-        padding = transforms.Pad((0, 0, 
-                                 self.max_width - img_before_pad.shape[-1], 
+        padding = transforms.Pad((0, 0,
+                                 self.max_width - img_before_pad.shape[-1],
                                  self.max_height - img_before_pad.shape[-2]))
         img_after_pad = padding(img_before_pad)
         return img_after_pad, self.images[idx]
@@ -112,13 +115,26 @@ class MyDatasetVideo(Dataset):
     def __getitem__(self, idx):
         img_name = os.path.join(self.root_dir, self.images[idx])
         image = read_image(img_name, use_pil=True)
-        
+
+        if image is None:
+            return None
+
         img_before_pad = self.preprocess(image)
-        padding = transforms.Pad((0, 0, 
-                                 self.max_width - img_before_pad.shape[-1], 
+        padding = transforms.Pad((0, 0,
+                                 self.max_width - img_before_pad.shape[-1],
                                  self.max_height - img_before_pad.shape[-2]))
         img_after_pad = padding(img_before_pad)
         return img_after_pad, self.images[idx]
+
+
+def collate_skip_none(batch):
+    """Custom collate function that filters out None values from failed image loads."""
+    batch = [item for item in batch if item is not None]
+    if len(batch) == 0:
+        return None
+    images, filenames = zip(*batch)
+    return torch.stack(images), filenames
+
 
 def find_masks(images_dir, model_name, db_to_process, max_width, max_height, 
                video_format=False):
@@ -158,10 +174,11 @@ def find_masks(images_dir, model_name, db_to_process, max_width, max_height,
         dataset = MyDataset(images_dir, db_to_process, max_width, max_height)
         
     dataloader = DataLoader(
-        dataset, 
+        dataset,
         batch_size=64,
         num_workers=8,
         pin_memory=True,
+        collate_fn=collate_skip_none,
     )
 
     class1_results = []
@@ -169,7 +186,10 @@ def find_masks(images_dir, model_name, db_to_process, max_width, max_height,
 
     # Run inference
     with torch.no_grad():
-        for images, filenames in tqdm(dataloader, total=len(dataloader), desc='Finding OCR Masks'):
+        for batch in tqdm(dataloader, total=len(dataloader), desc='Finding OCR Masks'):
+            if batch is None:
+                continue
+            images, filenames = batch
             images = images.to(device, non_blocking=True)
             with autocast('cuda'):
                 output = model(images)
