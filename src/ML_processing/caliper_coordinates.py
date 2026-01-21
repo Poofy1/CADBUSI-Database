@@ -870,20 +870,17 @@ def Locate_Calipers(image_dir, save_debug=False, debug_dir='debug_caliper_coords
             print("No image pairs found for mask-based detection.")
             return None
 
-        # Create a mapping from image_name to row index for faster lookup
-        image_name_to_idx = {row['image_name']: idx for idx, row in image_data.iterrows()}
+        # Create a mapping from image_name to row data for O(1) lookup
+        image_name_to_row = {row['image_name']: row for _, row in image_data.iterrows()}
 
         # Prepare valid pairs with their corresponding rows
         valid_pairs = []
-        pair_to_clean_idx = {}
 
         for pair in pairs:
             clean_image_name = pair['clean_image']
 
-            if clean_image_name in image_name_to_idx:
-                clean_idx = image_name_to_idx[clean_image_name]
+            if clean_image_name in image_name_to_row:
                 valid_pairs.append(pair)
-                pair_to_clean_idx[len(valid_pairs) - 1] = clean_idx
             else:
                 print(f"Warning: Clean image '{clean_image_name}' not found in database")
 
@@ -908,8 +905,8 @@ def Locate_Calipers(image_dir, save_debug=False, debug_dir='debug_caliper_coords
             if result is not None:
                 caliper_image_name = valid_pairs[i]['caliper_image']
 
-                # Get accession_number and patient_id from image data
-                image_row = image_data[image_data['image_name'] == caliper_image_name].iloc[0]
+                # Get accession_number and patient_id from image data (O(1) lookup)
+                image_row = image_name_to_row[caliper_image_name]
                 accession_number = image_row['accession_number']
                 patient_id = image_row['patient_id']
 

@@ -282,6 +282,18 @@ def Match_Lesions():
 
         print(f"Found {len(valid_images)} images with clock position and distance")
 
+        # Pre-build lookup dictionaries for O(1) access
+        study_cases_by_accession = {}
+        for _, row in study_cases_df.iterrows():
+            study_cases_by_accession[row['accession_number']] = row
+
+        lesions_by_image = {}
+        for _, row in lesions_df.iterrows():
+            img_name = row['image_name']
+            if img_name not in lesions_by_image:
+                lesions_by_image[img_name] = []
+            lesions_by_image[img_name].append(row)
+
         for _, image_row in tqdm(valid_images.iterrows(), total=len(valid_images), desc="Processing images"):
             image_name = image_row['image_name']
             accession_number = image_row['accession_number']
@@ -289,12 +301,11 @@ def Match_Lesions():
             image_clock = image_row['clock_pos']
             image_distance = image_row['nipple_dist']
 
-            # Find the corresponding study case
-            study_rows = study_cases_df[study_cases_df['accession_number'] == accession_number]
-            if study_rows.empty:
+            # Find the corresponding study case (O(1) lookup)
+            if accession_number not in study_cases_by_accession:
                 continue
 
-            study_row = study_rows.iloc[0]
+            study_row = study_cases_by_accession[accession_number]
             parsed_lesions = study_row['parsed_lesions']
 
             if not parsed_lesions:
@@ -323,11 +334,11 @@ def Match_Lesions():
                     # This description matches the image
                     matched_images.add(image_name)  # Track this image as matched
 
-                    # Check if there's an existing lesion for this image that matches the measurement
-                    existing_lesions = lesions_df[lesions_df['image_name'] == image_name]
+                    # Check if there's an existing lesion for this image that matches the measurement (O(1) lookup)
+                    existing_lesions = lesions_by_image.get(image_name, [])
 
                     matched_existing = False
-                    for _, existing_lesion in existing_lesions.iterrows():
+                    for existing_lesion in existing_lesions:
                         existing_measurement = existing_lesion['lesion_measurement_cm']
 
                         # Check if measurement matches
