@@ -811,7 +811,7 @@ def process_single_image_pair(pair, image_dir, image_data_row, save_debug=False,
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-def process_image_pairs_multithreading(pairs, image_dir, image_data_df, num_threads=6, save_debug=False, debug_dir=None):
+def process_image_pairs_multithreading(pairs, image_dir, image_data_df, num_threads=12, save_debug=False, debug_dir=None):
     """
     Process multiple image pairs using multithreading with tqdm progress bar
     """

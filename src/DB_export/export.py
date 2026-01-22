@@ -255,57 +255,118 @@ def process_labeled_lesion_masks(instance_data, mask_input_dir, output_dir):
 
 
 def process_single_video(row, video_folder_path, output_dir):
-    # Get the folder name and crop data
+    """Process a single video by cropping all frames."""
     folder_name = row['images_path']
-    crop_x = int(row['crop_x'])
-    crop_y = int(row['crop_y'])
-    crop_w = int(row['crop_w'])
-    crop_h = int(row['crop_h'])
+
+    # Check for valid crop coordinates
+    crop_x = row.get('crop_x')
+    crop_y = row.get('crop_y')
+    crop_w = row.get('crop_w')
+    crop_h = row.get('crop_h')
+
+    # Skip if any crop value is NULL/NaN
+    if pd.isna(crop_x) or pd.isna(crop_y) or pd.isna(crop_w) or pd.isna(crop_h):
+        return (0, f"Skipped {folder_name}: missing crop coordinates")
+
+    try:
+        crop_x = int(crop_x)
+        crop_y = int(crop_y)
+        crop_w = int(crop_w)
+        crop_h = int(crop_h)
+    except (ValueError, TypeError) as e:
+        return (0, f"Skipped {folder_name}: invalid crop coordinates - {e}")
+
+    # Validate crop dimensions
+    if crop_w <= 0 or crop_h <= 0:
+        return (0, f"Skipped {folder_name}: invalid crop dimensions w={crop_w} h={crop_h}")
 
     # Get all PNG files in the folder
     input_folder = os.path.join(video_folder_path, folder_name)
     all_images = list_files(input_folder, '.png')
 
     if not all_images:
-        return 0  # Return 0 if no images were processed
+        return (0, f"Skipped {folder_name}: no PNG files found in {input_folder}")
 
     # Prepare output folder path
     output_folder = os.path.join(output_dir, folder_name)
     make_dirs(output_folder)
 
-    # Process each image
+    # Process each frame
+    frames_processed = 0
     for image_path in all_images:
-        # Get just the filename for the output
         image_name = os.path.basename(image_path)
         output_path = os.path.join(output_folder, image_name)
 
-        # Crop and save (silently skip failures to maintain original behavior)
-        crop_and_save_image(image_path, output_path, crop_x, crop_y, crop_w, crop_h)
+        success, _ = crop_and_save_image(image_path, output_path, crop_x, crop_y, crop_w, crop_h)
+        if success:
+            frames_processed += 1
 
-    return 1  # Return 1 to indicate a successfully processed video
+    return (1, f"Processed {folder_name}: {frames_processed}/{len(all_images)} frames")
 
 
 def Crop_Videos(df, input_dir, output_dir):
-    
+    """Crop all video frames using their crop coordinates."""
     video_output = f"{output_dir}/videos/"
     make_dirs(video_output)
-    
+
     video_folder_path = f"{input_dir}/videos/"
-    
-    processed_videos = 0
+
+    # Filter to only videos with valid crop coordinates
+    valid_crop_mask = (
+        df['crop_x'].notna() &
+        df['crop_y'].notna() &
+        df['crop_w'].notna() &
+        df['crop_h'].notna()
+    )
+    videos_with_crops = df[valid_crop_mask]
+    videos_without_crops = df[~valid_crop_mask]
+
+    print(f"Videos with valid crops: {len(videos_with_crops)}")
+    print(f"Videos without crops (skipped): {len(videos_without_crops)}")
+
+    if len(videos_with_crops) == 0:
+        print("No videos with valid crop coordinates to process")
+        append_audit("export.exported_videos", 0)
+        append_audit("export.skipped_videos_no_crop", len(videos_without_crops))
+        return
+
+    results = {'success': 0, 'failed': 0}
+    failed_videos = []
 
     with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-        futures = {executor.submit(process_single_video, row, video_folder_path, video_output): index for index, row in df.iterrows()}
+        futures = {
+            executor.submit(process_single_video, row, video_folder_path, video_output): row['images_path']
+            for _, row in videos_with_crops.iterrows()
+        }
+
         with tqdm(total=len(futures), desc="Cropping US videos") as pbar:
             for future in as_completed(futures):
                 pbar.update()
                 try:
-                    result = future.result()
-                    processed_videos += result
+                    success_count, message = future.result()
+                    if success_count > 0:
+                        results['success'] += 1
+                    else:
+                        results['failed'] += 1
+                        failed_videos.append(message)
                 except Exception as e:
-                    print(f"Error processing video: {e}")
-                
-    append_audit("export.exported_videos", processed_videos)
+                    results['failed'] += 1
+                    failed_videos.append(f"Exception: {e}")
+
+    # Print summary
+    if failed_videos and len(failed_videos) <= 20:
+        print("\nFailed/skipped videos:")
+        for msg in failed_videos:
+            print(f"  {msg}")
+    elif failed_videos:
+        print(f"\n{len(failed_videos)} videos failed/skipped (showing first 10):")
+        for msg in failed_videos[:10]:
+            print(f"  {msg}")
+
+    print(f"\nVideo Processing Complete: Success={results['success']}, Failed={results['failed']}, Skipped (no crops)={len(videos_without_crops)}")
+    append_audit("export.exported_videos", results['success'])
+    append_audit("export.failed_videos", results['failed'])
+    append_audit("export.skipped_videos_no_crop", len(videos_without_crops))
 
 
 
@@ -382,11 +443,9 @@ def create_train_set(breast_data, image_data, lesion_df=None):
     if 'image_name' in data.columns:
         agg_dict['image_name'] = lambda x: list(x)
 
-    # Only include columns that were originally in breast_data (StudyCases table)
-    # This excludes image-specific columns like distance, closest_fn, crop_x, etc.
-    # Also exclude diagnosis columns that are not needed in final export
-    excluded_columns = ['accession_number', 'study_laterality', 'image_name',
-                       'has_benign', 'left_diagnosis', 'right_diagnosis']
+    # Include ALL columns from breast_data (StudyCases table)
+    # Only exclude the groupby keys and image_name which is handled specially
+    excluded_columns = ['accession_number', 'study_laterality', 'image_name']
     breast_columns = set(breast_data.columns)
     for col in data.columns:
         if col in breast_columns and col not in excluded_columns:
@@ -395,13 +454,9 @@ def create_train_set(breast_data, image_data, lesion_df=None):
     data = data.reset_index(drop=True)
     # Group by BOTH accession_number and study_laterality to keep split bilateral cases separate
     data = data.groupby(['accession_number', 'study_laterality'], as_index=False).agg(agg_dict)
-    
-    # Combine labels into description column
-    data['description'] = data.apply(combine_labels, axis=1)
-    
-    # Drop individual label columns after combining
-    data.drop(['margin', 'shape', 'orientation', 'echo', 'posterior', 'boundary'], 
-              axis=1, inplace=True)
+
+    # Combine labels into combined_labels column (keep individual columns too)
+    data['combined_labels'] = data.apply(combine_labels, axis=1)
     
     # Clean original images
     def clean_list(img_list):
@@ -623,77 +678,57 @@ def generate_caliper_data(image_df):
 def normalize_dataframes(image_df, video_df, breast_df):
     """
     Standardize data types and formats across all dataframes.
-    
+
     Returns:
         tuple: (image_df, video_df, breast_df)
     """
     # Normalize laterality to uppercase (do once for each df)
     image_df['laterality'] = image_df['laterality'].str.upper()
-    video_df['laterality'] = video_df['laterality'].str.upper()
-    
-    # Standardize patient_id as string
+    if not video_df.empty and 'laterality' in video_df.columns:
+        video_df['laterality'] = video_df['laterality'].str.upper()
+
+    # Standardize patient_id as string (MUST match across all dataframes for filtering)
     image_df['patient_id'] = image_df['patient_id'].astype(int).astype(str)
     breast_df['patient_id'] = breast_df['patient_id'].astype(int).astype(str)
-    
+    if not video_df.empty and 'patient_id' in video_df.columns:
+        video_df['patient_id'] = video_df['patient_id'].astype(int).astype(str)
+
     # Standardize accession_number as string
     image_df['accession_number'] = image_df['accession_number'].astype(str)
     breast_df['accession_number'] = breast_df['accession_number'].astype(str)
-    
+    if not video_df.empty and 'accession_number' in video_df.columns:
+        video_df['accession_number'] = video_df['accession_number'].astype(str)
+
     return image_df, video_df, breast_df
 
 def build_instance_data(image_df, breast_df):
     """
-    Build and enrich instance_data with all necessary fields from image_df, breast_df, and labelbox.
-    
+    Build and enrich instance_data with ALL fields from image_df and breast_df.
+
     Returns:
-        tuple: (instance_data, image_df) - image_df may be filtered if reject system is used
+        instance_data DataFrame with all image columns plus enriched breast data
     """
-    # Create base instance_data
-    instance_data = image_df[['dicom_hash', 'image_name']].copy()
+    # Start with ALL columns from image_df
+    instance_data = image_df.copy()
 
     # Add is_lesion column (0 for regular images)
     instance_data['is_lesion'] = 0
 
-    # Map breast data columns
+    # Rename closest_fn to pair_image for clarity
+    if 'closest_fn' in instance_data.columns:
+        instance_data['pair_image'] = instance_data['closest_fn']
+
+    # Add image dimensions as image_w and image_h (from crop dimensions)
+    if 'crop_w' in instance_data.columns:
+        instance_data['image_w'] = instance_data['crop_w'].fillna(0).astype(int)
+    if 'crop_h' in instance_data.columns:
+        instance_data['image_h'] = instance_data['crop_h'].fillna(0).astype(int)
+
+    # Map breast data columns (age_at_event -> Age for backward compatibility)
     column_mappings = {
         'age_at_event': 'Age'
     }
     instance_data = map_breast_data_to_instances(instance_data, image_df, breast_df, column_mappings)
-
-    # Add columns from Images table
-    image_columns_to_add = ['area', 'orientation', 'photometric_interpretation',
-                             'has_calipers', 'has_calipers_prediction', 'inpainted_from',
-                             'laterality', 'description', 'crop_aspect_ratio', 'darkness',
-                             'software_versions', 'manufacturer_model_name']
-    for col in image_columns_to_add:
-        if col in image_df.columns:
-            image_to_col_map = dict(zip(image_df['image_name'], image_df[col]))
-            instance_data[col] = instance_data['image_name'].map(image_to_col_map)
-
-    # Add closest_fn as pair_image
-    if 'closest_fn' in image_df.columns:
-        image_to_pair_map = dict(zip(image_df['image_name'], image_df['closest_fn']))
-        instance_data['pair_image'] = instance_data['image_name'].map(image_to_pair_map)
-
-    # Add physical_delta_x
-    if 'physical_delta_x' in image_df.columns:
-        image_to_physicaldelta_map = dict(zip(image_df['image_name'], image_df['physical_delta_x']))
-        instance_data['physical_delta_x'] = instance_data['image_name'].map(image_to_physicaldelta_map)
-    
-    # Add image dimensions
-    if 'crop_w' in image_df.columns:
-        image_to_width_map = dict(zip(image_df['image_name'], image_df['crop_w'].fillna(0).astype(int)))
-        instance_data['image_w'] = instance_data['image_name'].map(image_to_width_map)
-
-    if 'crop_h' in image_df.columns:
-        image_to_height_map = dict(zip(image_df['image_name'], image_df['crop_h'].fillna(0).astype(int)))
-        instance_data['image_h'] = instance_data['image_name'].map(image_to_height_map)
-
-    # Add crop coordinates for mask processing
-    for crop_col in ['crop_x', 'crop_y', 'crop_w', 'crop_h']:
-        if crop_col in image_df.columns:
-            image_to_crop_map = dict(zip(image_df['image_name'], image_df[crop_col]))
-            instance_data[crop_col] = instance_data['image_name'].map(image_to_crop_map)
 
     return instance_data
 
