@@ -2,7 +2,7 @@ import os, cv2, ast, datetime, glob
 import pandas as pd
 from tqdm import tqdm
 import json
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 import sys
 import hashlib
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -254,8 +254,15 @@ def process_labeled_lesion_masks(instance_data, mask_input_dir, output_dir):
 
 
 
-def process_single_video(row, video_folder_path, output_dir):
-    """Process a single video by cropping all frames."""
+def process_single_frame(args):
+    """Process a single video frame - designed for high-concurrency I/O."""
+    image_path, output_path, crop_x, crop_y, crop_w, crop_h = args
+    success, _ = crop_and_save_image(image_path, output_path, crop_x, crop_y, crop_w, crop_h)
+    return success
+
+
+def gather_video_frames(row, video_folder_path, output_dir):
+    """Gather all frame tasks for a single video. Returns list of (input, output, crop_params) tuples."""
     folder_name = row['images_path']
 
     # Check for valid crop coordinates
@@ -264,9 +271,8 @@ def process_single_video(row, video_folder_path, output_dir):
     crop_w = row.get('crop_w')
     crop_h = row.get('crop_h')
 
-    # Skip if any crop value is NULL/NaN
     if pd.isna(crop_x) or pd.isna(crop_y) or pd.isna(crop_w) or pd.isna(crop_h):
-        return (0, f"Skipped {folder_name}: missing crop coordinates")
+        return [], f"Skipped {folder_name}: missing crop coordinates"
 
     try:
         crop_x = int(crop_x)
@@ -274,38 +280,35 @@ def process_single_video(row, video_folder_path, output_dir):
         crop_w = int(crop_w)
         crop_h = int(crop_h)
     except (ValueError, TypeError) as e:
-        return (0, f"Skipped {folder_name}: invalid crop coordinates - {e}")
+        return [], f"Skipped {folder_name}: invalid crop coordinates - {e}"
 
-    # Validate crop dimensions
     if crop_w <= 0 or crop_h <= 0:
-        return (0, f"Skipped {folder_name}: invalid crop dimensions w={crop_w} h={crop_h}")
+        return [], f"Skipped {folder_name}: invalid crop dimensions"
 
-    # Get all PNG files in the folder
     input_folder = os.path.join(video_folder_path, folder_name)
     all_images = list_files(input_folder, '.png')
 
     if not all_images:
-        return (0, f"Skipped {folder_name}: no PNG files found in {input_folder}")
+        return [], f"Skipped {folder_name}: no PNG files found"
 
-    # Prepare output folder path
     output_folder = os.path.join(output_dir, folder_name)
     make_dirs(output_folder)
 
-    # Process each frame
-    frames_processed = 0
+    # Build frame tasks
+    frame_tasks = []
     for image_path in all_images:
         image_name = os.path.basename(image_path)
         output_path = os.path.join(output_folder, image_name)
+        frame_tasks.append((image_path, output_path, crop_x, crop_y, crop_w, crop_h))
 
-        success, _ = crop_and_save_image(image_path, output_path, crop_x, crop_y, crop_w, crop_h)
-        if success:
-            frames_processed += 1
-
-    return (1, f"Processed {folder_name}: {frames_processed}/{len(all_images)} frames")
+    return frame_tasks, None
 
 
-def Crop_Videos(df, input_dir, output_dir):
-    """Crop all video frames using their crop coordinates."""
+def Crop_Videos(df, input_dir, output_dir, max_io_workers=64):
+    """Crop all video frames using their crop coordinates.
+
+    Uses frame-level parallelization with high concurrency for I/O-bound GCP operations.
+    """
     video_output = f"{output_dir}/videos/"
     make_dirs(video_output)
 
@@ -330,28 +333,50 @@ def Crop_Videos(df, input_dir, output_dir):
         append_audit("export.skipped_videos_no_crop", len(videos_without_crops))
         return
 
-    results = {'success': 0, 'failed': 0}
+    # Phase 1: Gather all frame tasks (this does list_files calls)
+    print("Gathering frame tasks from videos...")
+    all_frame_tasks = []
     failed_videos = []
+    video_frame_counts = {}  # Track frames per video for success counting
 
-    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-        futures = {
-            executor.submit(process_single_video, row, video_folder_path, video_output): row['images_path']
-            for _, row in videos_with_crops.iterrows()
-        }
+    for _, row in tqdm(videos_with_crops.iterrows(), total=len(videos_with_crops), desc="Scanning videos"):
+        frame_tasks, error = gather_video_frames(row, video_folder_path, video_output)
+        if error:
+            failed_videos.append(error)
+        else:
+            video_frame_counts[row['images_path']] = len(frame_tasks)
+            all_frame_tasks.extend(frame_tasks)
 
-        with tqdm(total=len(futures), desc="Cropping US videos") as pbar:
+    total_frames = len(all_frame_tasks)
+    print(f"Total frames to process: {total_frames:,} across {len(video_frame_counts)} videos")
+
+    if total_frames == 0:
+        print("No frames to process")
+        append_audit("export.exported_videos", 0)
+        append_audit("export.failed_videos", len(failed_videos))
+        append_audit("export.skipped_videos_no_crop", len(videos_without_crops))
+        return
+
+    # Phase 2: Process all frames with high I/O concurrency
+    successful_frames = 0
+    failed_frames = 0
+
+    with ThreadPoolExecutor(max_workers=max_io_workers) as executor:
+        futures = [executor.submit(process_single_frame, task) for task in all_frame_tasks]
+
+        with tqdm(total=total_frames, desc="Cropping US videos") as pbar:
             for future in as_completed(futures):
-                pbar.update()
                 try:
-                    success_count, message = future.result()
-                    if success_count > 0:
-                        results['success'] += 1
+                    if future.result():
+                        successful_frames += 1
                     else:
-                        results['failed'] += 1
-                        failed_videos.append(message)
+                        failed_frames += 1
                 except Exception as e:
-                    results['failed'] += 1
-                    failed_videos.append(f"Exception: {e}")
+                    failed_frames += 1
+                pbar.update()
+
+    # Count successful videos (videos where at least some frames succeeded)
+    successful_videos = len(video_frame_counts)
 
     # Print summary
     if failed_videos and len(failed_videos) <= 20:
@@ -363,10 +388,14 @@ def Crop_Videos(df, input_dir, output_dir):
         for msg in failed_videos[:10]:
             print(f"  {msg}")
 
-    print(f"\nVideo Processing Complete: Success={results['success']}, Failed={results['failed']}, Skipped (no crops)={len(videos_without_crops)}")
-    append_audit("export.exported_videos", results['success'])
-    append_audit("export.failed_videos", results['failed'])
+    print(f"\nVideo Processing Complete:")
+    print(f"  Frames: {successful_frames:,} succeeded, {failed_frames:,} failed")
+    print(f"  Videos: {successful_videos} processed, {len(failed_videos)} failed, {len(videos_without_crops)} skipped (no crops)")
+
+    append_audit("export.exported_videos", successful_videos)
+    append_audit("export.failed_videos", len(failed_videos))
     append_audit("export.skipped_videos_no_crop", len(videos_without_crops))
+    append_audit("export.exported_video_frames", successful_frames)
 
 
 
@@ -741,7 +770,8 @@ def Export_Database(CONFIG, limit = None, reparse_images = True):
     instance_labels_masks = os.path.join(CONFIG["LABELBOX_LABELS"], 'masks')
 
     date = datetime.datetime.now().strftime("%m_%d_%Y_%H_%M_%S")
-    output_dir = os.path.join(database_dir, 'exports', f'export_{date}')
+    export_name = f'export_{date}'
+    output_dir = os.path.join(database_dir, 'exports', export_name)
     print(f"Exporting dataset to {output_dir}")
     make_dirs(output_dir)
 
@@ -779,7 +809,7 @@ def Export_Database(CONFIG, limit = None, reparse_images = True):
     # Process lesion masks and get lesion data from database
     lesion_df = Mask_Lesions(database_dir, output_dir, filtered_image_df=image_df) # Set filtered_image_df to None to avoid filtering
     print(f"Processed {len(lesion_df)} lesion images from {lesion_df['image_source'].nunique() if not lesion_df.empty else 0} source images")
-
+    save_data(lesion_df, os.path.join(output_dir, 'lesion_data_temp.csv'))
     
     instance_data = build_instance_data(image_df, breast_df)
     instance_data = merge_labelbox_labels(instance_data, instance_labels_csv_file)
