@@ -784,6 +784,7 @@ def Export_Database(CONFIG, limit = None, reparse_images = True):
         image_df = db.get_images_dataframe()
         breast_df = db.get_study_cases_dataframe()
         pathology_df = db.get_pathology_dataframe()
+        lesions_db_df = db.get_lesions_dataframe()
         print('Loaded database')
 
     # Apply test subset early if specified
@@ -813,6 +814,11 @@ def Export_Database(CONFIG, limit = None, reparse_images = True):
     
     instance_data = build_instance_data(image_df, breast_df)
     instance_data = merge_labelbox_labels(instance_data, instance_labels_csv_file)
+
+    # Map lesion_type from Lesions table to instance_data using image_name
+    if not lesions_db_df.empty and 'lesion_type' in lesions_db_df.columns:
+        lesion_type_map = lesions_db_df.set_index('image_name')['lesion_type'].to_dict()
+        instance_data['lesion_type'] = instance_data['image_name'].map(lesion_type_map)
 
     if reparse_images:
         # Crop the images for the relevant studies

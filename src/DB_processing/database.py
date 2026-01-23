@@ -545,6 +545,13 @@ class DatabaseManager:
             query += f" WHERE {where_clause}"
         return pd.read_sql_query(query, self.conn, params=params)
 
+    def get_lesions_dataframe(self, where_clause: str = "", params: tuple = ()) -> pd.DataFrame:
+        """Get lesions data as a pandas DataFrame with optional filtering."""
+        query = "SELECT * FROM Lesions"
+        if where_clause:
+            query += f" WHERE {where_clause}"
+        return pd.read_sql_query(query, self.conn, params=params)
+
     def check_existing_patient_ids(self) -> set:
         """Get set of all existing patient IDs in the database."""
         cursor = self.conn.cursor()
