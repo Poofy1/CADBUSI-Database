@@ -10,6 +10,8 @@ import pandas as pd
 import numpy as np
 from typing import List, Dict, Optional, Tuple
 from tqdm import tqdm
+from concurrent.futures import ProcessPoolExecutor
+import multiprocessing
 from src.DB_processing.database import DatabaseManager
 
 
@@ -421,5 +423,169 @@ def Match_Lesions():
         print("="*60)
 
 
+
+
+
+
+
+def classify_lesion_type(description: str) -> str:
+    """
+    Classify a lesion description into one of 4 categories.
+
+    Categories:
+    - "Simple cyst": simple cyst patterns
+    - "Node": lymph node patterns
+    - "Lesion": mass, lesion, complex cyst patterns
+    - "Other": everything else
+
+    Args:
+        description: Lesion description text
+
+    Returns:
+        One of: "Simple cyst", "Node", "Lesion", "Other"
+    """
+    if not description or pd.isna(description) or str(description).strip() == '':
+        return None
+
+    desc_lower = description.lower()
+
+    # Check for lymph node patterns (highest priority)
+    if re.search(r'\blymph\s*node\b', desc_lower) or \
+       re.search(r'\bintramammary\s+(lymph\s+)?node\b', desc_lower) or \
+       re.search(r'\baxillary\s+(lymph\s+)?node\b', desc_lower):
+        return "Node"
+
+    # Check for lesion patterns (mass, complex cyst, vascularity, malignancy, biopsy-proven)
+    if re.search(r'\bmass\b', desc_lower) or \
+       re.search(r'\blesion\b', desc_lower) or \
+       re.search(r'\bcomplex\b', desc_lower) or \
+       re.search(r'\bcomplicated\b', desc_lower) or \
+       re.search(r'\bbilobed\b', desc_lower) or \
+       re.search(r'\bcalcified\b', desc_lower) or \
+       re.search(r'\bsolid\b', desc_lower) or \
+       re.search(r'\bnodule\b', desc_lower) or \
+       re.search(r'\btumou?r\b', desc_lower) or \
+       re.search(r'\bcancer\b', desc_lower) or \
+       re.search(r'\bcarcinoma\b', desc_lower) or \
+       re.search(r'\bmalignancy\b', desc_lower) or \
+       re.search(r'\bseptate[ds]?\b', desc_lower) or \
+       re.search(r'\bseptation\b', desc_lower) or \
+       re.search(r'\bblood\s*flow\b', desc_lower) or \
+       re.search(r'\bvascularity\b', desc_lower) or \
+       re.search(r'\bvascular\b', desc_lower) or \
+       re.search(r'\bshadowing\b', desc_lower) or \
+       re.search(r'\bsebaceous\b', desc_lower) or \
+       re.search(r'\badenoma\b', desc_lower) or \
+       re.search(r'\bfibroadenoma\b', desc_lower) or \
+       re.search(r'\bpapilloma\b', desc_lower) or \
+       re.search(r'\bbiopsy[- ]?proven\b', desc_lower) or \
+       re.search(r'\bclip\b', desc_lower) or \
+       re.search(r'\bintraductal\b', desc_lower) or \
+       re.search(r'\bless\s+defined\b', desc_lower) or \
+       re.search(r'\bill[- ]?defined\b', desc_lower) or \
+       re.search(r'\birregular\s+margin\b', desc_lower) or \
+       re.search(r'\bpartially\s+circumscribed\b', desc_lower):
+        return "Lesion"
+
+    # Check for simple cyst patterns (lowest priority)
+    if re.search(r'cysts?\b', desc_lower) or \
+       re.search(r'\bcystic\b', desc_lower):
+        return "Simple cyst"
+
+    return "Other"
+
+
+def _classify_batch(descriptions: List[str]) -> List[str]:
+    """Classify a batch of descriptions (for multiprocessing)."""
+    return [classify_lesion_type(desc) for desc in descriptions]
+
+
+def Populate_Lesion_Types(num_workers: int = None, batch_size: int = 10000):
+    """
+    Populate lesion_type column for all lesions with non-empty descriptions.
+
+    Uses multiprocessing for classification and batched database updates.
+
+    Args:
+        num_workers: Number of parallel workers (default: CPU count)
+        batch_size: Size of batches for processing and DB updates
+    """
+    print("=" * 60)
+    print("LESION TYPE CLASSIFICATION")
+    print("=" * 60)
+
+    if num_workers is None:
+        num_workers = multiprocessing.cpu_count()
+    print(f"Using {num_workers} workers")
+
+    with DatabaseManager() as db:
+        # Ensure lesion_type column exists
+        db.add_column_if_not_exists('Lesions', 'lesion_type', 'TEXT')
+
+        # Load lesions with non-empty descriptions
+        print("Loading lesions with descriptions...")
+        query = """
+            SELECT lesion_id, description
+            FROM Lesions
+            WHERE description IS NOT NULL
+              AND description != ''
+              AND TRIM(description) != ''
+        """
+        lesions_df = pd.read_sql_query(query, db.conn)
+        total_count = len(lesions_df)
+        print(f"Found {total_count} lesions with descriptions")
+
+        if total_count == 0:
+            print("No lesions to classify.")
+            return
+
+        # Split descriptions into batches for multiprocessing
+        descriptions = lesions_df['description'].tolist()
+        lesion_ids = lesions_df['lesion_id'].tolist()
+
+        # Create batches
+        desc_batches = [
+            descriptions[i:i + batch_size]
+            for i in range(0, len(descriptions), batch_size)
+        ]
+
+        # Classify using multiprocessing (executor.map preserves order)
+        print(f"\nClassifying lesion types ({len(desc_batches)} batches)...")
+        all_types = []
+
+        with ProcessPoolExecutor(max_workers=num_workers) as executor:
+            results = list(tqdm(
+                executor.map(_classify_batch, desc_batches),
+                total=len(desc_batches),
+                desc="Classifying"
+            ))
+            for batch_types in results:
+                all_types.extend(batch_types)
+
+        # Print distribution
+        type_counts = pd.Series(all_types).value_counts()
+        print("\nLesion type distribution:")
+        for lesion_type, count in type_counts.items():
+            pct = (count / total_count) * 100
+            print(f"  {lesion_type}: {count} ({pct:.1f}%)")
+
+        # Update database in batches
+        print("\nUpdating database...")
+        cursor = db.conn.cursor()
+
+        updates = list(zip(all_types, lesion_ids))
+        for i in range(0, len(updates), batch_size):
+            batch = updates[i:i + batch_size]
+            cursor.executemany(
+                "UPDATE Lesions SET lesion_type = ? WHERE lesion_id = ?",
+                batch
+            )
+        db.conn.commit()
+
+        print(f"\nSuccessfully updated {len(updates)} lesion records")
+        print("=" * 60)
+
+
 if __name__ == "__main__":
     Match_Lesions()
+    Populate_Lesion_Types()
