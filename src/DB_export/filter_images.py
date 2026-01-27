@@ -237,7 +237,16 @@ def apply_filters(image_df, video_df, breast_df, CONFIG, output_dir=None):
     image_df = image_df[image_df['patient_id'].isin(valid_patient_ids)]
     video_df = video_df[video_df['patient_id'].isin(valid_patient_ids)]
 
-    # Filter 5: Remove bad aspect ratios
+    # Filter 5: Remove images with missing crop region
+    missing_crop_mask = image_df['crop_x'].isna()
+    missing_crop_images = image_df[missing_crop_mask][['image_name', 'patient_id', 'accession_number']].copy()
+    missing_crop_images['exclusion_reason'] = 'missing_crop_region'
+    excluded_images.append(missing_crop_images)
+
+    image_df = image_df[~missing_crop_mask]
+    audit_stats['missing_crop_removed'] = len(missing_crop_images)
+
+    # Filter 6: Remove bad aspect ratios
     min_aspect_ratio = CONFIG.get('MIN_ASPECT_RATIO', 0.5)
     max_aspect_ratio = CONFIG.get('MAX_ASPECT_RATIO', 4.0)
 
@@ -252,7 +261,7 @@ def apply_filters(image_df, video_df, breast_df, CONFIG, output_dir=None):
     image_df = image_df[~bad_aspect_mask]
     audit_stats['bad_aspect_removed'] = len(aspect_images)
 
-    # Filter 6: Remove images that are too small
+    # Filter 7: Remove images that are too small
     min_dimension = CONFIG.get('MIN_DIMENSION', 200)
 
     too_small_mask = (
