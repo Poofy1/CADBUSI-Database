@@ -18,8 +18,8 @@ def download_models():
             "filename": "SAMUS.pth"
         },
         "YOLO": {
-            "url": "https://huggingface.co/poofy38/CADBUSI/resolve/main/YOLO.pt",
-            "filename": "yolo_lesion_detect.pt"
+            "url": "https://huggingface.co/poofy38/CADBUSI/resolve/main/yolov11_lesion_detector_FP_control_2026_1_26.pt",
+            "filename": "yolov11_lesion_detector_FP_control_2026_1_26.pt"
         },
         "Caliper": {
             "url": "https://huggingface.co/poofy38/CADBUSI/resolve/main/caliper_detect_10_7_25.pt",

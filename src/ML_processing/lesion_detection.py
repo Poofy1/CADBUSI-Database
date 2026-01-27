@@ -17,8 +17,8 @@ env = os.path.dirname(os.path.abspath(__file__))
 
 def get_target_data(db_manager, limit=None):
     """Get target images from database."""
-    # Query images, filtering out RGB images
-    where_clause = "photometric_interpretation != 'RGB' AND label = 1"
+    # Query images, filtering out RGB images and those without crop data
+    where_clause = "photometric_interpretation != 'RGB' AND label = 1 AND crop_x IS NOT NULL"
     df = db_manager.get_images_dataframe(where_clause=where_clause)
     
     # Apply limit if specified
@@ -181,10 +181,13 @@ def load_image(image_name, image_data_row, image_dir):
     crop_x2 = max(crop_x, min(crop_x2, img_width))
     crop_y2 = max(crop_y, min(crop_y2, img_height))
     
-    # Crop and return the target image
-    target_image = target_image.crop((crop_x, crop_y, crop_x2, crop_y2))
+    # Crop the target image
+    cropped_image = target_image.crop((crop_x, crop_y, crop_x2, crop_y2))
+    
+    # Create YOLO image - squished/stretched to 640x640
+    yolo_image = target_image.resize((640, 640), Image.BILINEAR)
         
-    return target_image, (crop_x, crop_y, crop_x2, crop_y2), (img_width, img_height)
+    return cropped_image, yolo_image, (crop_x, crop_y, crop_x2, crop_y2), (img_width, img_height)
 
 
 def save_debug_image(image_name, image_dir, target_image, cropped_caliper_boxes, mask_resized=None):
@@ -200,11 +203,13 @@ def save_debug_image(image_name, image_dir, target_image, cropped_caliper_boxes,
     """
     try:
         # Convert PIL Image to numpy array and ensure RGB format
-        if isinstance(debug_img, Image.Image):
-            if debug_img.mode != 'RGB':
-                debug_img = debug_img.convert('RGB')
-            debug_img = np.array(debug_img)
+        if isinstance(target_image, Image.Image):  # Changed from debug_img
+            if target_image.mode != 'RGB':  # Changed from debug_img
+                target_image = target_image.convert('RGB')  # Changed from debug_img
+            debug_img = np.array(target_image)  # Changed from debug_img
             debug_img = cv2.cvtColor(debug_img, cv2.COLOR_RGB2BGR)
+        else:
+            debug_img = target_image
 
         # Draw bounding boxes if they exist
         if cropped_caliper_boxes:
@@ -231,14 +236,18 @@ def save_debug_image(image_name, image_dir, target_image, cropped_caliper_boxes,
         os.makedirs(save_dir, exist_ok=True)
         
         # Use the clean image name as the base for filename
-        base_name = image_name.replace('.png', '').replace('.jpg', '').replace('.jpeg', '')
+        base_name = image_name.replace('.png', '').replace('.jpg', '').replace('.jpeg', '').replace('/', '_').replace('\\', '_')
         debug_filename = f"{base_name}.png"
         debug_save_path = os.path.join(save_dir, debug_filename)
-        
-        # Save using your save_data function
-        save_data(debug_img, debug_save_path)
-        
-        print(f"Debug image saved: {debug_save_path}")
+
+        # Save directly with cv2 (bypass storage adapter)
+        debug_img_bgr = cv2.cvtColor(debug_img, cv2.COLOR_RGB2BGR)
+        success = cv2.imwrite(debug_save_path, debug_img_bgr)
+
+        if success:
+            print(f"Debug image saved: {debug_save_path}")
+        else:
+            print(f"FAILED to save debug image: {debug_save_path}")
         
     except Exception as debug_e:
         print(f"Error saving debug image for {image_name}: {str(debug_e)}")
@@ -266,22 +275,48 @@ def process_single_image(image_name, image_dir, image_data_row, model, yolo_mode
     cropped_caliper_boxes = []
 
     try:
-        target_image, crops, dim = load_image(image_name, image_data_row, image_dir)
+        target_image, yolo_image, crops, dim = load_image(image_name, image_data_row, image_dir)
         crop_x, crop_y, crop_x2, crop_y2 = crops
         img_width, img_height = dim
 
-        # Detect boxes using YOLO on the CROPPED image
-        cropped_caliper_boxes, confidences = detect_calipers_yolo(target_image, yolo_model, confidence_threshold=0.3)
+        # Detect boxes using YOLO on the FULL image resized to 640x640
+        yolo_boxes_640, confidences = detect_calipers_yolo(yolo_image, yolo_model, confidence_threshold=0.3)
 
-        if len(cropped_caliper_boxes) == 0:
+        if len(yolo_boxes_640) == 0:
             return result
 
-        # Convert to full image coordinates ONLY for storage in result
+        # Scale boxes from 640x640 to original image dimensions, then to crop-relative coordinates
+        scale_x = img_width / 640
+        scale_y = img_height / 640
+
+        cropped_caliper_boxes = []
         full_image_caliper_boxes = []
-        for bbox in cropped_caliper_boxes:
+
+        for bbox in yolo_boxes_640:
             x1, y1, x2, y2 = bbox
-            full_bbox = [x1 + crop_x, y1 + crop_y, x2 + crop_x, y2 + crop_y]
-            full_image_caliper_boxes.append(full_bbox)
+            
+            # Scale to original image coordinates
+            x1_full = int(x1 * scale_x)
+            y1_full = int(y1 * scale_y)
+            x2_full = int(x2 * scale_x)
+            y2_full = int(y2 * scale_y)
+            
+            # Store full image coordinates for result
+            full_image_caliper_boxes.append([x1_full, y1_full, x2_full, y2_full])
+
+            # Convert to crop-relative coordinates for SAMUS
+            x1_crop = x1_full - crop_x
+            y1_crop = y1_full - crop_y
+            x2_crop = x2_full - crop_x
+            y2_crop = y2_full - crop_y
+            
+            # Clamp to crop boundaries
+            x1_crop = max(0, min(x1_crop, crop_x2 - crop_x))
+            y1_crop = max(0, min(y1_crop, crop_y2 - crop_y))
+            x2_crop = max(0, min(x2_crop, crop_x2 - crop_x))
+            y2_crop = max(0, min(y2_crop, crop_y2 - crop_y))
+            
+            cropped_caliper_boxes.append([x1_crop, y1_crop, x2_crop, y2_crop])
 
         # Store caliper boxes in result format (using full image coordinates)
         result['caliper_boxes'] = "; ".join(f"[{b[0]}, {b[1]}, {b[2]}, {b[3]}]" for b in full_image_caliper_boxes)
@@ -421,7 +456,7 @@ def Locate_Lesions(image_dir, save_debug_images=False):
     
     # Load YOLO model
     try:
-        model_path = os.path.join(env, 'models', 'yolo_lesion_detect.pt')
+        model_path = os.path.join(env, 'models', 'yolov11_lesion_detector_FP_control_2026_1_26.pt')
         yolo_model = YOLO(model_path)
         print("YOLO model loaded successfully")
     except Exception as e:
