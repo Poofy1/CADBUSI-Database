@@ -145,22 +145,60 @@ def detect_calipers_yolo(image, yolo_model, confidence_threshold):
 
     return caliper_boxes, confidences
 
+def letterbox_image(image, target_size=640, fill_color=(114, 114, 114)):
+    """
+    Resize image so largest side equals target_size, then pad with gray to make square.
+
+    Args:
+        image: PIL Image
+        target_size: Target size for the square output (default 640)
+        fill_color: RGB tuple for letterbox padding (default gray 114,114,114)
+
+    Returns:
+        letterboxed_image: PIL Image of size (target_size, target_size)
+        scale: Scale factor used for resizing
+        offset_x: X offset where the image starts in the letterboxed image
+        offset_y: Y offset where the image starts in the letterboxed image
+    """
+    img_width, img_height = image.size
+
+    # Calculate scale to fit largest side to target_size
+    scale = target_size / max(img_width, img_height)
+    new_width = int(img_width * scale)
+    new_height = int(img_height * scale)
+
+    # Resize the image
+    resized = image.resize((new_width, new_height), Image.BILINEAR)
+
+    # Create letterboxed image with gray background
+    letterboxed = Image.new('RGB', (target_size, target_size), fill_color)
+
+    # Calculate offset to center the image
+    offset_x = (target_size - new_width) // 2
+    offset_y = (target_size - new_height) // 2
+
+    # Paste resized image onto letterboxed canvas
+    letterboxed.paste(resized, (offset_x, offset_y))
+
+    return letterboxed, scale, offset_x, offset_y
+
+
 def load_image(image_name, image_data_row, image_dir):
     """Load and crop image based on database row information."""
     # Load the target image
     target_path = os.path.normpath(image_name)
     target_image_path = os.path.join(image_dir, target_path)
     target_image = read_image(target_image_path, use_pil=True)
-        
+
     if target_image.mode != 'RGB':
         target_image = target_image.convert('RGB')
-        
+
     # Extract crop parameters from the data row
     crop_x = image_data_row.get('crop_x', None)
     crop_y = image_data_row.get('crop_y', None)
     crop_w = image_data_row.get('crop_w', None)
     crop_h = image_data_row.get('crop_h', None)
-    
+
     # Handle missing or null crop parameters
     if pd.isna(crop_x) or pd.isna(crop_y) or pd.isna(crop_w) or pd.isna(crop_h):
         # Use full image if crop parameters are missing
@@ -169,25 +207,25 @@ def load_image(image_name, image_data_row, image_dir):
     else:
         # Convert to integers
         crop_x, crop_y, crop_w, crop_h = int(crop_x), int(crop_y), int(crop_w), int(crop_h)
-    
+
     # Calculate crop coordinates
     crop_x2 = crop_x + crop_w
     crop_y2 = crop_y + crop_h
-    
+
     # Ensure crop coordinates are within image bounds
     img_width, img_height = target_image.size
     crop_x = max(0, min(crop_x, img_width))
     crop_y = max(0, min(crop_y, img_height))
     crop_x2 = max(crop_x, min(crop_x2, img_width))
     crop_y2 = max(crop_y, min(crop_y2, img_height))
-    
+
     # Crop the target image
     cropped_image = target_image.crop((crop_x, crop_y, crop_x2, crop_y2))
-    
-    # Create YOLO image - squished/stretched to 640x640
-    yolo_image = target_image.resize((640, 640), Image.BILINEAR)
-        
-    return cropped_image, yolo_image, (crop_x, crop_y, crop_x2, crop_y2), (img_width, img_height)
+
+    # Create YOLO image with letterboxing on the CROPPED image (maintains aspect ratio)
+    yolo_image, lb_scale, lb_offset_x, lb_offset_y = letterbox_image(cropped_image, target_size=640)
+
+    return cropped_image, yolo_image, (crop_x, crop_y, crop_x2, crop_y2), (img_width, img_height), (lb_scale, lb_offset_x, lb_offset_y)
 
 
 def save_debug_image(image_name, image_dir, target_image, cropped_caliper_boxes, mask_resized=None):
@@ -275,48 +313,50 @@ def process_single_image(image_name, image_dir, image_data_row, model, yolo_mode
     cropped_caliper_boxes = []
 
     try:
-        target_image, yolo_image, crops, dim = load_image(image_name, image_data_row, image_dir)
+        target_image, yolo_image, crops, dim, letterbox_params = load_image(image_name, image_data_row, image_dir)
         crop_x, crop_y, crop_x2, crop_y2 = crops
         img_width, img_height = dim
+        lb_scale, lb_offset_x, lb_offset_y = letterbox_params
 
-        # Detect boxes using YOLO on the FULL image resized to 640x640
-        yolo_boxes_640, confidences = detect_calipers_yolo(yolo_image, yolo_model, confidence_threshold=0.3)
+        # Detect boxes using YOLO on the letterboxed image
+        yolo_boxes_640, confidences = detect_calipers_yolo(yolo_image, yolo_model, confidence_threshold=0.158)
 
         if len(yolo_boxes_640) == 0:
             return result
 
-        # Scale boxes from 640x640 to original image dimensions, then to crop-relative coordinates
-        scale_x = img_width / 640
-        scale_y = img_height / 640
-
         cropped_caliper_boxes = []
         full_image_caliper_boxes = []
 
+        # Get cropped image dimensions
+        crop_w = crop_x2 - crop_x
+        crop_h = crop_y2 - crop_y
+
         for bbox in yolo_boxes_640:
             x1, y1, x2, y2 = bbox
-            
-            # Scale to original image coordinates
-            x1_full = int(x1 * scale_x)
-            y1_full = int(y1 * scale_y)
-            x2_full = int(x2 * scale_x)
-            y2_full = int(y2 * scale_y)
-            
-            # Store full image coordinates for result
-            full_image_caliper_boxes.append([x1_full, y1_full, x2_full, y2_full])
 
-            # Convert to crop-relative coordinates for SAMUS
-            x1_crop = x1_full - crop_x
-            y1_crop = y1_full - crop_y
-            x2_crop = x2_full - crop_x
-            y2_crop = y2_full - crop_y
-            
-            # Clamp to crop boundaries
-            x1_crop = max(0, min(x1_crop, crop_x2 - crop_x))
-            y1_crop = max(0, min(y1_crop, crop_y2 - crop_y))
-            x2_crop = max(0, min(x2_crop, crop_x2 - crop_x))
-            y2_crop = max(0, min(y2_crop, crop_y2 - crop_y))
-            
+            # Convert from letterboxed coordinates to CROPPED image coordinates
+            # 1. Subtract letterbox offset to get coordinates in the resized cropped image
+            # 2. Divide by scale to get cropped image coordinates
+            x1_crop = int((x1 - lb_offset_x) / lb_scale)
+            y1_crop = int((y1 - lb_offset_y) / lb_scale)
+            x2_crop = int((x2 - lb_offset_x) / lb_scale)
+            y2_crop = int((y2 - lb_offset_y) / lb_scale)
+
+            # Clamp to cropped image bounds
+            x1_crop = max(0, min(x1_crop, crop_w))
+            y1_crop = max(0, min(y1_crop, crop_h))
+            x2_crop = max(0, min(x2_crop, crop_w))
+            y2_crop = max(0, min(y2_crop, crop_h))
+
             cropped_caliper_boxes.append([x1_crop, y1_crop, x2_crop, y2_crop])
+
+            # Convert to full image coordinates by adding crop offset
+            x1_full = x1_crop + crop_x
+            y1_full = y1_crop + crop_y
+            x2_full = x2_crop + crop_x
+            y2_full = y2_crop + crop_y
+
+            full_image_caliper_boxes.append([x1_full, y1_full, x2_full, y2_full])
 
         # Store caliper boxes in result format (using full image coordinates)
         result['caliper_boxes'] = "; ".join(f"[{b[0]}, {b[1]}, {b[2]}, {b[3]}]" for b in full_image_caliper_boxes)
