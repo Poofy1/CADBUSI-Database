@@ -139,51 +139,89 @@ def extract_descript_features( input_str, labels_dict ):
 
 
 
-def find_top_edge_points(largest_contour, vertical_range):
-    # Find the highest y-coordinate in the contour
-    top_y = min(largest_contour[:, 0, 1])
-
-    # Filter points that are within the vertical range from the top y-coordinate
-    top_edge_points = [pt[0] for pt in largest_contour if top_y <= pt[0][1] <= top_y + vertical_range]
-
-    # Find the leftmost and rightmost points from the filtered top edge points
-    top_left = min(top_edge_points, key=lambda x: x[0])
-    top_right = max(top_edge_points, key=lambda x: x[0])
-
-    return top_left, top_right
-
 def process_crop_region(image):
-    start_row = int(3 * image.shape[0] / 4)
-    end_row = image.shape[0]
-    margin = 10
-    
-    reader_thread = get_reader()
-    output = reader_thread.readtext(image[start_row:end_row, :])
-    
-    for detection in output:
-        top_left = tuple(map(int, detection[0][0]))
-        bottom_right = tuple(map(int, detection[0][2]))
-        top_left = (0, max(0, top_left[1] + start_row - margin))
-        bottom_right = (image.shape[1], min(image.shape[0], bottom_right[1] + start_row + margin))
-        cv2.rectangle(image, top_left, bottom_right, (0, 0, 0), -1)
-    
+    # Binary threshold
     _, binary_mask = cv2.threshold(image, 0, 255, cv2.THRESH_BINARY)
-    kernel = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=np.uint8)
-    eroded_mask = cv2.erode(binary_mask, kernel, iterations=5)
 
+    # Erosion
+    kernel = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=np.uint8)
+    eroded_mask = cv2.erode(binary_mask, kernel, iterations=8)
+
+    # Find contours
     contours, _ = cv2.findContours(eroded_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
         return None, None, None, None
-    
-    largest_contour = max(contours, key=cv2.contourArea)
-    convex_hull = cv2.convexHull(largest_contour)
-    top_left, top_right = find_top_edge_points(convex_hull, vertical_range=20)
 
-    x = top_left[0]
-    y = top_left[1]
-    w = top_right[0] - x
-    h = max(convex_hull[:, 0, 1]) - y
-    
+    # Sort contours by area (largest first)
+    sorted_contours = sorted(contours, key=cv2.contourArea, reverse=True)
+    largest_contour = sorted_contours[0]
+
+    # Check if second largest contour should be merged
+    if len(sorted_contours) > 1:
+        second_largest = sorted_contours[1]
+        largest_area = cv2.contourArea(largest_contour)
+        second_area = cv2.contourArea(second_largest)
+
+        # Merge if second contour is at least 2.5% of largest
+        if second_area >= 0.025 * largest_area:
+            # Merge contours by concatenating points
+            largest_contour = np.concatenate([largest_contour, second_largest])
+
+    # Convex hull
+    convex_hull = cv2.convexHull(largest_contour)
+
+    # Get bounding box from convex hull
+    x_coords = convex_hull[:, 0, 0]
+    y_coords = convex_hull[:, 0, 1]
+    x_min = int(np.min(x_coords))
+    x_max = int(np.max(x_coords))
+    y_min = int(np.min(y_coords))
+    y_max = int(np.max(y_coords))
+
+    # OCR REGION SETUP: Use convex hull x-range to restrict OCR
+    start_row = int(3 * image.shape[0] / 4)
+    end_row = image.shape[0]
+    ocr_padding = 50  # Inset padding from convex hull edges
+
+    # Calculate restricted x-range for OCR (inset from convex hull edges)
+    start_col = max(0, x_min + ocr_padding)
+    end_col = min(image.shape[1], x_max - ocr_padding)
+
+    # Ensure valid region (if hull is too narrow, use full hull width)
+    if start_col >= end_col:
+        start_col = x_min
+        end_col = x_max
+
+    # Ensure minimum width for OCR region
+    min_ocr_width = 10
+    if end_col - start_col < min_ocr_width:
+        # Expand region around midpoint
+        mid_x = (x_min + x_max) // 2
+        start_col = max(0, mid_x - min_ocr_width // 2)
+        end_col = min(image.shape[1], mid_x + min_ocr_width // 2)
+
+    # OCR in restricted region
+    reader_thread = get_reader()
+    output = reader_thread.readtext(image[start_row:end_row, start_col:end_col])
+
+    # Find the minimum y-value of detected text (if any)
+    text_y_limit = None
+    if output:
+        # Get the minimum y-coordinate of all detected text boxes
+        min_text_y = min(detection[0][0][1] for detection in output)
+        text_y_limit = int(min_text_y + start_row)
+
+    # Calculate bounding box from convex hull
+    x = x_min
+    y = y_min
+    w = x_max - x_min
+
+    # Height: stop at text or end of convex hull, whichever comes first
+    if text_y_limit is not None:
+        h = min(text_y_limit, y_max) - y
+    else:
+        h = y_max - y
+
     return (x, y, w, h)
 
 # DARKNESS

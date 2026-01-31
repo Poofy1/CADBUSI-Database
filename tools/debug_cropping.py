@@ -6,35 +6,73 @@ import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
+image_folder_path = f'{current_dir}/inputs/'
 parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
 
-from src.DB_processing.image_processing import *
+from src.DB_processing.image_processing import get_reader
 
 parent_dir = os.path.dirname(parent_dir)
-current_dir = f'{parent_dir}/tools/'
-print(current_dir)
 
-image_output = f"{current_dir}/debug_output/"
-os.makedirs(image_output, exist_ok=True)
+crop_outputs = f"{current_dir}/crop_outputs/"
+crop_images_hard = f"{current_dir}/crop_images_hard/"
+os.makedirs(crop_outputs, exist_ok=True)
+os.makedirs(crop_images_hard, exist_ok=True)
 
 
-def save_step_image(image, image_name, step_num, step_desc):
-    """Save an image for a specific processing step with numbered, descriptive filename"""
-    # Make sure image is in color format for visualization
-    if len(image.shape) == 2 or image.shape[2] == 1:  # If grayscale
-        vis_image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+def create_debug_image(original_image, image_name, ocr_detections, start_row, start_col, end_col,
+                       contours, convex_hull, top_left, top_right, x, y, w, h, output_folder):
+    """Create a single comprehensive debug image showing all key information"""
+
+    # Convert to BGR if grayscale
+    if len(original_image.shape) == 2:
+        debug_image = cv2.cvtColor(original_image, cv2.COLOR_GRAY2BGR)
     else:
-        vis_image = image.copy()
-    
-    # Parse image name to create a descriptive filename
+        debug_image = original_image.copy()
+
+    # 1. Draw OCR detection region (the restricted area that was scanned for text)
+    cv2.rectangle(debug_image,
+                  (start_col, start_row),
+                  (end_col, debug_image.shape[0]),
+                  (255, 255, 0), 3)  # Cyan - OCR scan region
+
+    # 2. Draw detected text boxes
+    for detection in ocr_detections:
+        top_left_ocr = tuple(map(int, detection[0][0]))
+        bottom_right_ocr = tuple(map(int, detection[0][2]))
+        # Adjust coordinates for the start_col and start_row offset
+        cv2.rectangle(debug_image,
+                     (top_left_ocr[0] + start_col, top_left_ocr[1] + start_row),
+                     (bottom_right_ocr[0] + start_col, bottom_right_ocr[1] + start_row),
+                     (0, 255, 255), 2)  # Yellow - detected text
+
+    # 3. Draw all contours
+    cv2.drawContours(debug_image, contours, -1, (128, 128, 128), 2)  # Gray - all contours
+
+    # 4. Draw the convex hull
+    cv2.drawContours(debug_image, [convex_hull], -1, (0, 255, 0), 3)  # Green - convex hull
+
+    # 5. Draw the top edge points (larger circles)
+    cv2.circle(debug_image, tuple(top_left), 15, (255, 0, 0), -1)  # Blue - top-left point
+    cv2.circle(debug_image, tuple(top_right), 15, (255, 0, 255), -1)  # Magenta - top-right point
+
+    # 6. Draw the final bounding box (thick red rectangle)
+    cv2.rectangle(debug_image, (x, y), (x + w, y + h), (0, 0, 255), 5)  # Red - final crop box
+
+    # 7. Add text labels
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 1.5
+    font_thickness = 3
+
+    # Add legend at the top
+    cv2.putText(debug_image, f"Image: {image_name}", (10, 40), font, font_scale, (255, 255, 255), font_thickness)
+    cv2.putText(debug_image, f"Crop: ({x}, {y}, {w}, {h})", (10, 90), font, font_scale, (0, 0, 255), font_thickness)
+
+    # Save the debug image
     name_without_ext, ext = os.path.splitext(image_name)
-    # Create numbered descriptive filename: 01_image001_original.png
-    descriptive_filename = f"{step_num:02d}_{name_without_ext}_{step_desc}{ext}"
-    
-    # Save the image in the single output directory
-    output_path = os.path.join(image_output, descriptive_filename)
-    cv2.imwrite(output_path, vis_image)
+    output_path = os.path.join(output_folder, f"{name_without_ext}_debug{ext}")
+    cv2.imwrite(output_path, debug_image)
+
     return output_path
 
 
@@ -45,143 +83,111 @@ def safe_process_single_image(image_path):
         print(f"Error processing {image_path}: {e}")
         traceback.print_exc()  # This will print the stack trace of the exception
 
+def process_single_image(image_path, output_folder=None):
+    """
+    Process a single image using the EXACT same cropping logic as process_crop_region
+    from src/DB_processing/image_processing.py, with a single comprehensive debug image.
+    """
+    if output_folder is None:
+        output_folder = crop_outputs
 
-def Show_Crop(image_path, image, contours, x, y, w, h):
-    # Check if the image was loaded properly
-    if image is None:
-        print(f"Failed to load image at: {image_path}")
-        return
+    image_name = os.path.basename(image_path)
 
-    # Check if the box is too vertical
-    aspect_ratio = w / h
-    if aspect_ratio < 0.25:  # Too vertical
-        print(f"Image is too vertical: {image_path}")
-    elif aspect_ratio > 4:  # Too horizontal
-        print(f"Image is too horizontal: {image_path}")
-    # Check if the resolution is less than 200x200
-    if w < 200 or h < 200:
-        print(f"Image resolution is too small: {image_path}")
-        
-    # Create a copy for visualization
-    if len(image.shape) == 2 or image.shape[2] == 1:  # Check if the image is grayscale
-        vis_image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
-    else:
-        vis_image = image.copy()
-    
-    # Draw the bounding box only (no contours)
-    start_point = (x, y)
-    end_point = (x + w, y + h)
-    color = (0, 0, 255)  # Red color in BGR
-    thickness = 10
-    vis_image = cv2.rectangle(vis_image, start_point, end_point, color, thickness)
-    
-    # Save the final result
-    save_step_image(vis_image, image_path, 9, "final_result")
-
-
-def find_top_edge_points(largest_contour, vertical_range):
-    # Find the highest y-coordinate in the contour
-    top_y = min(largest_contour[:, 0, 1])
-
-    # Filter points that are within the vertical range from the top y-coordinate
-    top_edge_points = [pt[0] for pt in largest_contour if top_y <= pt[0][1] <= top_y + vertical_range]
-
-    # Find the leftmost and rightmost points from the filtered top edge points
-    top_left = min(top_edge_points, key=lambda x: x[0])
-    top_right = max(top_edge_points, key=lambda x: x[0])
-
-    return top_left, top_right
-
-
-def process_single_image(image_path):
-    image_name = os.path.basename(image_path)  # Get image name from image path
-    
-    # Step 1: Load grayscale image directly
+    # Load grayscale image directly
     original_image = cv2.imread(image_path, 0)
-    image = original_image.copy()  # Make a copy to work with
-    save_step_image(image, image_name, 1, "original")
-    
-    # Calculate the start and end row indices for the bottom quarter of the image
+    image = original_image.copy()
+
+    # FIRST PASS: Find edge points without OCR to determine OCR x-range
+    # Binary threshold
+    _, binary_mask = cv2.threshold(image, 0, 255, cv2.THRESH_BINARY)
+
+    # Erosion
+    kernel = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=np.uint8)
+    eroded_mask = cv2.erode(binary_mask, kernel, iterations=8)
+
+    # Find contours
+    contours, _ = cv2.findContours(eroded_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return None
+
+    # Sort contours by area (largest first)
+    sorted_contours = sorted(contours, key=cv2.contourArea, reverse=True)
+    largest_contour = sorted_contours[0]
+
+    # Check if second largest contour should be merged
+    if len(sorted_contours) > 1:
+        second_largest = sorted_contours[1]
+        largest_area = cv2.contourArea(largest_contour)
+        second_area = cv2.contourArea(second_largest)
+
+        # Merge if second contour is at least 25% of largest
+        if second_area >= 0.025 * largest_area:
+            # Merge contours by concatenating points
+            largest_contour = np.concatenate([largest_contour, second_largest])
+
+    # Convex hull
+    convex_hull = cv2.convexHull(largest_contour)
+
+    # Get bounding box from convex hull
+    x_coords = convex_hull[:, 0, 0]
+    y_coords = convex_hull[:, 0, 1]
+    x_min = int(np.min(x_coords))
+    x_max = int(np.max(x_coords))
+    y_min = int(np.min(y_coords))
+    y_max = int(np.max(y_coords))
+
+    # OCR REGION SETUP: Use convex hull x-range to restrict OCR
     start_row = int(3 * image.shape[0] / 4)
     end_row = image.shape[0]
-    margin = 10
-    
-    # Step 2: Remove caliper box
+    ocr_padding = 50  # Inset padding from convex hull edges
+
+    # Calculate restricted x-range for OCR (inset from convex hull edges)
+    start_col = max(0, x_min + ocr_padding)
+    end_col = min(image.shape[1], x_max - ocr_padding)
+
+    # Ensure valid region (if hull is too narrow, use full hull width)
+    if start_col >= end_col:
+        start_col = x_min
+        end_col = x_max
+
+    # Ensure minimum width for OCR region
+    min_ocr_width = 10
+    if end_col - start_col < min_ocr_width:
+        # Expand region around midpoint
+        mid_x = (x_min + x_max) // 2
+        start_col = max(0, mid_x - min_ocr_width // 2)
+        end_col = min(image.shape[1], mid_x + min_ocr_width // 2)
+
+    # OCR in restricted region
     reader_thread = get_reader()
-    output = reader_thread.readtext(image[start_row:end_row, :])
-    
-    # Create a copy for visualization before modifying
-    image_with_text_boxes = cv2.cvtColor(image.copy(), cv2.COLOR_GRAY2BGR)
-    
-    for detection in output:
-        top_left = tuple(map(int, detection[0][0]))
-        bottom_right = tuple(map(int, detection[0][2]))
-        
-        # Draw text boxes on the visualization image
-        cv2.rectangle(image_with_text_boxes, 
-                     (top_left[0], top_left[1] + start_row), 
-                     (bottom_right[0], bottom_right[1] + start_row), 
-                     (0, 255, 0), 10)
-    
-    save_step_image(image_with_text_boxes, image_name, 2, "detected_text")
-    
-    # Apply text removal to the original grayscale image
-    for detection in output:
-        top_left = tuple(map(int, detection[0][0]))
-        bottom_right = tuple(map(int, detection[0][2]))
-        top_left = (0, max(0, top_left[1] + start_row - margin))
-        bottom_right = (image.shape[1], min(image.shape[0], bottom_right[1] + start_row + margin))
-        cv2.rectangle(image, top_left, bottom_right, (0, 0, 0), -1)
-    
-    save_step_image(image, image_name, 3, "caliper_removed")
-    
-    # Step 3: Create binary mask
-    _, binary_mask = cv2.threshold(image, 0, 255, cv2.THRESH_BINARY)
-    save_step_image(binary_mask, image_name, 4, "binary_mask")
-    
-    # Step 4: Erode the binary mask
-    kernel = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=np.uint8)
-    eroded_mask = cv2.erode(binary_mask, kernel, iterations=5)
-    save_step_image(eroded_mask, image_name, 5, "eroded_mask")
+    output = reader_thread.readtext(image[start_row:end_row, start_col:end_col])
 
-    # Step 5: Find contours and get the largest one
-    contours, _ = cv2.findContours(eroded_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not contours:  # Check if contours is empty
-        return None
-    
-    largest_contour = max(contours, key=cv2.contourArea)
-    
-    # Visualize the largest contour
-    contour_image = cv2.cvtColor(eroded_mask.copy(), cv2.COLOR_GRAY2BGR)
-    cv2.drawContours(contour_image, [largest_contour], -1, (0, 0, 255), 10)
-    save_step_image(contour_image, image_name, 6, "largest_contour")
-    
-    # Step 6: Get the convex hull
-    convex_hull = cv2.convexHull(largest_contour)
-    
-    # Visualize the convex hull
-    hull_image = cv2.cvtColor(eroded_mask.copy(), cv2.COLOR_GRAY2BGR)
-    cv2.drawContours(hull_image, [convex_hull], -1, (0, 255, 0), 10)
-    save_step_image(hull_image, image_name, 7, "convex_hull")
-    
-    # Step 7: Find top edge points and bounding box
-    top_left, top_right = find_top_edge_points(convex_hull, vertical_range=20)
+    # Find the minimum y-value of detected text (if any)
+    text_y_limit = None
+    if output:
+        # Get the minimum y-coordinate of all detected text boxes
+        min_text_y = min(detection[0][0][1] for detection in output)
+        text_y_limit = int(min_text_y + start_row)
 
-    # Visualize the top edge points
-    edge_image = hull_image.copy()
-    cv2.circle(edge_image, tuple(top_left), 20, (255, 0, 0), -1)  # Blue for top-left
-    cv2.circle(edge_image, tuple(top_right), 20, (0, 0, 255), -1)  # Red for top-right
-    save_step_image(edge_image, image_name, 8, "top_edge_points")
+    # Calculate bounding box from convex hull
+    x = x_min
+    y = y_min
+    w = x_max - x_min
 
-    # Calculate the bounding box
-    x = top_left[0]
-    y = top_left[1]
-    w = top_right[0] - x
-    h = max(convex_hull[:, 0, 1]) - y  # Bottom y-coordinate - top y-coordinate
+    # Height: stop at text or end of convex hull, whichever comes first
+    if text_y_limit is not None:
+        h = min(text_y_limit, y_max) - y
+    else:
+        h = y_max - y
 
-    # Step 8: Show and save the final result
-    Show_Crop(image_name, original_image, convex_hull, x, y, w, h)
-    
+    # Create edge points for visualization (at the top of convex hull)
+    top_left = np.array([x_min, y_min])
+    top_right = np.array([x_max, y_min])
+
+    # Create single comprehensive debug image (pass start_col and end_col for restricted OCR region)
+    create_debug_image(original_image, image_name, output, start_row, start_col, end_col,
+                      contours, convex_hull, top_left, top_right, x, y, w, h, output_folder)
+
     return (image_name, (x, y, w, h))
 
 
@@ -205,8 +211,15 @@ def get_ultrasound_region(image_folder_path, db_to_process):
     return image_data
 
 
+def load_hard_cases_list(csv_path):
+    """Load list of hard case image names from CSV"""
+    import pandas as pd
+    df = pd.read_csv(csv_path)
+    return set(df['image'].tolist())
+
+
 def find_crops_extra():
-    image_folder_path = f'{current_dir}/inputs/'
+    
 
     # Construct image paths for only the new data
     image_paths = [os.path.join(image_folder_path, file) for file in os.listdir(image_folder_path) if file.lower().endswith('.png')]
@@ -234,5 +247,67 @@ def find_crops_extra():
             
     return image_data
 
-#image_masks = get_ultrasound_region(image_folder_path, image_df)
-image_masks = find_crops_extra()
+# Load list of hard cases from CSV
+csv_path = r"C:\Users\Tristan\Desktop\temp_data_bad_crop_strange_image.csv"
+hard_cases_set = load_hard_cases_list(csv_path)
+print(f"Loaded {len(hard_cases_set)} hard cases from CSV")
+
+# Get all images from inputs folder
+all_image_files = [file for file in os.listdir(image_folder_path) if file.lower().endswith('.png')]
+
+# Separate into hard cases and regular images
+hard_case_images = [img for img in all_image_files if img in hard_cases_set]
+regular_images = [img for img in all_image_files if img not in hard_cases_set]
+
+print(f"\nProcessing {len(hard_case_images)} hard cases -> crop_images_hard/")
+print(f"Processing {len(regular_images)} regular images -> crop_outputs/")
+
+# Process hard cases to crop_images_hard/
+hard_case_data = []
+if hard_case_images:
+    hard_case_paths = [os.path.join(image_folder_path, img) for img in hard_case_images]
+    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+        futures = {executor.submit(process_single_image, path, crop_images_hard): path
+                   for path in hard_case_paths}
+        with tqdm(total=len(futures), desc="Hard cases") as pbar:
+            for future in as_completed(futures):
+                result = future.result()
+                if result is not None:
+                    hard_case_data.append(result)
+                pbar.update()
+
+# Process regular images to crop_outputs/
+regular_data = []
+if regular_images:
+    regular_paths = [os.path.join(image_folder_path, img) for img in regular_images]
+    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+        futures = {executor.submit(process_single_image, path, crop_outputs): path
+                   for path in regular_paths}
+        with tqdm(total=len(futures), desc="Regular images") as pbar:
+            for future in as_completed(futures):
+                result = future.result()
+                if result is not None:
+                    regular_data.append(result)
+                pbar.update()
+
+# Write hard cases CSV
+if hard_case_data:
+    with open(f'{current_dir}/crop_data_hard_cases.csv', 'w', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow(['Image Name', 'X', 'Y', 'Width', 'Height'])
+        for image_name, (x, y, w, h) in hard_case_data:
+            writer.writerow([image_name, x, y, w, h])
+    print(f"\nSaved hard cases data to: crop_data_hard_cases.csv")
+
+# Write regular images CSV
+if regular_data:
+    with open(f'{current_dir}/crop_data.csv', 'w', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow(['Image Name', 'X', 'Y', 'Width', 'Height'])
+        for image_name, (x, y, w, h) in regular_data:
+            writer.writerow([image_name, x, y, w, h])
+    print(f"Saved regular images data to: crop_data.csv")
+
+print(f"\nDone! Debug images saved to:")
+print(f"  - crop_images_hard/: {len(hard_case_data)} images")
+print(f"  - crop_outputs/: {len(regular_data)} images")
