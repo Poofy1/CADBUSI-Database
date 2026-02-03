@@ -137,6 +137,11 @@ class DatabaseManager:
                 physical_delta_x REAL,
                 has_calipers INTEGER DEFAULT 0,
                 has_calipers_prediction REAL,
+                has_caliper_source TEXT,
+                has_caliper_prob_uncropped REAL,
+                has_caliper_prob_cropped REAL,
+                caliper_n_peaks INTEGER,
+                caliper_peak_max_score REAL,
                 caliper_boxes TEXT,
                 caliper_coordinates TEXT,
                 yolo_confidence TEXT,
@@ -374,12 +379,13 @@ class DatabaseManager:
             'region_location_max_x1', 'region_location_max_y1',
             'crop_x', 'crop_y', 'crop_w', 'crop_h', 'crop_aspect_ratio',
             'photometric_interpretation', 'rows', 'columns', 'physical_delta_x',
-            'has_calipers', 'has_calipers_prediction', 'caliper_boxes', 'caliper_coordinates', 'yolo_confidence', 'has_caliper_mask', 'samus_confidence',
+            'has_calipers', 'has_calipers_prediction', 'has_caliper_source', 'has_caliper_prob_uncropped', 'has_caliper_prob_cropped',
+            'caliper_n_peaks', 'caliper_peak_max_score', 'caliper_boxes', 'caliper_coordinates', 'yolo_confidence', 'has_caliper_mask', 'samus_confidence',
             'darkness', 'label', 'region_count', 'closest_fn', 'distance',
             'file_name', 'software_versions', 'manufacturer_model_name', 'exclusion_reason'
         ]
 
-        string_columns = ['accession_number', 'patient_id', 'image_name', 'dicom_hash', 'caliper_boxes', 'caliper_coordinates', 'yolo_confidence', 'samus_confidence', 'inpainted_from', 'exclusion_reason']
+        string_columns = ['accession_number', 'patient_id', 'image_name', 'dicom_hash', 'has_caliper_source', 'caliper_boxes', 'caliper_coordinates', 'yolo_confidence', 'samus_confidence', 'inpainted_from', 'exclusion_reason']
         boolean_columns = ['has_calipers', 'has_caliper_mask', 'label']
         
         return self._batch_upsert_helper(

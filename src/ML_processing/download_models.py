@@ -36,6 +36,18 @@ def download_models():
         "Ori": {
             "url": "https://huggingface.co/poofy38/CADBUSI/resolve/main/ori_model.pt",
             "filename": "ori_model.pt"
+        },
+        "Caliper Cropped CLF": {
+            "url": "https://huggingface.co/poofy38/CADBUSI/resolve/main/caliper_pipeline_cropped_clf_2_3_2026.pt",
+            "filename": "caliper_pipeline_cropped_clf_2_3_2026.pt"
+        },
+        "Caliper Locator": {
+            "url": "https://huggingface.co/poofy38/CADBUSI/resolve/main/caliper_pipeline_locator_2_3_2026.pt",
+            "filename": "caliper_pipeline_locator_2_3_2026.pt"
+        },
+        "Caliper Uncropped CLF": {
+            "url": "https://huggingface.co/poofy38/CADBUSI/resolve/main/caliper_pipeline_uncropped_clf_2_3_2026.pt",
+            "filename": "caliper_pipeline_uncropped_clf_2_3_2026.pt"
         }
     }
     
