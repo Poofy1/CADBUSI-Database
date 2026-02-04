@@ -119,6 +119,7 @@ def main():
         from src.ML_processing.inpaint_N2N import Inpaint_Dataset_N2N
         from src.ML_processing.orientation_detection import Find_Orientation
         from src.ML_processing.caliper_coordinates import Locate_Calipers
+        from src.ML_processing.caliper_pipeline.caliper_pipeline_run import run_caliper_pipeline
         from src.ML_processing.download_models import download_models
         
         lesion_pathology = f'{env}/data/lesion_pathology.csv'
@@ -148,6 +149,9 @@ def main():
         print("Step 3/5: Processing image data...")
         analyze_images(CONFIG["DATABASE_DIR"])
         
+        run_caliper_pipeline()
+        
+        
         # Step 4: Clean data
         print("Step 4/5: Cleaning image data...")
         #Find_Orientation(CONFIG) # Unnessesary and unreliable 
@@ -159,7 +163,7 @@ def main():
             Inpaint_Dataset_N2N( f'{CONFIG["DATABASE_DIR"]}/images/')
             
         Locate_Lesions(f'{CONFIG["DATABASE_DIR"]}/images/')
-        Locate_Calipers(f'{CONFIG["DATABASE_DIR"]}/images/')
+        #Locate_Calipers(f'{CONFIG["DATABASE_DIR"]}/images/')
         Match_Lesions()
         Populate_Lesion_Types()
 

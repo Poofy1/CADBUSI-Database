@@ -10,9 +10,12 @@ import cv2
 import numpy as np
 import pandas as pd
 import torch
+from PIL import Image
+from torch.utils.data import DataLoader, Dataset
+from torchvision import transforms
 from tqdm import tqdm
 
-from src.ML_processing.caliper_pipeline.caliper_pipeline import decide, load_models, run_classifier_on_arrays, run_locator_with_points
+from src.ML_processing.caliper_pipeline.caliper_pipeline import decide, load_models, run_locator_with_points
 from config import CONFIG
 from src.DB_processing.tools import append_audit
 from src.DB_processing.database import DatabaseManager
@@ -30,6 +33,46 @@ def points_to_uncropped(points: list[dict], crop_x: float, crop_y: float) -> lis
         {"x": round(p["x"] + crop_x, 1), "y": round(p["y"] + crop_y, 1), "score": p["score"]}
         for p in points
     ]
+
+
+class _DualCaliperDataset(Dataset):
+    """Reads each image once, produces 224x224 tensors for both classifiers."""
+
+    def __init__(self, image_df, image_folder_path, has_crop_info):
+        self.image_names = image_df["image_name"].tolist()
+        self.crop_x = image_df["crop_x"].tolist() if "crop_x" in image_df.columns else [0] * len(image_df)
+        self.crop_y = image_df["crop_y"].tolist() if "crop_y" in image_df.columns else [0] * len(image_df)
+        self.crop_w = image_df["crop_w"].tolist() if "crop_w" in image_df.columns else [0] * len(image_df)
+        self.crop_h = image_df["crop_h"].tolist() if "crop_h" in image_df.columns else [0] * len(image_df)
+        self.has_crop = has_crop_info.tolist()
+        self.image_folder_path = image_folder_path
+        self.transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+        ])
+
+    def __len__(self):
+        return len(self.image_names)
+
+    def __getitem__(self, idx):
+        img = read_image(os.path.join(self.image_folder_path, self.image_names[idx]))
+
+        # Uncropped tensor
+        if img is not None:
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            uncropped_tensor = self.transform(Image.fromarray(gray))
+        else:
+            uncropped_tensor = torch.zeros(1, 224, 224)
+            gray = None
+
+        # Cropped tensor
+        if self.has_crop[idx] and gray is not None:
+            cropped = crop_image(gray, self.crop_x[idx], self.crop_y[idx], self.crop_w[idx], self.crop_h[idx])
+            cropped_tensor = self.transform(Image.fromarray(cropped))
+        else:
+            cropped_tensor = torch.zeros(1, 224, 224)
+
+        return uncropped_tensor, cropped_tensor, self.has_crop[idx], idx
 
 
 def run_caliper_pipeline():
@@ -70,65 +113,52 @@ def run_caliper_pipeline():
         print("Loading models...")
         clf_uncropped, clf_cropped, locator = load_models(device)
 
-        # Load all images
-        print("Loading images...")
-        images = []
-        for _, row in tqdm(image_df.iterrows(), total=n, desc="Loading"):
-            img = read_image(os.path.join(image_folder_path, row.image_name))
-            if img is not None:
-                img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            images.append(img)
+        # Run both classifiers in a single DataLoader pass (one image read per sample)
+        print("Running classifiers...")
+        dataset = _DualCaliperDataset(image_df, image_folder_path, has_crop_info)
+        loader = DataLoader(dataset, batch_size=BATCH_SIZE, num_workers=4, pin_memory=True)
 
-        # Step 1: Uncropped classifier on all images
-        print("Running uncropped classifier...")
-        uncropped_arrays = [img if img is not None else np.zeros((100, 100), dtype=np.uint8) for img in images]
-        probs_uncropped = run_classifier_on_arrays(
-            clf_uncropped, uncropped_arrays, device, BATCH_SIZE
-        )
-
-        # Step 2: For images with crop info, crop and run cropped classifier + locator
+        probs_uncropped = [0.0] * n
         probs_cropped = [0.0] * n
+
+        with torch.no_grad():
+            for unc_batch, crop_batch, has_crop_batch, indices in tqdm(loader, desc="Classifiers"):
+                unc_batch = unc_batch.to(device)
+                crop_batch = crop_batch.to(device)
+
+                # Uncropped classifier on all images
+                p_unc = torch.sigmoid(clf_uncropped(unc_batch).squeeze(-1)).cpu().numpy()
+
+                # Cropped classifier on all images (zeros for non-crop produce ~0 prob)
+                p_crop = torch.sigmoid(clf_cropped(crop_batch).squeeze(-1)).cpu().numpy()
+
+                for j, idx in enumerate(indices.numpy()):
+                    probs_uncropped[idx] = float(p_unc[j])
+                    if has_crop_batch[j]:
+                        probs_cropped[idx] = float(p_crop[j])
+
+        # Locator pass (per-image, re-reads only images with crop info)
         locator_n_peaks = [0] * n
         locator_peak_max = [0.0] * n
         all_points = [[] for _ in range(n)]
 
         if n_with_crop > 0:
             crop_indices = [i for i in range(n) if has_crop_info.iloc[i]]
-            crop_arrays = []
-            crop_params = []
-
-            print("Cropping images...")
-            for i in tqdm(crop_indices, desc="Crop"):
-                row = image_df.iloc[i]
-                img = images[i]
-                if img is None:
-                    crop_arrays.append(np.zeros((100, 100), dtype=np.uint8))
-                    crop_params.append((0, 0))
-                    continue
-                cropped = crop_image(img, row.crop_x, row.crop_y, row.crop_w, row.crop_h)
-                crop_arrays.append(cropped)
-                crop_params.append((float(row.crop_x), float(row.crop_y)))
-
-            # Cropped classifier (batched)
-            print("Running cropped classifier...")
-            crop_probs = run_classifier_on_arrays(
-                clf_cropped, crop_arrays, device, BATCH_SIZE
-            )
-            for j, i in enumerate(crop_indices):
-                probs_cropped[i] = crop_probs[j]
-
-            # Locator (per-image)
             print("Running locator...")
-            for j, i in enumerate(tqdm(crop_indices, desc="Locator")):
-                n_pk, pk_max, pts = run_locator_with_points(
-                    locator, crop_arrays[j], device
-                )
+            for i in tqdm(crop_indices, desc="Locator"):
+                row = image_df.iloc[i]
+                img = read_image(os.path.join(image_folder_path, row.image_name))
+                if img is None:
+                    continue
+                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                cropped = crop_image(gray, row.crop_x, row.crop_y, row.crop_w, row.crop_h)
+
+                n_pk, pk_max, pts = run_locator_with_points(locator, cropped, device)
                 locator_n_peaks[i] = n_pk
                 locator_peak_max[i] = pk_max
-                cx, cy = crop_params[j]
-                all_points[i] = points_to_uncropped(pts, cx, cy)
+                all_points[i] = points_to_uncropped(pts, float(row.crop_x), float(row.crop_y))
 
-        # Step 3: Decide and build results
+        # Decide and build results
         print("Assembling results...")
         results = []
         for i in range(n):
@@ -151,7 +181,7 @@ def run_caliper_pipeline():
             })
 
         # Update database
-        updated_count = db.insert_images_batch(results, upsert=True)
+        updated_count = db.insert_images_batch(results, update_only=True)
         print(f"Updated {updated_count} images in database")
 
         # Summary

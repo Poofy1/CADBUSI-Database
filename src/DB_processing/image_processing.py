@@ -12,7 +12,6 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
 
-from src.ML_processing.caliper_detection import *
 from src.ML_processing.mask_model import *
 from src.DB_processing.tools import get_reader, reader, append_audit
 from src.DB_processing.database import DatabaseManager
@@ -399,22 +398,13 @@ def analyze_images(database_path):
         append_audit("image_processing.extracted_crop_regions", len(image_masks))
         append_audit("image_processing.extracted_darkness_measurements", len(darknesses))
 
-        # Finding Calipers
-        caliper_results = find_calipers(image_folder_path, image_df, image_masks)
-        caliper_count = sum(1 for _, bool_val, _ in caliper_results if bool_val)
-        append_audit("image_processing.images_with_calipers", caliper_count)
-
         # Convert lists of tuples to dictionaries
-        has_calipers_dict = {filename: bool_val for filename, bool_val, _ in caliper_results}
-        has_calipers_confidence_dict = {filename: pred_val for filename, _, pred_val in caliper_results}
         darknesses_dict = {filename: value for filename, value in darknesses}
         image_masks_dict = {filename: mask for filename, mask in image_masks}
-        
+
         # Update dataframe using map
         image_df['description'] = image_df['image_name'].map(descriptions)
         image_df['darkness'] = image_df['image_name'].map(darknesses_dict)
-        image_df['has_calipers'] = image_df['image_name'].map(has_calipers_dict)
-        image_df['has_calipers_prediction'] = image_df['image_name'].map(has_calipers_confidence_dict)
         image_df['bounding_box'] = image_df['image_name'].map(image_masks_dict)
 
         # Fill NaN values with (None, None, None, None) before expanding

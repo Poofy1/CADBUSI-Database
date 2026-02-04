@@ -12,10 +12,10 @@ from torchvision import transforms
 from tqdm import tqdm
 from src.ML_processing.caliper_pipeline.caliper_models import UNetLite, create_classifier
 
-PIPELINE_DIR = Path(__file__).parent
-CKPT_UNCROPPED = PIPELINE_DIR / "checkpoints" / "uncropped_clf.pt"
-CKPT_CROPPED = PIPELINE_DIR / "checkpoints" / "cropped_clf.pt"
-CKPT_LOCATOR = PIPELINE_DIR / "checkpoints" / "locator.pt"
+MODELS_DIR = Path(__file__).parent.parent / "models"
+CKPT_UNCROPPED = MODELS_DIR / "caliper_pipeline_uncropped_clf_2_3_2026.pt"
+CKPT_CROPPED = MODELS_DIR / "caliper_pipeline_cropped_clf_2_3_2026.pt"
+CKPT_LOCATOR = MODELS_DIR / "caliper_pipeline_locator_2_3_2026.pt"
 
 
 def _load_state_dict(path, device):
