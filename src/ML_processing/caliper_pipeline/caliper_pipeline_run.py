@@ -11,11 +11,12 @@ import numpy as np
 import pandas as pd
 import torch
 from PIL import Image
+from scipy.ndimage import maximum_filter
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 from tqdm import tqdm
 
-from src.ML_processing.caliper_pipeline.caliper_pipeline import decide, load_models, run_locator_with_points
+from src.ML_processing.caliper_pipeline.caliper_pipeline import decide, load_models
 from config import CONFIG
 from src.DB_processing.tools import append_audit
 from src.DB_processing.database import DatabaseManager
@@ -35,18 +36,37 @@ def points_to_uncropped(points: list[dict], crop_x: float, crop_y: float) -> lis
     ]
 
 
-class _DualCaliperDataset(Dataset):
-    """Reads each image once, produces 224x224 tensors for both classifiers."""
+def _extract_peaks(heatmap: np.ndarray, scale: float, threshold=0.3, min_distance=10) -> tuple[int, float, list[dict]]:
+    """Peak finding on a locator heatmap. Returns (n_peaks, peak_max, points) in crop coords."""
+    local_max = maximum_filter(heatmap, size=min_distance)
+    peaks_mask = (heatmap == local_max) & (heatmap > threshold)
+    ys, xs = np.where(peaks_mask)
+
+    points = [
+        {
+            "x": round(float(x_px) / scale, 1),
+            "y": round(float(y_px) / scale, 1),
+            "score": round(float(heatmap[y_px, x_px]), 4),
+        }
+        for y_px, x_px in zip(ys, xs)
+    ]
+    points.sort(key=lambda p: p["score"], reverse=True)
+    peak_max = max((p["score"] for p in points), default=0.0)
+    return len(points), peak_max, points
+
+
+class _CaliperDataset(Dataset):
+    """Reads each image once, produces tensors for all three models."""
 
     def __init__(self, image_df, image_folder_path, has_crop_info):
         self.image_names = image_df["image_name"].tolist()
-        self.crop_x = image_df["crop_x"].tolist() if "crop_x" in image_df.columns else [0] * len(image_df)
-        self.crop_y = image_df["crop_y"].tolist() if "crop_y" in image_df.columns else [0] * len(image_df)
-        self.crop_w = image_df["crop_w"].tolist() if "crop_w" in image_df.columns else [0] * len(image_df)
-        self.crop_h = image_df["crop_h"].tolist() if "crop_h" in image_df.columns else [0] * len(image_df)
+        self.crop_x = image_df["crop_x"].tolist() if "crop_x" in image_df.columns else [0.0] * len(image_df)
+        self.crop_y = image_df["crop_y"].tolist() if "crop_y" in image_df.columns else [0.0] * len(image_df)
+        self.crop_w = image_df["crop_w"].tolist() if "crop_w" in image_df.columns else [0.0] * len(image_df)
+        self.crop_h = image_df["crop_h"].tolist() if "crop_h" in image_df.columns else [0.0] * len(image_df)
         self.has_crop = has_crop_info.tolist()
         self.image_folder_path = image_folder_path
-        self.transform = transforms.Compose([
+        self.clf_transform = transforms.Compose([
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
         ])
@@ -57,22 +77,33 @@ class _DualCaliperDataset(Dataset):
     def __getitem__(self, idx):
         img = read_image(os.path.join(self.image_folder_path, self.image_names[idx]))
 
-        # Uncropped tensor
+        # Uncropped tensor (224x224 for classifier)
         if img is not None:
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            uncropped_tensor = self.transform(Image.fromarray(gray))
+            uncropped_tensor = self.clf_transform(Image.fromarray(gray))
         else:
             uncropped_tensor = torch.zeros(1, 224, 224)
             gray = None
 
-        # Cropped tensor
+        # Cropped tensor (224x224 for classifier) + locator tensor (512x512)
+        scale = 0.0
         if self.has_crop[idx] and gray is not None:
             cropped = crop_image(gray, self.crop_x[idx], self.crop_y[idx], self.crop_w[idx], self.crop_h[idx])
-            cropped_tensor = self.transform(Image.fromarray(cropped))
+            cropped_tensor = self.clf_transform(Image.fromarray(cropped))
+
+            # Locator: resize maintaining aspect ratio, pad to 512x512
+            h, w = cropped.shape[:2]
+            scale = 512.0 / max(h, w)
+            new_h, new_w = int(h * scale), int(w * scale)
+            resized = cv2.resize(cropped, (new_w, new_h))
+            padded = np.zeros((512, 512), dtype=np.uint8)
+            padded[:new_h, :new_w] = resized
+            locator_tensor = torch.from_numpy(padded).float().div_(255.0).unsqueeze(0)
         else:
             cropped_tensor = torch.zeros(1, 224, 224)
+            locator_tensor = torch.zeros(1, 512, 512)
 
-        return uncropped_tensor, cropped_tensor, self.has_crop[idx], idx
+        return uncropped_tensor, cropped_tensor, locator_tensor, scale, self.has_crop[idx], idx
 
 
 def run_caliper_pipeline():
@@ -113,50 +144,41 @@ def run_caliper_pipeline():
         print("Loading models...")
         clf_uncropped, clf_cropped, locator = load_models(device)
 
-        # Run both classifiers in a single DataLoader pass (one image read per sample)
-        print("Running classifiers...")
-        dataset = _DualCaliperDataset(image_df, image_folder_path, has_crop_info)
+        # Run all three models in a single DataLoader pass (one image read per sample)
+        print("Running models...")
+        dataset = _CaliperDataset(image_df, image_folder_path, has_crop_info)
         loader = DataLoader(dataset, batch_size=BATCH_SIZE, num_workers=4, pin_memory=True)
 
         probs_uncropped = [0.0] * n
         probs_cropped = [0.0] * n
-
-        with torch.no_grad():
-            for unc_batch, crop_batch, has_crop_batch, indices in tqdm(loader, desc="Classifiers"):
-                unc_batch = unc_batch.to(device)
-                crop_batch = crop_batch.to(device)
-
-                # Uncropped classifier on all images
-                p_unc = torch.sigmoid(clf_uncropped(unc_batch).squeeze(-1)).cpu().numpy()
-
-                # Cropped classifier on all images (zeros for non-crop produce ~0 prob)
-                p_crop = torch.sigmoid(clf_cropped(crop_batch).squeeze(-1)).cpu().numpy()
-
-                for j, idx in enumerate(indices.numpy()):
-                    probs_uncropped[idx] = float(p_unc[j])
-                    if has_crop_batch[j]:
-                        probs_cropped[idx] = float(p_crop[j])
-
-        # Locator pass (per-image, re-reads only images with crop info)
         locator_n_peaks = [0] * n
         locator_peak_max = [0.0] * n
         all_points = [[] for _ in range(n)]
 
-        if n_with_crop > 0:
-            crop_indices = [i for i in range(n) if has_crop_info.iloc[i]]
-            print("Running locator...")
-            for i in tqdm(crop_indices, desc="Locator"):
-                row = image_df.iloc[i]
-                img = read_image(os.path.join(image_folder_path, row.image_name))
-                if img is None:
-                    continue
-                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                cropped = crop_image(gray, row.crop_x, row.crop_y, row.crop_w, row.crop_h)
+        with torch.no_grad():
+            for unc_batch, crop_batch, loc_batch, scales, has_crop_batch, indices in tqdm(loader, desc="Models"):
+                unc_batch = unc_batch.to(device)
+                crop_batch = crop_batch.to(device)
+                loc_batch = loc_batch.to(device)
 
-                n_pk, pk_max, pts = run_locator_with_points(locator, cropped, device)
-                locator_n_peaks[i] = n_pk
-                locator_peak_max[i] = pk_max
-                all_points[i] = points_to_uncropped(pts, float(row.crop_x), float(row.crop_y))
+                # All three forward passes
+                p_unc = torch.sigmoid(clf_uncropped(unc_batch).squeeze(-1)).cpu().numpy()
+                p_crop = torch.sigmoid(clf_cropped(crop_batch).squeeze(-1)).cpu().numpy()
+                heatmaps = torch.sigmoid(locator(loc_batch)).squeeze(1).cpu().numpy()
+
+                # Per-image post-processing
+                for j, idx in enumerate(indices.numpy()):
+                    probs_uncropped[idx] = float(p_unc[j])
+
+                    if has_crop_batch[j]:
+                        probs_cropped[idx] = float(p_crop[j])
+
+                        # Peak finding on locator heatmap (CPU)
+                        n_pk, pk_max, pts = _extract_peaks(heatmaps[j], float(scales[j]))
+                        locator_n_peaks[idx] = n_pk
+                        locator_peak_max[idx] = pk_max
+                        cx, cy = dataset.crop_x[idx], dataset.crop_y[idx]
+                        all_points[idx] = points_to_uncropped(pts, float(cx), float(cy))
 
         # Decide and build results
         print("Assembling results...")
