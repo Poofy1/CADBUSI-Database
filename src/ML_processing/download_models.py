@@ -33,10 +33,6 @@ def download_models():
             "url": "https://huggingface.co/poofy38/CADBUSI/resolve/main/N2N_7.pth",
             "filename": "N2N_7.pth"
         },
-        "Ori": {
-            "url": "https://huggingface.co/poofy38/CADBUSI/resolve/main/ori_model.pt",
-            "filename": "ori_model.pt"
-        },
         "Caliper Cropped CLF": {
             "url": "https://huggingface.co/poofy38/CADBUSI/resolve/main/caliper_pipeline_cropped_clf_2_3_2026.pt",
             "filename": "caliper_pipeline_cropped_clf_2_3_2026.pt"
@@ -48,6 +44,14 @@ def download_models():
         "Caliper Uncropped CLF": {
             "url": "https://huggingface.co/poofy38/CADBUSI/resolve/main/caliper_pipeline_uncropped_clf_2_3_2026.pt",
             "filename": "caliper_pipeline_uncropped_clf_2_3_2026.pt"
+        },
+        "US Region Cropper": {
+            "url": "https://huggingface.co/poofy38/CADBUSI/resolve/main/us_region_2026_02_05.pth",
+            "filename": "us_region_2026_02_05.pth"
+        },
+        "LOGIQE Orientation Yolo": {
+            "url": "https://huggingface.co/poofy38/CADBUSI/resolve/main/LOGIQE_ori_yolo_2026_02_06.pt",
+            "filename": "LOGIQE_ori_yolo_2026_02_06.pt"
         }
     }
     

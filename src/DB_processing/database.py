@@ -294,7 +294,22 @@ class DatabaseManager:
         # Find which columns are present in the data
         first_row = data[0]
         present_columns = [col for col in all_columns if col in first_row]
-        
+
+        # Auto-migrate: add any missing columns to the table
+        cursor.execute(f"PRAGMA table_info({table_name})")
+        existing_columns = {row[1] for row in cursor.fetchall()}
+        for col in present_columns:
+            if col not in existing_columns:
+                if col in boolean_columns:
+                    col_type = "INTEGER DEFAULT 0"
+                elif col in string_columns:
+                    col_type = "TEXT"
+                else:
+                    col_type = "REAL"
+                cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {col} {col_type}")
+                print(f"Auto-added column '{col}' ({col_type}) to {table_name}")
+        self.conn.commit()
+
         # Handle UPDATE-only mode
         if update_only:
             if unique_key not in present_columns:

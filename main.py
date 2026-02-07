@@ -1,4 +1,5 @@
 import ssl
+
 ssl._create_default_https_context = ssl._create_unverified_context
 
 from src.encrypt_keys import encrypt_ids
@@ -117,8 +118,8 @@ def main():
         from src.DB_processing.lesion_matching import Match_Lesions, Populate_Lesion_Types
         from src.ML_processing.lesion_detection import Locate_Lesions
         from src.ML_processing.inpaint_N2N import Inpaint_Dataset_N2N
-        from src.ML_processing.orientation_detection import Find_Orientation
         from src.ML_processing.caliper_coordinates import Locate_Calipers
+        from src.ML_processing.ultrasound_cropping import generate_crop_regions
         from src.ML_processing.caliper_pipeline.caliper_pipeline_run import run_caliper_pipeline
         from src.ML_processing.download_models import download_models
         
@@ -148,13 +149,12 @@ def main():
         # Step 3: Run OCR
         print("Step 3/5: Processing image data...")
         analyze_images(CONFIG["DATABASE_DIR"])
-        
+        generate_crop_regions(CONFIG)
         run_caliper_pipeline()
         
         
         # Step 4: Clean data
-        print("Step 4/5: Cleaning image data...")
-        #Find_Orientation(CONFIG) # Unnessesary and unreliable 
+        print("Step 4/5: Cleaning image data...") 
         Select_Data(CONFIG["DATABASE_DIR"])
         
         # Make inpainting optional

@@ -110,6 +110,7 @@ def run_caliper_pipeline():
 
     DEVICE = "cuda"  # "auto", "cpu", "cuda", "cuda:0", etc.
     BATCH_SIZE = 32
+    LIMIT = None  # Set to an int (e.g. 100) to process only a subset for testing
 
     device = torch.device(
         DEVICE if DEVICE != "auto"
@@ -126,6 +127,8 @@ def run_caliper_pipeline():
                          "AND accession_number IN "
                          "(SELECT accession_number FROM StudyCases WHERE date >= '2018-01-01')"
         )
+        if LIMIT is not None:
+            image_df = image_df.head(LIMIT)
         n = len(image_df)
         print(f"Processing {n} images")
         append_audit("caliper_pipeline.input_images", n)

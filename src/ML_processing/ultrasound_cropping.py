@@ -1,7 +1,6 @@
 import cv2, sys, csv
 import numpy as np
 import os
-import sqlite3
 from tqdm import tqdm
 import torch
 import segmentation_models_pytorch as smp
@@ -9,11 +8,12 @@ from torch.utils.data import Dataset, DataLoader
 from ultralytics import YOLO
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
-image_folder_path = f'{current_dir}/inputs/'
 parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
 
 from src.DB_processing.image_processing import get_reader
+from src.DB_processing.database import DatabaseManager
+from tools.storage_adapter import *
 from ML_processing.simplify_region import simplify_us_region, polygon_to_storage
 
 # ML Model configuration
@@ -22,9 +22,10 @@ MODEL_PATH = os.path.join(current_dir, 'us_region_2026_02_06.pth')
 YOLO_MODEL_PATH = os.path.join('C:/Users/Tristan/Desktop', 'orientation_yolo_training', 'orientation_v15', 'weights', 'best.pt')
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 BATCH_SIZE = 16
+DEBUG_IMAGES = False
+MAX_PER_MODEL = None #For debug
 
-crop_outputs = f"{current_dir}/crop_outputs/"
-os.makedirs(crop_outputs, exist_ok=True)
+debug_crop_outputs = f"{current_dir}/debug_crop_outputs/"
 
 EXCLUSION_BOXES = {
     'LOGIQE9':    {'right': 140, 'left_ratio': 0.04},
@@ -66,10 +67,13 @@ class CropDataset(Dataset):
         image_name = os.path.basename(image_path)
         model_name = self.image_to_model.get(image_name, None)
 
-        # Load grayscale image
-        gray = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
-        if gray is None:
+        # Load image using storage adapter (works with both local and GCP)
+        image = read_image(image_path, use_pil=True)
+        if image is None:
             return None
+
+        # Convert PIL image to grayscale numpy array
+        gray = np.array(image.convert('L'))
 
         # Ensure image is 2D (grayscale)
         if len(gray.shape) == 3:
@@ -356,19 +360,16 @@ def apply_post_boxes(image, model_name):
     return image
 
 
-def get_valid_image_names_from_db(db_path, allowed_models):
+def get_valid_image_names_from_db(allowed_models):
     """Get image names and their model names from database that match the allowed manufacturer model names.
     Returns a dict mapping image_name -> model_name"""
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
+    with DatabaseManager() as db:
+        placeholders = ','.join('?' * len(allowed_models))
+        where_clause = f"manufacturer_model_name IN ({placeholders})"
 
-    placeholders = ','.join('?' * len(allowed_models))
-    query = f"SELECT image_name, manufacturer_model_name FROM Images WHERE manufacturer_model_name IN ({placeholders})"
+        image_df = db.get_images_dataframe(where_clause=where_clause, params=tuple(allowed_models))
+        image_to_model = dict(zip(image_df['image_name'], image_df['manufacturer_model_name']))
 
-    cursor.execute(query, allowed_models)
-    image_to_model = {row[0]: row[1] for row in cursor.fetchall()}
-
-    conn.close()
     return image_to_model
 
 
@@ -479,9 +480,6 @@ def process_batch_with_model(model, batch, output_folders, ocr_reader, yolo_mode
         if yolo_model is not None:
             gray_processed, yolo_boxes, _ = fill_orientation_markers(gray_processed, yolo_model, model_name)
 
-        # Get output folder for this model
-        output_folder = output_folders.get(model_name, crop_outputs)
-
         # Collect all debris polygons
         debris_polygons = collect_debris_polygons(
             orig_h, orig_w, model_name,
@@ -497,20 +495,24 @@ def process_batch_with_model(model, batch, output_folders, ocr_reader, yolo_mode
         debris_polygons_str = [polygon_to_storage(p, precision=1) for p in debris_polygons]
 
         # Create debug image
-        create_debug_image_ml(gray_processed, image_name, x, y, w, h, output_folder, model_name, polygon, shape_type, iou, debris_polygons)
+        if DEBUG_IMAGES:
+            output_folder = output_folders.get(model_name, debug_crop_outputs)
+            create_debug_image_ml(gray_processed, image_name, x, y, w, h, output_folder, model_name, polygon, shape_type, iou, debris_polygons)
 
         results.append((image_name, (x, y, w, h), model_name, us_polygon_str, debris_polygons_str))
 
     return results
 
 
-def generate_crop_regions():
+def generate_crop_regions(CONFIG):
     # Define allowed manufacturer model names
     ALLOWED_MODELS = ['LOGIQE9', 'LOGIQE10', 'EPIQ 5G', 'EPIQ 7G', 'EPIQ Elite']
 
+    # Get image folder path from CONFIG
+    image_folder_path = f"{CONFIG['DATABASE_DIR']}/images/"
+
     # Get valid image names and their models from the database
-    model_db_path = r"C:\Users\Tristan\Desktop\database_new.db"
-    image_to_model = get_valid_image_names_from_db(model_db_path, ALLOWED_MODELS)
+    image_to_model = get_valid_image_names_from_db(ALLOWED_MODELS)
     print(f"Found {len(image_to_model)} images with allowed model names: {ALLOWED_MODELS}")
 
     # Get all images from inputs folder that match allowed models
@@ -518,14 +520,14 @@ def generate_crop_regions():
                        if file.lower().endswith('.png') and file in image_to_model]
     print(f"Filtered to {len(all_image_files)} images matching allowed models")
 
-    # Group images by model (max 1000 per model)
-    MAX_PER_MODEL = 1000
+    # Group images by model (max per model from CONFIG, or None/0 for all)
     images_by_model = {}
     for img in all_image_files:
         model = image_to_model[img]
         if model not in images_by_model:
             images_by_model[model] = []
-        if len(images_by_model[model]) < MAX_PER_MODEL:
+        # If MAX_PER_MODEL is None or 0, process all images
+        if MAX_PER_MODEL is None or MAX_PER_MODEL == 0 or len(images_by_model[model]) < MAX_PER_MODEL:
             images_by_model[model].append(img)
 
     # Print counts per model
@@ -536,7 +538,7 @@ def generate_crop_regions():
     # Create output folders for each model
     output_folders = {}
     for model in images_by_model.keys():
-        model_folder = f"{current_dir}/crop_outputs_{model.replace(' ', '_')}/"
+        model_folder = f"{current_dir}/debug_crop_outputs_{model.replace(' ', '_')}/"
         os.makedirs(model_folder, exist_ok=True)
         output_folders[model] = model_folder
 
@@ -601,7 +603,7 @@ def generate_crop_regions():
 
     print(f"\nDone! Debug images saved to:")
     for model, model_results in results_by_model.items():
-        print(f"  - crop_outputs_{model.replace(' ', '_')}/: {len(model_results)} images")
+        print(f"  - debug_crop_outputs_{model.replace(' ', '_')}/: {len(model_results)} images")
 
 
 
