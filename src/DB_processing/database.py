@@ -131,6 +131,8 @@ class DatabaseManager:
                 crop_w INTEGER,
                 crop_h INTEGER,
                 crop_aspect_ratio REAL,
+                us_polygon TEXT,
+                debris_polygons TEXT,
                 photometric_interpretation TEXT,
                 rows INTEGER,
                 columns INTEGER,

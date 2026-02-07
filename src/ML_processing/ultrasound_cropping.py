@@ -1,4 +1,4 @@
-import cv2, sys, csv
+import cv2, sys
 import numpy as np
 import os
 from tqdm import tqdm
@@ -583,29 +583,39 @@ def generate_crop_regions(CONFIG):
         results = process_batch_with_model(seg_model, batch, output_folders, ocr_reader, yolo_model)
         all_results.extend(results)
 
-    # Group results by model for CSV output
-    results_by_model = {}
-    for image_name, bbox, model_name, us_polygon_str, debris_polygons_str in all_results:
-        if model_name not in results_by_model:
-            results_by_model[model_name] = []
-        results_by_model[model_name].append((image_name, bbox, us_polygon_str, debris_polygons_str))
+    # Write results to database
+    print(f"\nWriting {len(all_results)} crop regions to database...")
+    with DatabaseManager() as db:
+        # Ensure new columns exist
+        db.add_column_if_not_exists('Images', 'us_polygon', 'TEXT')
+        db.add_column_if_not_exists('Images', 'debris_polygons', 'TEXT')
 
-    # Write CSV for each model
-    for model, model_results in results_by_model.items():
-        csv_filename = f'{current_dir}/crop_data_{model.replace(" ", "_")}.csv'
-        with open(csv_filename, 'w', newline='') as file:
-            writer = csv.writer(file)
-            writer.writerow(['Image Name', 'X', 'Y', 'Width', 'Height', 'US Polygon', 'Debris Polygons'])
-            for image_name, (x, y, w, h), us_polygon_str, debris_polygons_str in model_results:
-                # Join debris polygons with | separator
-                debris_str = '|'.join(debris_polygons_str)
-                writer.writerow([image_name, x, y, w, h, us_polygon_str, debris_str])
+        # Prepare batch updates
+        image_updates = []
+        for image_name, bbox, model_name, us_polygon_str, debris_polygons_str in all_results:
+            x, y, w, h = bbox
+            # Join debris polygons with | separator
+            debris_str = '|'.join(debris_polygons_str)
 
-    print(f"\nDone! Debug images saved to:")
-    for model, model_results in results_by_model.items():
-        print(f"  - debug_crop_outputs_{model.replace(' ', '_')}/: {len(model_results)} images")
+            image_updates.append({
+                'image_name': image_name,
+                'crop_x': x,
+                'crop_y': y,
+                'crop_w': w,
+                'crop_h': h,
+                'us_polygon': us_polygon_str,
+                'debris_polygons': debris_str
+            })
+
+        # Batch update database
+        updated_count = db.insert_images_batch(image_updates, upsert=True)
+        print(f"Updated {updated_count} images in database with crop regions")
+
+    print(f"\nDone! Processed {len(all_results)} images")
 
 
 
 if __name__ == "__main__":
-    generate_crop_regions()
+    # For standalone testing - use a minimal CONFIG
+    from config import CONFIG
+    generate_crop_regions(CONFIG)
