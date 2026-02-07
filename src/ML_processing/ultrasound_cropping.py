@@ -18,7 +18,7 @@ from ML_processing.simplify_region import simplify_us_region, polygon_to_storage
 
 # ML Model configuration
 IMG_SIZE = 256
-MODEL_PATH = os.path.join(current_dir, 'us_region_2026_02_06.pth')
+MODEL_PATH = os.path.join(current_dir, 'models', 'us_region_2026_02_06.pth')
 YOLO_MODEL_PATH = os.path.join('C:/Users/Tristan/Desktop', 'orientation_yolo_training', 'orientation_v15', 'weights', 'best.pt')
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 BATCH_SIZE = 16
@@ -509,15 +509,18 @@ def generate_crop_regions(CONFIG):
     ALLOWED_MODELS = ['LOGIQE9', 'LOGIQE10', 'EPIQ 5G', 'EPIQ 7G', 'EPIQ Elite']
 
     # Get image folder path from CONFIG
-    image_folder_path = f"{CONFIG['DATABASE_DIR']}/images/"
+    image_folder_path = f"{CONFIG['DATABASE_DIR']}images/"
 
     # Get valid image names and their models from the database
     image_to_model = get_valid_image_names_from_db(ALLOWED_MODELS)
     print(f"Found {len(image_to_model)} images with allowed model names: {ALLOWED_MODELS}")
 
-    # Get all images from inputs folder that match allowed models
-    all_image_files = [file for file in os.listdir(image_folder_path)
-                       if file.lower().endswith('.png') and file in image_to_model]
+    # Get all images from folder that match allowed models (works with GCP and local)
+    all_files = list_files(image_folder_path)
+    file_dict = {os.path.basename(img): img for img in all_files}
+
+    all_image_files = [img_name for img_name in image_to_model.keys()
+                       if img_name.lower().endswith('.png') and img_name in file_dict]
     print(f"Filtered to {len(all_image_files)} images matching allowed models")
 
     # Group images by model (max per model from CONFIG, or None/0 for all)
@@ -566,7 +569,7 @@ def generate_crop_regions(CONFIG):
     all_images = []
     for model, images in images_by_model.items():
         for img in images:
-            all_images.append(os.path.join(image_folder_path, img))
+            all_images.append(file_dict[img])  # Use full path from storage adapter
 
     # Create dataset and dataloader
     dataset = CropDataset(all_images, image_to_model)
@@ -590,25 +593,25 @@ def generate_crop_regions(CONFIG):
         db.add_column_if_not_exists('Images', 'us_polygon', 'TEXT')
         db.add_column_if_not_exists('Images', 'debris_polygons', 'TEXT')
 
-        # Prepare batch updates
-        image_updates = []
-        for image_name, bbox, model_name, us_polygon_str, debris_polygons_str in all_results:
+        cursor = db.conn.cursor()
+
+        # Update each image with crop data
+        updated_count = 0
+        for image_name, bbox, _, us_polygon_str, debris_polygons_str in all_results:
             x, y, w, h = bbox
             # Join debris polygons with | separator
             debris_str = '|'.join(debris_polygons_str)
 
-            image_updates.append({
-                'image_name': image_name,
-                'crop_x': x,
-                'crop_y': y,
-                'crop_w': w,
-                'crop_h': h,
-                'us_polygon': us_polygon_str,
-                'debris_polygons': debris_str
-            })
+            cursor.execute("""
+                UPDATE Images
+                SET crop_x = ?, crop_y = ?, crop_w = ?, crop_h = ?,
+                    us_polygon = ?, debris_polygons = ?
+                WHERE image_name = ?
+            """, (x, y, w, h, us_polygon_str, debris_str, image_name))
 
-        # Batch update database
-        updated_count = db.insert_images_batch(image_updates, upsert=True)
+            updated_count += cursor.rowcount
+
+        db.conn.commit()
         print(f"Updated {updated_count} images in database with crop regions")
 
     print(f"\nDone! Processed {len(all_results)} images")

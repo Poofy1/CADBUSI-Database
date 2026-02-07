@@ -46,8 +46,8 @@ def download_models():
             "filename": "caliper_pipeline_uncropped_clf_2_3_2026.pt"
         },
         "US Region Cropper": {
-            "url": "https://huggingface.co/poofy38/CADBUSI/resolve/main/us_region_2026_02_05.pth",
-            "filename": "us_region_2026_02_05.pth"
+            "url": "https://huggingface.co/poofy38/CADBUSI/resolve/main/us_region_2026_02_06.pth",
+            "filename": "us_region_2026_02_06.pth"
         },
         "LOGIQE Orientation Yolo": {
             "url": "https://huggingface.co/poofy38/CADBUSI/resolve/main/LOGIQE_ori_yolo_2026_02_06.pt",
