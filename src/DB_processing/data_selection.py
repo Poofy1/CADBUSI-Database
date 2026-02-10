@@ -2,8 +2,10 @@ from src.DB_processing.image_processing import *
 from src.DB_processing.tools import append_audit
 from src.DB_processing.database import DatabaseManager
 from scipy.spatial.distance import cdist
-import concurrent.futures
-from functools import partial
+from tqdm import tqdm
+import pandas as pd
+import os
+from tools.storage_adapter import save_data
 tqdm.pandas()
 
 
@@ -129,115 +131,149 @@ def process_nearest_given_ids(pid, subset, image_folder_path):
     return subset
 
 
-def create_caliper_file(database_path, image_df, breast_df, max_workers=None):
-    """
-    Creates a separate caliper file with specific columns for images that have calipers
-    and copies both the caliper images and raw images to a new directory using read_image and save_data.
-    
-    Args:
-        database_path (str): Path to the database directory
-        max_workers (int): Maximum number of threads (defaults to CPU count)
-    """
-    caliper_output_file = f'{database_path}/CaliperData.csv'
-    images_dir = f'{database_path}/images'
-    caliper_images_dir = f'{database_path}/caliper_pairs'
-    
-    # Filter for images that have calipers
-    caliper_images = image_df[
-        (image_df['has_calipers'] == True) & 
-        (image_df['distance'] < 5)
-    ].copy()
-    
-    if caliper_images.empty:
-        print("No images with calipers found.")
-        return
-    
-    # Create the caliper dataframe with required columns
-    caliper_df = pd.DataFrame()
-    caliper_df['patient_id'] = caliper_images['patient_id']
-    caliper_df['accession_number'] = caliper_images.get('accession_number', '')
-    caliper_df['Distance'] = caliper_images['distance']
-    caliper_df['Caliper_Image'] = caliper_images['image_name']
-    caliper_df['Raw_Image'] = caliper_images['closest_fn']
-    
-    # Fix leading zeros issue - normalize both accession number columns
-    caliper_df['accession_number'] = caliper_df['accession_number'].astype(str).str.lstrip('0')
-    breast_df = breast_df.copy()  # Don't modify the original
-    breast_df['accession_number'] = breast_df['accession_number'].astype(str).str.lstrip('0')
-    
-    # Handle edge case where all zeros becomes empty string
-    caliper_df['accession_number'] = caliper_df['accession_number'].replace('', '0')
-    breast_df['accession_number'] = breast_df['accession_number'].replace('', '0')
-    
-    # Merge with breast data to get has_malignant information
-    caliper_df = caliper_df.merge(
-        breast_df[['accession_number', 'has_malignant']], 
-        on='accession_number', 
-        how='left'
-    )
-    
-    # Reorder columns to match your specification
-    column_order = ['patient_id', 'accession_number', 'has_malignant', 'Distance', 'Raw_Image', 'Caliper_Image']
-    caliper_df = caliper_df[column_order]
-    
-    # Function to copy both caliper and raw images for a single row
-    def copy_images_for_row(row, images_dir, caliper_images_dir):
-        success_count = 0
-        
-        # Copy caliper image
-        try:
-            caliper_image_path = f"{images_dir}/{row['Caliper_Image']}"
-            image = read_image(caliper_image_path)
-            if image is not None:
-                caliper_filename = os.path.basename(caliper_image_path)
-                caliper_dest_path = f"{caliper_images_dir}/{caliper_filename}"
-                save_data(image, caliper_dest_path)
-                success_count += 1
-            else:
-                print(f"Failed to read caliper image: {caliper_image_path}")
-        except Exception as e:
-            print(f"Error copying caliper image {caliper_image_path}: {e}")
-        
-        # Copy raw image
-        try:
-            raw_image_path = f"{images_dir}/{row['Raw_Image']}"
-            image = read_image(raw_image_path)
-            if image is not None:
-                raw_filename = os.path.basename(raw_image_path)
-                raw_dest_path = f"{caliper_images_dir}/{raw_filename}"
-                save_data(image, raw_dest_path)
-                success_count += 1
-            else:
-                print(f"Failed to read raw image: {raw_image_path}")
-        except Exception as e:
-            print(f"Error copying raw image {raw_image_path}: {e}")
-        
-        return success_count
-    
-    # Copy both caliper and raw images using ThreadPoolExecutor
-    total_copied = 0
-    copy_func = partial(copy_images_for_row, images_dir=images_dir, caliper_images_dir=caliper_images_dir)
-    
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Convert DataFrame rows to list for ThreadPoolExecutor
-        rows = [row for _, row in caliper_df.iterrows()]
-        
-        # Submit all tasks and track progress
-        future_to_row = {executor.submit(copy_func, row): row for row in rows}
-        
-        # Use tqdm to show progress
-        for future in tqdm(concurrent.futures.as_completed(future_to_row), 
-                          desc="Copying Caliper and Raw Images", 
-                          total=len(caliper_df)):
-            total_copied += future.result()
-    
-    # Save the caliper file
-    save_data(caliper_df, caliper_output_file)
-    
-    print(f"Successfully copied {total_copied} images total ({len(caliper_df)} caliper + {len(caliper_df)} raw images expected)")
-    
-    return caliper_df
 
+
+
+def apply_filters(CONFIG):
+    """
+    Apply all quality and relevance filters to the image data.
+    Excluded images are saved to the BadData table with exclusion reasons.
+
+    Args:
+        CONFIG: Configuration dictionary
+    """
+    audit_stats = {}
+    excluded_images = []  # Track all excluded images
+
+    with DatabaseManager() as db:
+        image_df = db.get_images_dataframe()
+        breast_df = db.get_study_cases_dataframe()
+
+        # Track initial counts
+        audit_stats['init_images'] = len(image_df)
+        audit_stats['init_breasts'] = len(breast_df)
+
+        # Merge study_laterality from breast_df for laterality filtering logic
+        if 'study_laterality' not in image_df.columns:
+            image_df = image_df.merge(
+                breast_df[['accession_number', 'study_laterality']],
+                on='accession_number',
+                how='left'
+            )
+
+        # Filter 1: Remove images that are too dark
+        darkness_thresh = 75
+        darkness_values = image_df['darkness'].round(2).tolist()
+        append_audit("export.darkness_values", darkness_values)
+        append_audit("export.darkness_thresh", darkness_thresh)
+
+        dark_mask = image_df['darkness'] > darkness_thresh
+        dark_images = image_df[dark_mask][['image_name', 'dicom_hash']].copy()
+        dark_images['exclusion_reason'] = 'too dark (>75)'
+        excluded_images.append(dark_images)
+
+        image_df = image_df[~dark_mask]
+        audit_stats['too_dark_removed'] = len(dark_images)
+
+        # Filter 2: Remove non-breast images
+        # First, fix unknown areas
+        image_df.loc[(image_df['area'] == 'unknown') | (image_df['area'].isna()), 'area'] = 'breast'
+
+        non_breast_mask = image_df['area'] != 'breast'
+        non_breast_images = image_df[non_breast_mask][['image_name', 'dicom_hash']].copy()
+        non_breast_images['exclusion_reason'] = 'non-breast area'
+        excluded_images.append(non_breast_images)
+
+        image_df = image_df[~non_breast_mask]
+        audit_stats['non_breast_removed'] = len(non_breast_images)
+
+        # Filter 3: Remove images with unknown laterality in BILATERAL studies
+        bilateral_unknown_mask = (
+            ((image_df['laterality'] == 'unknown') | (image_df['laterality'].isna())) &
+            (image_df['study_laterality'].str.upper() == 'BILATERAL')
+        )
+        lat_images = image_df[bilateral_unknown_mask][['image_name', 'dicom_hash']].copy()
+        lat_images['exclusion_reason'] = 'unknown laterality (bilateral study)'
+        excluded_images.append(lat_images)
+
+        image_df = image_df[~bilateral_unknown_mask]
+        audit_stats['unknown_lat_removed'] = len(lat_images)
+
+        # Filter 4: Remove images with multiple regions
+        multi_region_mask = image_df['region_count'] > 1
+        region_images = image_df[multi_region_mask][['image_name', 'dicom_hash']].copy()
+        region_images['exclusion_reason'] = 'multiple regions'
+        excluded_images.append(region_images)
+
+        image_df = image_df[~multi_region_mask]
+        audit_stats['multi_region_removed'] = len(region_images)
+
+        # Update has_malignant for all cases (vectorized)
+        both_null = breast_df['left_diagnosis'].isna() & breast_df['right_diagnosis'].isna()
+        left_mask = breast_df['study_laterality'] == 'LEFT'
+        left_malignant = breast_df['left_diagnosis'].fillna('').str.upper().str.contains('MALIGNANT')
+        right_mask = breast_df['study_laterality'] == 'RIGHT'
+        right_malignant = breast_df['right_diagnosis'].fillna('').str.upper().str.contains('MALIGNANT')
+
+        breast_df.loc[both_null, 'has_malignant'] = -1
+        breast_df.loc[left_mask & ~both_null, 'has_malignant'] = left_malignant[left_mask & ~both_null].astype(int)
+        breast_df.loc[right_mask & ~both_null, 'has_malignant'] = right_malignant[right_mask & ~both_null].astype(int)
+
+        # Keep only images whose patient_id exists in breast_df
+        valid_patient_ids = breast_df['patient_id'].unique()
+        image_df = image_df[image_df['patient_id'].isin(valid_patient_ids)]
+
+        # Filter 5: Remove images with missing crop region
+        missing_crop_mask = image_df['crop_x'].isna()
+        missing_crop_images = image_df[missing_crop_mask][['image_name', 'dicom_hash']].copy()
+        missing_crop_images['exclusion_reason'] = 'missing_crop_region'
+        excluded_images.append(missing_crop_images)
+
+        image_df = image_df[~missing_crop_mask]
+        audit_stats['missing_crop_removed'] = len(missing_crop_images)
+
+        # Filter 6: Remove bad aspect ratios
+        min_aspect_ratio = CONFIG.get('MIN_ASPECT_RATIO', 0.5)
+        max_aspect_ratio = CONFIG.get('MAX_ASPECT_RATIO', 4.0)
+
+        bad_aspect_mask = (
+            (image_df['crop_aspect_ratio'] < min_aspect_ratio) |
+            (image_df['crop_aspect_ratio'] > max_aspect_ratio)
+        )
+        aspect_images = image_df[bad_aspect_mask][['image_name', 'dicom_hash']].copy()
+        aspect_images['exclusion_reason'] = f'bad aspect ratio ({min_aspect_ratio}-{max_aspect_ratio})'
+        excluded_images.append(aspect_images)
+
+        image_df = image_df[~bad_aspect_mask]
+        audit_stats['bad_aspect_removed'] = len(aspect_images)
+
+        # Filter 7: Remove images that are too small
+        min_dimension = CONFIG.get('MIN_DIMENSION', 200)
+
+        too_small_mask = (
+            (image_df['crop_w'] < min_dimension) |
+            (image_df['crop_h'] < min_dimension)
+        )
+        small_images = image_df[too_small_mask][['image_name', 'dicom_hash']].copy()
+        small_images['exclusion_reason'] = f'too small (<{min_dimension}px)'
+        excluded_images.append(small_images)
+
+        image_df = image_df[~too_small_mask]
+        audit_stats['too_small_removed'] = len(small_images)
+
+        # Track final usable images
+        audit_stats['usable_images'] = len(image_df)
+
+        # Save excluded images to BadData table
+        excluded_df = pd.concat(excluded_images, ignore_index=True)
+        bad_data = excluded_df[['image_name', 'dicom_hash', 'exclusion_reason']].to_dict('records')
+        db.insert_bad_data_batch(bad_data)
+
+        print(f"Saved {len(bad_data)} excluded images to BadData table")
+
+        # Log audit statistics
+        for key, value in audit_stats.items():
+            append_audit(f"export.{key}", value)
 
 def Select_Data(database_path):
     with DatabaseManager() as db:
@@ -309,5 +345,3 @@ def Select_Data(database_path):
         db.insert_images_batch(update_data, update_only=True)
         
         print(f"Updated {len(db_to_process)} images in database")
-
-        create_caliper_file(database_path, db_out, breast_df)

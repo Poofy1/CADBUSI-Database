@@ -65,7 +65,6 @@ python main.py --query [optional: --limit=N]
 python main.py --deploy
 python main.py --cleanup
 python main.py --database
-python main.py --export
 ```
 
 
@@ -117,43 +116,6 @@ This will:
 Example:
 
 `python main.py --database`
-
-### Export Database
-
-To process the downloaded DICOM files into a complete database:
-
-`python main.py --export`
-
-This will:
-1. Crop all relevent images / videos into output dir
-2. Create a consolidated label system
-
-
-
-## Data Architecture
-### Database
-- The final database will be held in the specified `DATABASE_DIR` folder with this internal layout:
-    - `/database/images/`: Raw image storage
-        - Any caliper image that qualified to be used in an export has been replaced with an inpainted version of itself.
-    - `/database/videos/`: Contains a separate folder for each video, each one with the first and middle frame of the video. 
-    - `/database/LossLabeling/`: Contains all images for Label Box labeling. (Labeling instance labels)
-    - `/database/LossLabelingReferences.csv`: LabelBox image data structure for retrieving and cross referencing data.
-        - This is database specific! You must build and retrieve labels from Label Box using the same database. 
-    - `/database/database.db`: SQLite metadata database
-
-### Labeled Data
-- The labeled data will be held in the specified `LABELBOX_LABELS` folder with this internal layout:
-    - `/labelbox_data/InstanceLabels.csv`: Recorded instance labels from Label Box. This data is universal across databases as it includes the dicom `FileName` for each instance.
-    - If there exists a boolean column named `Reject Image`, this will be used to ignore the specified image when exporting the database. This column will be excluded on export. 
-    - Labeled instance data will referenced and stored using the dicom data hash ID `'DicomHash'`, generated from the unanonymized raw dicom file.
-
-### Exports
-- Exporting will create a new folder in the appropriate database directory `DATABASE_DIR`, with todays date on it so that it does not overwrite previous exports.
-    - The format will be similar to the original database architecture but will only include relevant data.
-    - If there is labeled instance data inside the `LABELBOX_LABELS` dir then these will be added in the export as well.
-    - `/export_12_26_2023/TrainData.csv`: This file contains refrences to the data formatted into bags for the [CADBUSI-Training](https://github.com/Poofy1/CADBUSI-Training) project to easily interpret.
-
-
 
 ## Data Pipeline
 - [CADBUSI-Database](https://github.com/Poofy1/CADBUSI-Database)

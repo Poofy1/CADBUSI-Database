@@ -33,9 +33,6 @@ def parse_arguments():
     # Anonymize arguments
     parser.add_argument('--database', action='store_true', help='Process database')
     parser.add_argument('--skip-inpaint', action='store_true', help='Skip the inpainting step')
-
-    # Export arguments
-    parser.add_argument('--export', action='store_true', help='Export current databse')
     
     return parser.parse_args()
 
@@ -119,6 +116,7 @@ def main():
         from src.ML_processing.lesion_detection import Locate_Lesions
         from src.ML_processing.inpaint_N2N import Inpaint_Dataset_N2N
         from src.ML_processing.caliper_coordinates import Locate_Calipers
+        from src.DB_processing.validation_split import PerformSplit
         from src.ML_processing.ultrasound_cropping import generate_crop_regions
         from src.ML_processing.caliper_pipeline.caliper_pipeline_run import run_caliper_pipeline
         from src.ML_processing.download_models import download_models
@@ -171,31 +169,15 @@ def main():
         print("Step 5/5: Processing video data...")
         ProcessVideoData(CONFIG["DATABASE_DIR"])
         
+        # Step 6 validation split
+        PerformSplit()
+        
         #Upload Database
         if storage.is_gcp:
             blob = storage._bucket.blob(DATABASE_GCP_PATH.replace('//', '/').rstrip('/'))
             local_full_path = os.path.join(storage.windir, DATABASE_LOCAL_PATH) if storage.windir else DATABASE_LOCAL_PATH
             blob.upload_from_filename(local_full_path)
             print('Database uploaded')
-
-    elif args.export:
-        from src.DB_export.export import Export_Database
-        #Download Database
-        if storage.is_gcp:
-            local_full_path = os.path.join(storage.windir, DATABASE_LOCAL_PATH) if storage.windir else DATABASE_LOCAL_PATH
-            # Delete local database if it exists
-            if os.path.exists(DATABASE_LOCAL_PATH):
-                os.remove(local_full_path)
-            
-            # Download from GCP
-            blob = storage._bucket.blob(DATABASE_GCP_PATH.replace('//', '/').rstrip('/'))
-            os.makedirs(os.path.dirname(local_full_path), exist_ok=True)
-            blob.download_to_filename(local_full_path)
-            print(f'Database downloaded to {local_full_path}')
-            
-        if args.limit:
-            print(f"Exporting with limit: {args.limit}")
-        Export_Database(CONFIG, limit=args.limit)
     
     else:
         print("No action specified. Use --help for available options.")

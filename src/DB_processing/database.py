@@ -236,6 +236,17 @@ class DatabaseManager:
             )
         """)
 
+        # BadData table (excluded images with reasons)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS BadData (
+                image_name TEXT PRIMARY KEY,
+                dicom_hash TEXT,
+                exclusion_reason TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (image_name) REFERENCES Images(image_name) ON DELETE CASCADE
+            )
+        """)
+
         # Create indexes for performance
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_images_accession ON Images(accession_number)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_images_patient ON Images(patient_id)")
@@ -255,6 +266,8 @@ class DatabaseManager:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_lesions_accession ON Lesions(accession_number)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_lesions_patient ON Lesions(patient_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_lesions_image ON Lesions(image_name)")
+
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_baddata_image ON BadData(image_name)")
 
         self.conn.commit()
 
@@ -462,7 +475,8 @@ class DatabaseManager:
             'left_diagnosis_source', 'right_diagnosis_source',
             'location_id', 'location_name', 'location_city', 'location_state',
             'location_zip', 'location_address', 'location_type', 'location_description',
-            'lesion_descriptions'
+            'lesion_descriptions',
+            'valid'
         ]
         
         string_columns = ['accession_number', 'patient_id']
@@ -536,6 +550,44 @@ class DatabaseManager:
         cursor.executemany(insert_query, rows_to_insert)
         self.conn.commit()
         return cursor.rowcount
+
+    def insert_bad_data_batch(self, bad_data: List[Dict[str, Any]]) -> int:
+        """Insert excluded images into BadData table. Clears existing data first."""
+        if not bad_data:
+            return 0
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS BadData (
+                image_name TEXT PRIMARY KEY,
+                dicom_hash TEXT,
+                exclusion_reason TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (image_name) REFERENCES Images(image_name) ON DELETE CASCADE
+            )
+        """)
+        cursor.execute("DELETE FROM BadData")
+        insert_query = """
+            INSERT OR REPLACE INTO BadData (image_name, dicom_hash, exclusion_reason)
+            VALUES (?, ?, ?)
+        """
+        rows = [
+            (
+                row['image_name'],
+                row.get('dicom_hash', ''),
+                row['exclusion_reason']
+            )
+            for row in bad_data
+        ]
+        cursor.executemany(insert_query, rows)
+        self.conn.commit()
+        return cursor.rowcount
+
+    def get_bad_data_dataframe(self, where_clause: str = "", params: tuple = ()) -> pd.DataFrame:
+        """Get bad data as a pandas DataFrame with optional filtering."""
+        query = "SELECT * FROM BadData"
+        if where_clause:
+            query += f" WHERE {where_clause}"
+        return pd.read_sql_query(query, self.conn, params=params)
 
     def get_images_dataframe(self, where_clause: str = "", params: tuple = ()) -> pd.DataFrame:
         """Get images as a pandas DataFrame with optional filtering."""

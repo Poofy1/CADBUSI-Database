@@ -6,6 +6,7 @@ import torch
 import segmentation_models_pytorch as smp
 from torch.utils.data import Dataset, DataLoader
 from ultralytics import YOLO
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
@@ -19,9 +20,9 @@ from ML_processing.simplify_region import simplify_us_region, polygon_to_storage
 # ML Model configuration
 IMG_SIZE = 256
 MODEL_PATH = os.path.join(current_dir, 'models', 'us_region_2026_02_06.pth')
-YOLO_MODEL_PATH = os.path.join('C:/Users/Tristan/Desktop', 'orientation_yolo_training', 'orientation_v15', 'weights', 'best.pt')
+YOLO_MODEL_PATH = os.path.join(current_dir, 'models', 'LOGIQE_ori_yolo_2026_02_06.pt')
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-BATCH_SIZE = 16
+BATCH_SIZE = 256
 DEBUG_IMAGES = False
 MAX_PER_MODEL = None #For debug
 
@@ -373,15 +374,118 @@ def get_valid_image_names_from_db(allowed_models):
     return image_to_model
 
 
-def process_batch_with_model(model, batch, output_folders, ocr_reader, yolo_model=None):
-    """Process a batch of images through the model and generate debug images."""
-    results = []
+def process_single_image_postprocessing(image_data):
+    """Process a single image: OCR, YOLO, polygon extraction (CPU-bound, can parallelize)."""
+    (image_name, model_name, orig_h, orig_w, gray, binary_mask,
+     output_folders, ocr_reader, yolo_model) = image_data
 
+    # Simplify mask to polygon
+    shape_type, polygon, iou = simplify_us_region(binary_mask, scanner=model_name)
+
+    # Get bounding box from mask
+    bbox = mask_to_bbox(binary_mask)
+    if bbox is None:
+        return None
+
+    x, y, w, h = bbox
+
+    # OCR: scan bottom 1/4 of image with restricted x range
+    ocr_start_row = int(3 * orig_h / 4)
+
+    # Determine OCR x boundaries
+    ocr_left = 0
+    ocr_right = orig_w
+    if model_name and model_name in EXCLUSION_BOXES:
+        boxes = EXCLUSION_BOXES[model_name]
+        ocr_left = boxes.get('left', 0)
+        if 'left_ratio' in boxes:
+            ocr_left = max(ocr_left, int(orig_w * boxes['left_ratio']))
+        ocr_right = orig_w - boxes.get('right', 0)
+
+    # Ensure valid region
+    if ocr_left >= ocr_right:
+        ocr_left = 0
+        ocr_right = orig_w
+
+    ocr_region = gray[ocr_start_row:orig_h, ocr_left:ocr_right]
+    ocr_detections = ocr_reader.readtext(ocr_region)
+
+    # Find the minimum y-value of detected text (if any)
+    if ocr_detections:
+        right_third_start = ocr_left + (ocr_right - ocr_left) * 2 // 3
+
+        min_text_y = float('inf')
+        for detection in ocr_detections:
+            text_top_y = detection[0][0][1]
+            text_x = detection[0][0][0] + ocr_left
+
+            if model_name in ['LOGIQE9', 'LOGIQE10'] and text_x >= right_third_start:
+                text_top_y -= 30
+
+            min_text_y = min(min_text_y, text_top_y)
+
+        if min_text_y != float('inf'):
+            text_y_limit = int(min_text_y + ocr_start_row)
+            if text_y_limit > y and text_y_limit < y + h:
+                h = text_y_limit - y
+
+    # Apply post_boxes to the original image
+    gray_processed = apply_post_boxes(gray.copy(), model_name)
+
+    # For LOGIQE9/10: OCR left side and fill detected text with gray
+    left_ocr_detections = None
+    if model_name in ['LOGIQE9', 'LOGIQE10']:
+        left_width = int(orig_w / 5)
+        left_region = gray_processed[:, :left_width]
+        left_ocr_detections = ocr_reader.readtext(left_region)
+
+        for detection in left_ocr_detections:
+            bbox_ocr = detection[0]
+            x1 = int(bbox_ocr[0][0])
+            y1 = int(bbox_ocr[0][1])
+            x2 = int(bbox_ocr[2][0])
+            y2 = int(bbox_ocr[2][1])
+            gray_processed[y1:y2, x1:x2] = 128
+
+    # Fill orientation markers with YOLO
+    yolo_boxes = []
+    if yolo_model is not None:
+        gray_processed, yolo_boxes, _ = fill_orientation_markers(gray_processed, yolo_model, model_name)
+
+    # Collect all debris polygons
+    debris_polygons = collect_debris_polygons(
+        orig_h, orig_w, model_name,
+        yolo_boxes=yolo_boxes,
+        ocr_detections=ocr_detections,
+        ocr_start_row=ocr_start_row,
+        ocr_left=ocr_left,
+        left_ocr_detections=left_ocr_detections
+    )
+
+    # Convert polygons to storage format
+    us_polygon_str = polygon_to_storage(polygon, precision=1)
+    debris_polygons_str = [polygon_to_storage(p, precision=1) for p in debris_polygons]
+
+    # Create debug image
+    if DEBUG_IMAGES:
+        output_folder = output_folders.get(model_name, debug_crop_outputs)
+        create_debug_image_ml(gray_processed, image_name, x, y, w, h, output_folder,
+                            model_name, polygon, shape_type, iou, debris_polygons)
+
+    return (image_name, (x, y, w, h), model_name, us_polygon_str, debris_polygons_str)
+
+
+def process_batch_with_model(model, batch, output_folders, ocr_reader, yolo_model=None):
+    """Process a batch of images: GPU inference (serial), then parallel OCR/YOLO."""
+
+    # GPU inference (serial, batched)
     with torch.no_grad():
         tensors = batch['tensor'].to(DEVICE)
         outputs = model(tensors)
         masks = torch.sigmoid(outputs).squeeze(1).cpu().numpy()
 
+    # Prepare data for parallel post-processing
+    image_data_list = []
     for i in range(len(batch['image_name'])):
         image_name = batch['image_name'][i]
         model_name = batch['model_name'][i]
@@ -397,109 +501,22 @@ def process_batch_with_model(model, batch, output_folders, ocr_reader, yolo_mode
         # Apply exclusion boxes to the mask
         binary_mask = apply_exclusion_to_mask(binary_mask, model_name)
 
-        # Simplify mask to polygon
-        shape_type, polygon, iou = simplify_us_region(binary_mask, scanner=model_name)
+        # Package data for parallel processing
+        image_data_list.append((
+            image_name, model_name, orig_h, orig_w, gray, binary_mask,
+            output_folders, ocr_reader, yolo_model
+        ))
 
-        # Get bounding box from mask
-        bbox = mask_to_bbox(binary_mask)
-        if bbox is None:
-            continue
+    # Process all images in parallel (OCR/YOLO are CPU-bound)
+    results = []
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        futures = [executor.submit(process_single_image_postprocessing, data)
+                   for data in image_data_list]
 
-        x, y, w, h = bbox
-
-        # OCR: scan bottom 1/4 of image with restricted x range
-        ocr_start_row = int(3 * orig_h / 4)
-
-        # Determine OCR x boundaries
-        if model_name and model_name in EXCLUSION_BOXES:
-            boxes = EXCLUSION_BOXES[model_name]
-            # Use exclusion box boundaries
-            ocr_left = boxes.get('left', 0)
-            if 'left_ratio' in boxes:
-                ocr_left = max(ocr_left, int(orig_w * boxes['left_ratio']))
-            ocr_right = orig_w - boxes.get('right', 0)
-
-        # Ensure valid region
-        if ocr_left >= ocr_right:
-            ocr_left = 0
-            ocr_right = orig_w
-
-        ocr_region = gray[ocr_start_row:orig_h, ocr_left:ocr_right]
-        ocr_detections = ocr_reader.readtext(ocr_region)
-
-        # Find the minimum y-value of detected text (if any)
-        if ocr_detections:
-            # For LOGIQE9/10: check if text is in rightmost 1/3, add 30px padding
-            right_third_start = ocr_left + (ocr_right - ocr_left) * 2 // 3
-
-            min_text_y = float('inf')
-            for detection in ocr_detections:
-                text_top_y = detection[0][0][1]
-                text_x = detection[0][0][0] + ocr_left  # Convert to full image coords
-
-                # Check if text is in rightmost 1/3 for LOGIQE9/10
-                if model_name in ['LOGIQE9', 'LOGIQE10'] and text_x >= right_third_start:
-                    # Add 30px vertical padding above this text
-                    text_top_y -= 30
-
-                min_text_y = min(min_text_y, text_top_y)
-
-            if min_text_y != float('inf'):
-                text_y_limit = int(min_text_y + ocr_start_row)
-                # Adjust height to stop at text if it's within our crop region
-                if text_y_limit > y and text_y_limit < y + h:
-                    h = text_y_limit - y
-
-        # Apply post_boxes to the original image
-        gray_processed = apply_post_boxes(gray.copy(), model_name)
-
-        # For LOGIQE9/10: OCR left side and fill detected text with gray
-        left_ocr_detections = None
-        if model_name in ['LOGIQE9', 'LOGIQE10']:
-            # Scan left 1/5th of image (full height)
-            left_width = int(orig_w / 5)
-            left_region = gray_processed[:, :left_width]
-
-            # Run OCR on left region
-            left_ocr_detections = ocr_reader.readtext(left_region)
-
-            # Fill detected text boxes with gray 128
-            for detection in left_ocr_detections:
-                # Get bounding box coordinates
-                bbox = detection[0]
-                x1 = int(bbox[0][0])
-                y1 = int(bbox[0][1])
-                x2 = int(bbox[2][0])
-                y2 = int(bbox[2][1])
-
-                # Fill text region with gray
-                gray_processed[y1:y2, x1:x2] = 128
-
-        # Fill orientation markers with gray 128 (after crop is determined)
-        yolo_boxes = []
-        if yolo_model is not None:
-            gray_processed, yolo_boxes, _ = fill_orientation_markers(gray_processed, yolo_model, model_name)
-
-        # Collect all debris polygons
-        debris_polygons = collect_debris_polygons(
-            orig_h, orig_w, model_name,
-            yolo_boxes=yolo_boxes,
-            ocr_detections=ocr_detections,
-            ocr_start_row=ocr_start_row,
-            ocr_left=ocr_left,
-            left_ocr_detections=left_ocr_detections
-        )
-
-        # Convert polygons to storage format
-        us_polygon_str = polygon_to_storage(polygon, precision=1)
-        debris_polygons_str = [polygon_to_storage(p, precision=1) for p in debris_polygons]
-
-        # Create debug image
-        if DEBUG_IMAGES:
-            output_folder = output_folders.get(model_name, debug_crop_outputs)
-            create_debug_image_ml(gray_processed, image_name, x, y, w, h, output_folder, model_name, polygon, shape_type, iou, debris_polygons)
-
-        results.append((image_name, (x, y, w, h), model_name, us_polygon_str, debris_polygons_str))
+        for future in as_completed(futures):
+            result = future.result()
+            if result is not None:
+                results.append(result)
 
     return results
 
