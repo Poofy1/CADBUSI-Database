@@ -102,6 +102,7 @@ class DatabaseManager:
                 location_type TEXT,
                 location_description TEXT,
                 lesion_descriptions TEXT,
+                valid INTEGER,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)

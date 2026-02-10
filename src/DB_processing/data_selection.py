@@ -1,3 +1,4 @@
+from config import CONFIG
 from src.DB_processing.image_processing import *
 from src.DB_processing.tools import append_audit
 from src.DB_processing.database import DatabaseManager
@@ -283,12 +284,6 @@ def Select_Data(database_path):
         db_out = db.get_images_dataframe()
         breast_df = db.get_study_cases_dataframe()
 
-        # Remove rows with missing data in crop_x, crop_y, crop_w, crop_h
-        rows_before = len(db_out)
-        db_out.dropna(subset=['crop_x', 'crop_y', 'crop_w', 'crop_h'], inplace=True)
-        rows_after = len(db_out)
-        append_audit("image_processing.missing_crop_removed", rows_before - rows_after)
-
         db_to_process = db_out
         columns_to_update = ['image_name', 'label', 'crop_aspect_ratio', 'closest_fn', 'distance', 'exclusion_reason']
         accession_ids = db_to_process['accession_number'].unique()
@@ -345,3 +340,7 @@ def Select_Data(database_path):
         db.insert_images_batch(update_data, update_only=True)
         
         print(f"Updated {len(db_to_process)} images in database")
+    
+    # Create Exclusion Data
+    apply_filters(CONFIG)
+        
