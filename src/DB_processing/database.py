@@ -237,9 +237,9 @@ class DatabaseManager:
             )
         """)
 
-        # BadData table (excluded images with reasons)
+        # BadImages table (excluded images with reasons)
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS BadData (
+            CREATE TABLE IF NOT EXISTS BadImages (
                 image_name TEXT PRIMARY KEY,
                 dicom_hash TEXT,
                 exclusion_reason TEXT NOT NULL,
@@ -268,7 +268,7 @@ class DatabaseManager:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_lesions_patient ON Lesions(patient_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_lesions_image ON Lesions(image_name)")
 
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_baddata_image ON BadData(image_name)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_baddata_image ON BadImages(image_name)")
 
         self.conn.commit()
 
@@ -553,12 +553,12 @@ class DatabaseManager:
         return cursor.rowcount
 
     def insert_bad_data_batch(self, bad_data: List[Dict[str, Any]]) -> int:
-        """Insert excluded images into BadData table. Clears existing data first."""
+        """Insert excluded images into BadImages table. Clears existing data first."""
         if not bad_data:
             return 0
         cursor = self.conn.cursor()
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS BadData (
+            CREATE TABLE IF NOT EXISTS BadImages (
                 image_name TEXT PRIMARY KEY,
                 dicom_hash TEXT,
                 exclusion_reason TEXT NOT NULL,
@@ -566,9 +566,9 @@ class DatabaseManager:
                 FOREIGN KEY (image_name) REFERENCES Images(image_name) ON DELETE CASCADE
             )
         """)
-        cursor.execute("DELETE FROM BadData")
+        cursor.execute("DELETE FROM BadImages")
         insert_query = """
-            INSERT OR REPLACE INTO BadData (image_name, dicom_hash, exclusion_reason)
+            INSERT OR REPLACE INTO BadImages (image_name, dicom_hash, exclusion_reason)
             VALUES (?, ?, ?)
         """
         rows = [
@@ -585,7 +585,7 @@ class DatabaseManager:
 
     def get_bad_data_dataframe(self, where_clause: str = "", params: tuple = ()) -> pd.DataFrame:
         """Get bad data as a pandas DataFrame with optional filtering."""
-        query = "SELECT * FROM BadData"
+        query = "SELECT * FROM BadImages"
         if where_clause:
             query += f" WHERE {where_clause}"
         return pd.read_sql_query(query, self.conn, params=params)

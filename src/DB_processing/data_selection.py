@@ -6,7 +6,7 @@ from scipy.spatial.distance import cdist
 from tqdm import tqdm
 import pandas as pd
 import os
-from tools.storage_adapter import save_data
+from tools.storage_adapter import save_data, list_files
 tqdm.pandas()
 
 
@@ -138,7 +138,7 @@ def process_nearest_given_ids(pid, subset, image_folder_path):
 def apply_filters(CONFIG):
     """
     Apply all quality and relevance filters to the image data.
-    Excluded images are saved to the BadData table with exclusion reasons.
+    Excluded images are saved to the BadImages table with exclusion reasons.
 
     Args:
         CONFIG: Configuration dictionary
@@ -153,6 +153,17 @@ def apply_filters(CONFIG):
         # Track initial counts
         audit_stats['init_images'] = len(image_df)
         audit_stats['init_breasts'] = len(breast_df)
+
+        # Filter 0: Remove images that don't exist on disk
+        image_folder = f'{CONFIG["DATABASE_DIR"]}/images/'
+        disk_files = set(os.path.basename(f) for f in list_files(image_folder))
+        missing_mask = ~image_df['image_name'].isin(disk_files)
+        missing_images = image_df[missing_mask][['image_name', 'dicom_hash']].copy()
+        missing_images['exclusion_reason'] = 'image does not exist'
+        excluded_images.append(missing_images)
+
+        image_df = image_df[~missing_mask]
+        audit_stats['missing_file_removed'] = len(missing_images)
 
         # Merge study_laterality from breast_df for laterality filtering logic
         if 'study_laterality' not in image_df.columns:
@@ -265,12 +276,12 @@ def apply_filters(CONFIG):
         # Track final usable images
         audit_stats['usable_images'] = len(image_df)
 
-        # Save excluded images to BadData table
+        # Save excluded images to BadImages table
         excluded_df = pd.concat(excluded_images, ignore_index=True)
         bad_data = excluded_df[['image_name', 'dicom_hash', 'exclusion_reason']].to_dict('records')
         db.insert_bad_data_batch(bad_data)
 
-        print(f"Saved {len(bad_data)} excluded images to BadData table")
+        print(f"Saved {len(bad_data)} excluded images to BadImages table")
 
         # Log audit statistics
         for key, value in audit_stats.items():
