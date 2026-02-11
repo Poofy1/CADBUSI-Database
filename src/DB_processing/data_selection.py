@@ -327,6 +327,52 @@ def Select_Data(database_path):
             updated_df = pd.concat(all_results, ignore_index=False)
             db_to_process.update(updated_df)
 
+        # Build CaliperPairs from near-duplicate pairs (distance <= 5)
+        # Exclude inpainted images - they have has_calipers=0 and would falsely match as "clean" sisters
+        inpainted_names = set(
+            db_to_process.loc[
+                (db_to_process['inpainted_from'].notna()) & (db_to_process['inpainted_from'] != ''),
+                'image_name'
+            ]
+        )
+        real_images = db_to_process[~db_to_process['image_name'].isin(inpainted_names)]
+        caliper_lookup = real_images.set_index('image_name')['has_calipers']
+
+        near_dupes = real_images[
+            (real_images['distance'] <= 5) &
+            (real_images['closest_fn'] != '') &
+            (~real_images['closest_fn'].isin(inpainted_names))
+        ].copy()
+
+        # Deduplicate pairs (A,B) and (B,A)
+        near_dupes['pair_key'] = near_dupes.apply(
+            lambda r: tuple(sorted([r['image_name'], r['closest_fn']])), axis=1
+        )
+        near_dupes = near_dupes.drop_duplicates(subset='pair_key')
+
+        # Vectorized sister lookup
+        near_dupes['sister_has_calipers'] = near_dupes['closest_fn'].map(caliper_lookup)
+        near_dupes['img_has'] = near_dupes['has_calipers'] == 1
+        near_dupes['sis_has'] = near_dupes['sister_has_calipers'] == 1
+
+        # Keep only pairs where exactly one has calipers
+        valid_pairs = near_dupes[near_dupes['img_has'] != near_dupes['sis_has']]
+
+        clean_pairs = pd.DataFrame({
+            'caliper_image_name': valid_pairs.apply(
+                lambda r: r['image_name'] if r['img_has'] else r['closest_fn'], axis=1
+            ),
+            'clean_image_name': valid_pairs.apply(
+                lambda r: r['closest_fn'] if r['img_has'] else r['image_name'], axis=1
+            )
+        })
+        clean_pairs = clean_pairs.drop_duplicates(subset='caliper_image_name')
+
+        if not clean_pairs.empty:
+            caliper_pairs = clean_pairs.to_dict('records')
+            db.insert_caliper_pairs_batch(caliper_pairs)
+            print(f"Saved {len(caliper_pairs)} caliper/clean pairs to CaliperPairs table")
+
         # Merge study_laterality from breast_df for laterality filtering logic
         db_to_process = db_to_process.merge(
             breast_df[['accession_number', 'study_laterality']],

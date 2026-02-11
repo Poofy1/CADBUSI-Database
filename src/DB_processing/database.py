@@ -248,6 +248,17 @@ class DatabaseManager:
             )
         """)
 
+        # CaliperPairs table (matched caliper/clean/inpainted image pairs)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS CaliperPairs (
+                caliper_image_name TEXT PRIMARY KEY,
+                clean_image_name TEXT,
+                inpainted_image_name TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (caliper_image_name) REFERENCES Images(image_name) ON DELETE CASCADE
+            )
+        """)
+
         # Create indexes for performance
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_images_accession ON Images(accession_number)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_images_patient ON Images(patient_id)")
@@ -269,6 +280,7 @@ class DatabaseManager:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_lesions_image ON Lesions(image_name)")
 
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_baddata_image ON BadImages(image_name)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_caliperpairs_caliper ON CaliperPairs(caliper_image_name)")
 
         self.conn.commit()
 
@@ -582,6 +594,48 @@ class DatabaseManager:
         cursor.executemany(insert_query, rows)
         self.conn.commit()
         return cursor.rowcount
+
+    def insert_caliper_pairs_batch(self, pairs: List[Dict[str, Any]]) -> int:
+        """Insert caliper/clean/inpainted pairs into CaliperPairs table.
+        Uses upsert to allow updating clean_image_name and inpainted_image_name separately."""
+        if not pairs:
+            return 0
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS CaliperPairs (
+                caliper_image_name TEXT PRIMARY KEY,
+                clean_image_name TEXT,
+                inpainted_image_name TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (caliper_image_name) REFERENCES Images(image_name) ON DELETE CASCADE
+            )
+        """)
+        # Build upsert that only updates non-null fields
+        insert_query = """
+            INSERT INTO CaliperPairs (caliper_image_name, clean_image_name, inpainted_image_name)
+            VALUES (?, ?, ?)
+            ON CONFLICT(caliper_image_name) DO UPDATE SET
+                clean_image_name = COALESCE(excluded.clean_image_name, CaliperPairs.clean_image_name),
+                inpainted_image_name = COALESCE(excluded.inpainted_image_name, CaliperPairs.inpainted_image_name)
+        """
+        rows = [
+            (
+                row['caliper_image_name'],
+                row.get('clean_image_name'),
+                row.get('inpainted_image_name')
+            )
+            for row in pairs
+        ]
+        cursor.executemany(insert_query, rows)
+        self.conn.commit()
+        return cursor.rowcount
+
+    def get_caliper_pairs_dataframe(self, where_clause: str = "", params: tuple = ()) -> pd.DataFrame:
+        """Get caliper pairs as a pandas DataFrame with optional filtering."""
+        query = "SELECT * FROM CaliperPairs"
+        if where_clause:
+            query += f" WHERE {where_clause}"
+        return pd.read_sql_query(query, self.conn, params=params)
 
     def get_bad_data_dataframe(self, where_clause: str = "", params: tuple = ()) -> pd.DataFrame:
         """Get bad data as a pandas DataFrame with optional filtering."""

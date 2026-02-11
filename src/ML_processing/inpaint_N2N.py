@@ -141,8 +141,18 @@ def Inpaint_Dataset_N2N(input_folder, num_workers=8):
             ))
             new_rows = [r for r in results if r is not None]
         
-        # Insert new rows into database
+        # Insert new rows into database and populate CaliperPairs
         if new_rows:
             rows_inserted = db.insert_images_batch(new_rows)
             print(f"Added {rows_inserted} inpainted images to database")
+
+            caliper_pairs = [
+                {
+                    'caliper_image_name': row['inpainted_from'],
+                    'inpainted_image_name': row['image_name']
+                }
+                for row in new_rows
+            ]
+            db.insert_caliper_pairs_batch(caliper_pairs)
+            print(f"Saved {len(caliper_pairs)} caliper/inpainted pairs to CaliperPairs table")
 
