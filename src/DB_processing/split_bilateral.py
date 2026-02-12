@@ -19,10 +19,10 @@ def _determine_has_benign(diagnosis):
 def _get_bilateral_image_lateralities(cursor):
     """Get image lateralities grouped by accession_number for all bilateral cases."""
     cursor.execute("""
-        SELECT i.accession_number, i.laterality
+        SELECT i.accession_number, UPPER(i.laterality)
         FROM Images i
         INNER JOIN StudyCases s ON s.accession_number = i.accession_number
-        WHERE s.study_laterality = 'BILATERAL'
+        WHERE s.study_laterality = 'BILATERAL' AND s.modality = 'US'
     """)
 
     groups = {}
@@ -59,7 +59,7 @@ def split_bilateral_cases_in_db():
         db.conn.commit()
 
         # Get all bilateral study cases
-        cursor.execute("SELECT * FROM StudyCases WHERE study_laterality = 'BILATERAL'")
+        cursor.execute("SELECT * FROM StudyCases WHERE study_laterality = 'BILATERAL' AND modality = 'US'")
         columns = [desc[0] for desc in cursor.description]
         bilateral_rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
 
@@ -171,16 +171,16 @@ def _insert_split_row(cursor, columns, original_row, original_accession, lateral
 
 def _reassign_child_records(cursor, old_accession, new_accession, laterality):
     """Reassign Images, Videos, and Lesions matching a specific laterality to the new accession."""
-    # Reassign Images by laterality
+    # Reassign Images by laterality (case-insensitive match)
     cursor.execute("""
         UPDATE Images SET accession_number = ?
-        WHERE accession_number = ? AND laterality = ?
+        WHERE accession_number = ? AND UPPER(laterality) = ?
     """, (new_accession, old_accession, laterality))
 
-    # Reassign Videos by laterality
+    # Reassign Videos by laterality (case-insensitive match)
     cursor.execute("""
         UPDATE Videos SET accession_number = ?
-        WHERE accession_number = ? AND laterality = ?
+        WHERE accession_number = ? AND UPPER(laterality) = ?
     """, (new_accession, old_accession, laterality))
 
     # Reassign Lesions — route via their linked image's laterality
