@@ -76,6 +76,10 @@ def calculate_laterality_stats(breast_df):
     append_audit("export.num_right_breasts", int(laterality_counts.get('RIGHT', 0)))
     append_audit("export.num_bilateral_breasts", int(laterality_counts.get('BILATERAL', 0)))
 
+    if 'was_bilateral' in breast_df.columns:
+        was_bilateral_count = int(breast_df['was_bilateral'].sum())
+        append_audit("export.num_was_bilateral", was_bilateral_count)
+
 
 def calculate_split_diagnosis_stats(breast_df):
     """Calculate and log diagnosis counts by split and laterality."""

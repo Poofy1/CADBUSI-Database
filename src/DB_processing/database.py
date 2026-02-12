@@ -103,6 +103,8 @@ class DatabaseManager:
                 location_description TEXT,
                 lesion_descriptions TEXT,
                 valid INTEGER,
+                original_accession_number TEXT,
+                was_bilateral INTEGER DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -271,6 +273,7 @@ class DatabaseManager:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_studies_patient ON StudyCases(patient_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_studies_laterality ON StudyCases(study_laterality)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_studies_malignant ON StudyCases(has_malignant)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_studies_original_accession ON StudyCases(original_accession_number)")
 
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_path_patient ON Pathology(patient_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_path_accession ON Pathology(accession_number)")
@@ -489,7 +492,9 @@ class DatabaseManager:
             'location_id', 'location_name', 'location_city', 'location_state',
             'location_zip', 'location_address', 'location_type', 'location_description',
             'lesion_descriptions',
-            'valid'
+            'valid',
+            'original_accession_number',
+            'was_bilateral'
         ]
         
         string_columns = ['accession_number', 'patient_id']

@@ -1,138 +1,210 @@
-from tqdm import tqdm
-import pandas as pd
 from src.DB_processing.tools import append_audit
+from src.DB_processing.database import DatabaseManager
 
-def determine_has_malignant(row, laterality):
-    """
-    Determine if a breast has malignancy based on diagnosis columns and laterality.
 
-    Args:
-        row: DataFrame row with left_diagnosis and right_diagnosis columns
-        laterality: 'LEFT' or 'RIGHT'
-
-    Returns:
-        1 if malignant, 0 if not malignant, -1 if both diagnoses are NULL
-    """
-    # Check if both diagnoses are NULL
-    left_diag = row.get('left_diagnosis', None)
-    right_diag = row.get('right_diagnosis', None)
-
-    if pd.isna(left_diag) and pd.isna(right_diag):
-        return -1
-
-    if laterality == 'LEFT':
-        diagnosis = left_diag
-    elif laterality == 'RIGHT':
-        diagnosis = right_diag
-    else:
+def _determine_has_malignant(diagnosis):
+    """Check if a diagnosis string contains MALIGNANT."""
+    if diagnosis is None:
         return 0
-
-    # Check if diagnosis contains MALIGNANT
-    if pd.notna(diagnosis) and 'MALIGNANT' in str(diagnosis).upper():
-        return 1
-    return 0
+    return 1 if 'MALIGNANT' in str(diagnosis).upper() else 0
 
 
-def split_bilateral_cases(breast_df, image_df):
+def _determine_has_benign(diagnosis):
+    """Check if a diagnosis string contains BENIGN."""
+    if diagnosis is None:
+        return 0
+    return 1 if 'BENIGN' in str(diagnosis).upper() else 0
+
+
+def _get_bilateral_image_lateralities(cursor):
+    """Get image lateralities grouped by accession_number for all bilateral cases."""
+    cursor.execute("""
+        SELECT i.accession_number, i.laterality
+        FROM Images i
+        INNER JOIN StudyCases s ON s.accession_number = i.accession_number
+        WHERE s.study_laterality = 'BILATERAL'
+    """)
+
+    groups = {}
+    for acc, lat in cursor.fetchall():
+        if acc not in groups:
+            groups[acc] = []
+        groups[acc].append(lat)
+    return groups
+
+
+def split_bilateral_cases_in_db():
     """
-    Split bilateral cases into separate LEFT and RIGHT breast rows based on available images.
-    Only splits if images exist for both lateralities. Otherwise converts to single-sided.
-    Keeps bilateral cases with unknown laterality and flags them with has_unknown_laterality=1.
+    Split bilateral StudyCases into separate LEFT and RIGHT rows in the database.
 
-    Returns:
-        Updated breast_df with bilateral cases split or converted
+    For each bilateral case:
+    - If images exist for BOTH sides: split into two rows (ACC_L, ACC_R)
+    - If images exist for only ONE side: convert to that side
+    - If NO images exist: remove the case
+
+    Child records (Images, Videos, Lesions) are reassigned to the correct split accession.
     """
-    bilateral_df = breast_df[breast_df['study_laterality'] == 'BILATERAL'].copy()
-    non_bilateral_df = breast_df[breast_df['study_laterality'] != 'BILATERAL'].copy()
+    with DatabaseManager() as db:
+        cursor = db.conn.cursor()
 
-    # Add was_bilateral and has_unknown_laterality columns to non-bilateral cases (set to 0)
-    non_bilateral_df['was_bilateral'] = 0
-    non_bilateral_df['has_unknown_laterality'] = 0
+        # Ensure new columns exist (for databases created before this migration)
+        cursor.execute("PRAGMA table_info(StudyCases)")
+        existing_columns = {row[1] for row in cursor.fetchall()}
+        if 'original_accession_number' not in existing_columns:
+            cursor.execute("ALTER TABLE StudyCases ADD COLUMN original_accession_number TEXT")
+            print("Added column 'original_accession_number' to StudyCases")
+        if 'was_bilateral' not in existing_columns:
+            cursor.execute("ALTER TABLE StudyCases ADD COLUMN was_bilateral INTEGER DEFAULT 0")
+            print("Added column 'was_bilateral' to StudyCases")
+        db.conn.commit()
 
-    if bilateral_df.empty:
-        return non_bilateral_df
+        # Get all bilateral study cases
+        cursor.execute("SELECT * FROM StudyCases WHERE study_laterality = 'BILATERAL'")
+        columns = [desc[0] for desc in cursor.description]
+        bilateral_rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
 
-    # Pre-group images by accession_number to avoid repeated filtering (HUGE speedup!)
-    print(f"Pre-grouping {len(image_df)} images by accession number...")
-    image_groups = image_df.groupby('accession_number')['laterality'].apply(list).to_dict()
+        if not bilateral_rows:
+            print("No bilateral cases found to split.")
+            return
 
-    split_rows = []
-    converted_rows = []
-    removed_count = 0
-    flagged_unknown_laterality = 0
+        print(f"Found {len(bilateral_rows)} bilateral cases to process...")
 
-    print(f"Processing {len(bilateral_df)} bilateral cases...")
-    for _, row in tqdm(bilateral_df.iterrows(), total=len(bilateral_df), desc="Splitting bilateral cases"):
-        accession = row['accession_number']
+        # Get image lateralities for all bilateral cases in one query
+        image_groups = _get_bilateral_image_lateralities(cursor)
 
-        # Get lateralities for this accession (much faster than filtering!)
-        lateralities = image_groups.get(accession, [])
+        split_count = 0
+        converted_count = 0
+        removed_count = 0
 
-        if not lateralities:
-            # No images for this accession
-            removed_count += 1
-            continue
+        for row in bilateral_rows:
+            accession = row['accession_number']
+            lateralities = image_groups.get(accession, [])
 
-        # Check for unknown/null laterality images
-        has_unknown = any(
-            pd.isna(lat) or lat == '' or str(lat).upper() == 'UNKNOWN'
-            for lat in lateralities
+            if not lateralities:
+                # No images — remove this case (CASCADE will clean up any child records)
+                cursor.execute("DELETE FROM StudyCases WHERE accession_number = ?", (accession,))
+                removed_count += 1
+                continue
+
+            has_left = any(lat == 'LEFT' for lat in lateralities)
+            has_right = any(lat == 'RIGHT' for lat in lateralities)
+
+            if has_left and has_right:
+                # Split into LEFT and RIGHT
+                _insert_split_row(cursor, columns, row, accession, 'LEFT')
+                _insert_split_row(cursor, columns, row, accession, 'RIGHT')
+                _reassign_child_records(cursor, accession, f"{accession}_L", 'LEFT')
+                _reassign_child_records(cursor, accession, f"{accession}_R", 'RIGHT')
+                # Delete original bilateral row
+                cursor.execute("DELETE FROM StudyCases WHERE accession_number = ?", (accession,))
+                split_count += 1
+            elif has_left:
+                _insert_split_row(cursor, columns, row, accession, 'LEFT')
+                _reassign_child_records(cursor, accession, f"{accession}_L", 'LEFT')
+                # Reassign any remaining child records (unknown laterality) to the LEFT side
+                _reassign_remaining_child_records(cursor, accession, f"{accession}_L")
+                cursor.execute("DELETE FROM StudyCases WHERE accession_number = ?", (accession,))
+                converted_count += 1
+            elif has_right:
+                _insert_split_row(cursor, columns, row, accession, 'RIGHT')
+                _reassign_child_records(cursor, accession, f"{accession}_R", 'RIGHT')
+                _reassign_remaining_child_records(cursor, accession, f"{accession}_R")
+                cursor.execute("DELETE FROM StudyCases WHERE accession_number = ?", (accession,))
+                converted_count += 1
+            else:
+                # Images exist but none have LEFT/RIGHT laterality — remove
+                cursor.execute("DELETE FROM StudyCases WHERE accession_number = ?", (accession,))
+                removed_count += 1
+
+        db.conn.commit()
+
+        print(f"Bilateral split complete: {split_count} split into L+R, "
+              f"{converted_count} converted to single-sided, "
+              f"{removed_count} removed (no images or no laterality)")
+
+        append_audit("bilateral_split.split_into_lr", split_count)
+        append_audit("bilateral_split.converted_single_side", converted_count)
+        append_audit("bilateral_split.removed", removed_count)
+
+
+def _insert_split_row(cursor, columns, original_row, original_accession, laterality):
+    """Insert a new StudyCases row for one side of a bilateral split."""
+    suffix = '_L' if laterality == 'LEFT' else '_R'
+    new_accession = f"{original_accession}{suffix}"
+
+    # Determine diagnosis for this side
+    if laterality == 'LEFT':
+        diagnosis = original_row.get('left_diagnosis')
+        has_malignant = _determine_has_malignant(diagnosis)
+        has_benign = _determine_has_benign(diagnosis)
+    else:
+        diagnosis = original_row.get('right_diagnosis')
+        has_malignant = _determine_has_malignant(diagnosis)
+        has_benign = _determine_has_benign(diagnosis)
+
+    # Build new row
+    new_row = dict(original_row)
+    new_row['accession_number'] = new_accession
+    new_row['original_accession_number'] = original_accession
+    new_row['was_bilateral'] = 1
+    new_row['study_laterality'] = laterality
+    new_row['has_malignant'] = has_malignant
+    new_row['has_benign'] = has_benign
+
+    # Clear non-relevant diagnosis
+    if laterality == 'LEFT':
+        new_row['right_diagnosis'] = None
+        new_row['right_diagnosis_source'] = None
+    else:
+        new_row['left_diagnosis'] = None
+        new_row['left_diagnosis_source'] = None
+
+    # Filter to only columns that exist in the table
+    # (exclude created_at to let default apply)
+    insert_columns = [c for c in columns if c != 'created_at' and c in new_row]
+    placeholders = ', '.join(['?'] * len(insert_columns))
+    col_names = ', '.join(insert_columns)
+    values = [new_row[c] for c in insert_columns]
+
+    cursor.execute(f"INSERT INTO StudyCases ({col_names}) VALUES ({placeholders})", values)
+
+
+def _reassign_child_records(cursor, old_accession, new_accession, laterality):
+    """Reassign Images, Videos, and Lesions matching a specific laterality to the new accession."""
+    # Reassign Images by laterality
+    cursor.execute("""
+        UPDATE Images SET accession_number = ?
+        WHERE accession_number = ? AND laterality = ?
+    """, (new_accession, old_accession, laterality))
+
+    # Reassign Videos by laterality
+    cursor.execute("""
+        UPDATE Videos SET accession_number = ?
+        WHERE accession_number = ? AND laterality = ?
+    """, (new_accession, old_accession, laterality))
+
+    # Reassign Lesions — route via their linked image's laterality
+    cursor.execute("""
+        UPDATE Lesions SET accession_number = ?
+        WHERE accession_number = ? AND image_name IN (
+            SELECT image_name FROM Images WHERE accession_number = ?
         )
+    """, (new_accession, old_accession, new_accession))
 
-        if has_unknown:
-            flagged_unknown_laterality += 1
 
-        has_left = 'LEFT' in lateralities
-        has_right = 'RIGHT' in lateralities
+def _reassign_remaining_child_records(cursor, old_accession, new_accession):
+    """Reassign any remaining child records (unknown laterality) to the new accession."""
+    cursor.execute("""
+        UPDATE Images SET accession_number = ?
+        WHERE accession_number = ?
+    """, (new_accession, old_accession))
 
-        if has_left and has_right:
-            # Split into two rows
-            left_row = row.copy()
-            left_row['study_laterality'] = 'LEFT'
-            left_row['has_malignant'] = determine_has_malignant(row, 'LEFT')
-            left_row['was_bilateral'] = 1
-            left_row['has_unknown_laterality'] = 1 if has_unknown else 0
+    cursor.execute("""
+        UPDATE Videos SET accession_number = ?
+        WHERE accession_number = ?
+    """, (new_accession, old_accession))
 
-            right_row = row.copy()
-            right_row['study_laterality'] = 'RIGHT'
-            right_row['has_malignant'] = determine_has_malignant(row, 'RIGHT')
-            right_row['was_bilateral'] = 1
-            right_row['has_unknown_laterality'] = 1 if has_unknown else 0
-
-            split_rows.extend([left_row, right_row])
-        elif has_left:
-            # Convert to LEFT only
-            converted_row = row.copy()
-            converted_row['study_laterality'] = 'LEFT'
-            converted_row['has_malignant'] = determine_has_malignant(row, 'LEFT')
-            converted_row['was_bilateral'] = 1
-            converted_row['has_unknown_laterality'] = 1 if has_unknown else 0
-            converted_rows.append(converted_row)
-        elif has_right:
-            # Convert to RIGHT only
-            converted_row = row.copy()
-            converted_row['study_laterality'] = 'RIGHT'
-            converted_row['has_malignant'] = determine_has_malignant(row, 'RIGHT')
-            converted_row['was_bilateral'] = 1
-            converted_row['has_unknown_laterality'] = 1 if has_unknown else 0
-            converted_rows.append(converted_row)
-        else:
-            # No images for either side, remove this case
-            removed_count += 1
-
-    # Combine all dataframes
-    result_dfs = [non_bilateral_df]
-    if split_rows:
-        result_dfs.append(pd.DataFrame(split_rows))
-    if converted_rows:
-        result_dfs.append(pd.DataFrame(converted_rows))
-
-    result_df = pd.concat(result_dfs, ignore_index=True)
-
-    print(f"Bilateral processing: {len(split_rows)//2} split into L+R, {len(converted_rows)} converted to single-sided, {removed_count} removed (no images), {flagged_unknown_laterality} flagged (unknown laterality)")
-    append_audit("export.bilateral_split", len(split_rows)//2)
-    append_audit("export.bilateral_converted", len(converted_rows))
-    append_audit("export.bilateral_removed_no_images", removed_count)
-    append_audit("export.bilateral_flagged_unknown_laterality", flagged_unknown_laterality)
-
-    return result_df
+    cursor.execute("""
+        UPDATE Lesions SET accession_number = ?
+        WHERE accession_number = ?
+    """, (new_accession, old_accession))
