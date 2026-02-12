@@ -392,7 +392,8 @@ def parse_video_data(dcm, dataset, current_index, parsed_database, video_n_frame
             data_dict[tag_name] = str(elem.value)
     
     #create video folder
-    video_path = f"{data_dict.get('PatientID', '')}_{data_dict.get('AccessionNumber', '')}_{current_index}"
+    dicom_hash = os.path.splitext(os.path.basename(dcm))[0]
+    video_path = dicom_hash
     make_dirs(f"{parsed_database}/videos/{video_path}/")
     
     #get image frames
@@ -414,13 +415,13 @@ def parse_video_data(dcm, dataset, current_index, parsed_database, video_n_frame
             if len(frame.shape) == 3:  # if the frame has 3 channels
                 frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)  # Convert to grayscale
 
-            image_name = f"{data_dict.get('PatientID', '')}_{data_dict.get('AccessionNumber', '')}_{current_index}_{image_count}.png"
+            frame_name = f"{image_count}.png"
 
             # Only increment count if frame save succeeds
-            if save_data(frame, f"{parsed_database}/videos/{video_path}/{image_name}"):
+            if save_data(frame, f"{parsed_database}/videos/{video_path}/{frame_name}"):
                 image_count += 1
             else:
-                print(f"Failed to save video frame {image_name}")
+                print(f"Failed to save video frame {video_path}/{frame_name}")
 
     # Only add metadata if at least one frame was saved successfully
     if image_count == 0:
@@ -432,7 +433,7 @@ def parse_video_data(dcm, dataset, current_index, parsed_database, video_n_frame
     data_dict['FileName'] = os.path.join(os.path.basename(os.path.dirname(dcm)), os.path.basename(dcm))
     data_dict['ImagesPath'] = video_path
     data_dict['SavedFrames'] = image_count
-    data_dict['DicomHash'] = os.path.splitext(os.path.basename(dcm))[0]
+    data_dict['DicomHash'] = dicom_hash
     data_dict['SoftwareVersions'] = str(software_version)
     data_dict['ManufacturerModelName'] = str(manufacturer_model)
 
@@ -564,7 +565,8 @@ def parse_single_dcm(dcm, current_index, parsed_database, video_n_frames, birads
             im = cv2.cvtColor(np_im, cv2.COLOR_BGR2GRAY)
             data_dict['PhotometricInterpretation'] = 'MONOCHROME2_OVERRIDE'
 
-    image_name = f"{data_dict.get('PatientID', '')}_{data_dict.get('AccessionNumber', '')}_{current_index}.png"
+    dicom_hash = os.path.splitext(os.path.basename(dcm))[0]
+    image_name = f"{dicom_hash}.png"
 
     # Only add metadata if image save succeeds
     if not save_data(im, f"{parsed_database}/images/{image_name}"):
@@ -575,7 +577,7 @@ def parse_single_dcm(dcm, current_index, parsed_database, video_n_frames, birads
     data_dict['DataType'] = 'image'
     data_dict['FileName'] = os.path.join(os.path.basename(os.path.dirname(dcm)), os.path.basename(dcm))
     data_dict['ImageName'] = image_name
-    data_dict['DicomHash'] = os.path.splitext(os.path.basename(dcm))[0]
+    data_dict['DicomHash'] = dicom_hash
     data_dict['RegionCount'] = region_count
     data_dict['SoftwareVersions'] = str(software_version)
     data_dict['ManufacturerModelName'] = str(manufacturer_model)
