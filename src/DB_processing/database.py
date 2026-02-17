@@ -261,6 +261,56 @@ class DatabaseManager:
             )
         """)
 
+        # ImageLabels table (per-image classification labels)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS ImageLabels (
+                dicom_hash TEXT PRIMARY KEY,
+                reject INTEGER,
+                only_normal INTEGER,
+                cyst INTEGER,
+                benign INTEGER,
+                malignant INTEGER,
+                quality TEXT,
+                version TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (dicom_hash) REFERENCES Images(dicom_hash)
+            )
+        """)
+
+        # LesionLabels table (bounding box + mask annotations per lesion)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS LesionLabels (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                dicom_hash TEXT,
+                x1 INTEGER,
+                y1 INTEGER,
+                x2 INTEGER,
+                y2 INTEGER,
+                mask_image TEXT,
+                quality TEXT,
+                version TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (dicom_hash) REFERENCES ImageLabels(dicom_hash)
+            )
+        """)
+
+        # RegionLabels table (ultrasound region crop labels)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS RegionLabels (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                dicom_hash TEXT,
+                crop_x INTEGER,
+                crop_y INTEGER,
+                crop_h INTEGER,
+                crop_w INTEGER,
+                us_polygon TEXT,
+                debris_polygon TEXT,
+                version TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (dicom_hash) REFERENCES Images(dicom_hash)
+            )
+        """)
+
         # Create indexes for performance
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_images_accession ON Images(accession_number)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_images_patient ON Images(patient_id)")
@@ -284,6 +334,10 @@ class DatabaseManager:
 
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_baddata_image ON BadImages(image_name)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_caliperpairs_caliper ON CaliperPairs(caliper_image_name)")
+
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_imagelabels_dicom ON ImageLabels(dicom_hash)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_lesionlabels_dicom ON LesionLabels(dicom_hash)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_regionlabels_dicom ON RegionLabels(dicom_hash)")
 
         self.conn.commit()
 
@@ -634,6 +688,94 @@ class DatabaseManager:
         cursor.executemany(insert_query, rows)
         self.conn.commit()
         return cursor.rowcount
+
+    def insert_image_labels_batch(self, label_data: List[Dict[str, Any]], upsert: bool = True) -> int:
+        """Insert image classification labels."""
+        all_columns = ['dicom_hash', 'reject', 'only_normal', 'cyst', 'benign', 'malignant', 'quality', 'version']
+        string_columns = ['dicom_hash', 'quality', 'version']
+        boolean_columns = ['reject', 'only_normal', 'cyst', 'benign', 'malignant']
+        return self._batch_upsert_helper(
+            table_name='ImageLabels',
+            data=label_data,
+            all_columns=all_columns,
+            unique_key='dicom_hash',
+            string_columns=string_columns,
+            boolean_columns=boolean_columns,
+            upsert=upsert
+        )
+
+    def insert_lesion_labels_batch(self, lesion_data: List[Dict[str, Any]]) -> int:
+        """Insert lesion bounding box and mask annotations."""
+        if not lesion_data:
+            return 0
+        cursor = self.conn.cursor()
+        insert_query = """
+            INSERT INTO LesionLabels (dicom_hash, x1, y1, x2, y2, mask_image, quality, version)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        rows = [
+            (
+                str(row.get('dicom_hash', '')),
+                row.get('x1'),
+                row.get('y1'),
+                row.get('x2'),
+                row.get('y2'),
+                row.get('mask_image'),
+                row.get('quality'),
+                row.get('version')
+            )
+            for row in lesion_data
+        ]
+        cursor.executemany(insert_query, rows)
+        self.conn.commit()
+        return cursor.rowcount
+
+    def insert_region_labels_batch(self, region_data: List[Dict[str, Any]]) -> int:
+        """Insert ultrasound region crop labels (allows duplicate dicom_hashes)."""
+        if not region_data:
+            return 0
+        cursor = self.conn.cursor()
+        insert_query = """
+            INSERT INTO RegionLabels (dicom_hash, crop_x, crop_y, crop_h, crop_w, us_polygon, debris_polygon, version)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        rows = [
+            (
+                str(row.get('dicom_hash', '')),
+                row.get('crop_x'),
+                row.get('crop_y'),
+                row.get('crop_h'),
+                row.get('crop_w'),
+                row.get('us_polygon'),
+                row.get('debris_polygon'),
+                row.get('version')
+            )
+            for row in region_data
+        ]
+        cursor.executemany(insert_query, rows)
+        self.conn.commit()
+        return cursor.rowcount
+
+    def get_image_labels_dataframe(self, where_clause: str = "", params: tuple = ()) -> pd.DataFrame:
+        """Get image labels as a pandas DataFrame."""
+        query = "SELECT * FROM ImageLabels"
+        if where_clause:
+            query += f" WHERE {where_clause}"
+        return pd.read_sql_query(query, self.conn, params=params)
+
+    def get_lesion_labels_dataframe(self, where_clause: str = "", params: tuple = ()) -> pd.DataFrame:
+        """Get lesion labels as a pandas DataFrame."""
+        query = "SELECT * FROM LesionLabels"
+        if where_clause:
+            query += f" WHERE {where_clause}"
+        return pd.read_sql_query(query, self.conn, params=params)
+
+    def get_region_labels_dataframe(self, where_clause: str = "", params: tuple = ()) -> pd.DataFrame:
+        """Get region labels as a pandas DataFrame."""
+        query = "SELECT * FROM RegionLabels"
+        if where_clause:
+            query += f" WHERE {where_clause}"
+        return pd.read_sql_query(query, self.conn, params=params)
 
     def get_caliper_pairs_dataframe(self, where_clause: str = "", params: tuple = ()) -> pd.DataFrame:
         """Get caliper pairs as a pandas DataFrame with optional filtering."""
