@@ -311,6 +311,24 @@ class DatabaseManager:
             )
         """)
 
+        # CaliperLabels table (per-image caliper annotation labels)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS CaliperLabels (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                dicom_hash TEXT NOT NULL,
+                has_calipers INTEGER,
+                caliper_points TEXT,
+                n_points INTEGER,
+                split TEXT,
+                bi_rads TEXT,
+                quality TEXT,
+                accession_number TEXT,
+                version TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (dicom_hash) REFERENCES Images(dicom_hash)
+            )
+        """)
+
         # Create indexes for performance
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_images_accession ON Images(accession_number)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_images_patient ON Images(patient_id)")
@@ -338,6 +356,7 @@ class DatabaseManager:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_imagelabels_dicom ON ImageLabels(dicom_hash)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_lesionlabels_dicom ON LesionLabels(dicom_hash)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_regionlabels_dicom ON RegionLabels(dicom_hash)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_caliperlabels_dicom ON CaliperLabels(dicom_hash)")
 
         self.conn.commit()
 
