@@ -32,7 +32,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 import pandas as pd
-import yaml
+import torch
+from tqdm import tqdm
 
 # Project root on sys.path so we can import tools/ and config
 _root = Path(__file__).resolve().parent.parent
@@ -45,13 +46,15 @@ from config import CONFIG
 from tools.storage_adapter import StorageClient
 from ui_mask import compute_ui_mask
 from export_configurable import ExportConfig
+from infer_us_region import load_model, predict_mask_from_array
+from simplify_region import simplify_us_region, polygon_to_storage
 
 
 # ---------------------------------------------------------------------------
 # Config -> SQL
 # ---------------------------------------------------------------------------
 
-def build_query(config: ExportConfig, raw_cfg: dict) -> str:
+def build_query(config: ExportConfig) -> str:
     """Build the Images+StudyCases SQL query from a structured ExportConfig."""
     conditions = [
         "i.crop_x IS NOT NULL",
@@ -75,10 +78,7 @@ def build_query(config: ExportConfig, raw_cfg: dict) -> str:
         conditions.append(f"s.date <= '{stf.max_year}-12-31'")
     if stf.is_biopsy is not None:
         conditions.append(f"s.is_biopsy = {stf.is_biopsy}")
-
-    # Extra fields not in ExportConfig
-    raw_stf = raw_cfg.get("study_filters", {})
-    if raw_stf.get("exclude_unknown_label"):
+    if stf.exclude_unknown_label:
         conditions.append("(s.has_malignant != -1 OR s.has_malignant IS NULL)")
 
     imf = config.image_filters
@@ -294,6 +294,56 @@ def process_one(
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+# Stage 1 pre-pass: fill missing us_polygon via U-Net inference
+# ---------------------------------------------------------------------------
+
+def fill_missing_polygons(
+    df: pd.DataFrame,
+    model_path: str,
+    image_dir: str,
+    storage: StorageClient,
+    device: str,
+) -> pd.DataFrame:
+    """Infer us_polygon for any images where it is null/empty.
+
+    Downloads each affected image, runs U-Net (Stage 1), simplifies to a
+    polygon string (Stage 3), and patches the dataframe in memory.
+    Does not write back to the DB — permanent storage is ultrasound_cropping.py.
+    """
+    missing_mask = df["us_polygon"].isna() | (df["us_polygon"] == "")
+    n_missing = int(missing_mask.sum())
+    if n_missing == 0:
+        print("  All images have us_polygon — skipping inference pre-pass.")
+        return df
+
+    print(f"\n=== Polygon Inference Pre-pass: {n_missing:,} images missing us_polygon ===")
+    model, img_size = load_model(model_path, device)
+
+    inferred: dict[str, str] = {}
+    for row in tqdm(df[missing_mask].to_dict("records"), desc="Infer polygons"):
+        name = row["image_name"]
+        try:
+            img_bytes = _download_bytes(name, image_dir, storage)
+            nparr = np.frombuffer(img_bytes, np.uint8)
+            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            if img is None:
+                continue
+            mask = predict_mask_from_array(model, img, img_size, device)
+            scanner = row.get("manufacturer_model_name")
+            _, polygon, _ = simplify_us_region(mask, scanner)
+            if len(polygon) > 0:
+                inferred[name] = polygon_to_storage(polygon, precision=1)
+        except Exception as e:
+            print(f"  Warning: inference failed for {name}: {e}")
+
+    df = df.copy()
+    for name, poly_str in inferred.items():
+        df.loc[df["image_name"] == name, "us_polygon"] = poly_str
+    print(f"  Inferred {len(inferred):,}/{n_missing:,} polygons")
+    return df
+
+
+# ---------------------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser(
@@ -337,6 +387,16 @@ def main():
         action="store_true",
         help="Print stats and exit without processing",
     )
+    parser.add_argument(
+        "--model",
+        default=None,
+        help="U-Net checkpoint path for inferring missing us_polygon values (Stage 1 pre-pass)",
+    )
+    parser.add_argument(
+        "--device",
+        default="cuda" if torch.cuda.is_available() else "cpu",
+        help="Device for U-Net inference (default: cuda if available)",
+    )
     args = parser.parse_args()
 
     # Resolve from config
@@ -350,19 +410,17 @@ def main():
     print(f"Image source : {image_dir}")
 
     # Load dataset config
-    with open(args.dataset) as f:
-        raw_cfg = yaml.safe_load(f)
     config = ExportConfig.from_yaml(Path(args.dataset))
-    pre = raw_cfg.get("preprocessing", {})
-    target_size = pre.get("target_size", 256)
-    fill = pre.get("fill", 128)
-    pipeline = pre.get("pipeline", "structural_tissue_aware")
+    pre = config.preprocessing
+    target_size = pre.target_size
+    fill = pre.fill
+    pipeline = pre.pipeline
     print(f"Dataset : {config.name}")
     print(f"          {config.description}")
     print(f"  target_size={target_size}, fill={fill}, pipeline={pipeline}")
 
     # Load data from DB
-    query = build_query(config, raw_cfg)
+    query = build_query(config)
     print(f"\nLoading DB: {args.db}")
     df = load_from_db(args.db, query)
     df = apply_image_filters(df, config)
@@ -374,6 +432,9 @@ def main():
     if df.empty:
         print("No images to process — exiting.")
         return
+
+    if args.model:
+        df = fill_missing_polygons(df, args.model, image_dir, storage, args.device)
 
     if args.dry_run:
         sample = df.head(1_000).copy()
@@ -391,6 +452,10 @@ def main():
     subdirs = ["images"] if pipeline == "simple_crop_letterbox" else ["images", "masks", "patch_tissue"]
     for sub in subdirs:
         (output_dir / sub).mkdir(parents=True, exist_ok=True)
+
+    # Copy config to output for reproducibility
+    import shutil
+    shutil.copy(args.dataset, output_dir / "export_config.yaml")
 
     rows = df.to_dict("records")
 

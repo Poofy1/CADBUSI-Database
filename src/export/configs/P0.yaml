@@ -32,8 +32,9 @@ scanner_filters:
 
 # Study-level filters
 study_filters:
-  is_biopsy: 0          # Only non-biopsy exams
-  min_year: 2018        # Year >= 2018 (pre-2018 are biased comparison imports)
+  is_biopsy: 0                   # Only non-biopsy exams
+  min_year: 2018                 # Year >= 2018 (pre-2018 are biased comparison imports)
+  exclude_unknown_label: true    # Exclude has_malignant == -1
 
 study_processing:
   bilateral_handling:

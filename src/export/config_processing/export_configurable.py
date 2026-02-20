@@ -78,9 +78,17 @@ class ScannerFilters:
 
 @dataclass
 class StudyFilters:
-    is_biopsy: Optional[int] = None  # Filter by is_biopsy value (0 or 1)
-    min_year: Optional[int] = None   # Minimum year (inclusive)
-    max_year: Optional[int] = None   # Maximum year (inclusive)
+    is_biopsy: Optional[int] = None        # Filter by is_biopsy value (0 or 1)
+    min_year: Optional[int] = None         # Minimum year (inclusive)
+    max_year: Optional[int] = None         # Maximum year (inclusive)
+    exclude_unknown_label: bool = False    # Exclude has_malignant == -1
+
+
+@dataclass
+class PreprocessingConfig:
+    pipeline: str = "structural_tissue_aware"  # structural_tissue_aware or simple_crop_letterbox
+    target_size: int = 256
+    fill: int = 128
 
 
 @dataclass
@@ -105,6 +113,7 @@ class OutputConfig:
 class ExportConfig:
     name: str = "default"
     description: str = ""
+    preprocessing: PreprocessingConfig = field(default_factory=PreprocessingConfig)
     image_filters: ImageFilters = field(default_factory=ImageFilters)
     scanner_filters: ScannerFilters = field(default_factory=ScannerFilters)
     study_filters: StudyFilters = field(default_factory=StudyFilters)
@@ -169,12 +178,21 @@ class ExportConfig:
                 allowed_scanners=sf.get("allowed_scanners", []),
             )
 
+        if "preprocessing" in data:
+            p = data["preprocessing"]
+            config.preprocessing = PreprocessingConfig(
+                pipeline=p.get("pipeline", "structural_tissue_aware"),
+                target_size=p.get("target_size", 256),
+                fill=p.get("fill", 128),
+            )
+
         if "study_filters" in data:
             stf = data["study_filters"]
             config.study_filters = StudyFilters(
                 is_biopsy=stf.get("is_biopsy"),
                 min_year=stf.get("min_year"),
                 max_year=stf.get("max_year"),
+                exclude_unknown_label=stf.get("exclude_unknown_label", False),
             )
 
         if "v6" in data:
