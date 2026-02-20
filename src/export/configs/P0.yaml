@@ -1,0 +1,65 @@
+# Dataset Export Configuration - v6
+# Includes scanner filtering and v6-specific output files
+
+name: "P0 dataset"
+description: "Simple crop + letterbox, no masks"
+
+preprocessing:
+  pipeline: simple_crop_letterbox     # crop only, center letterbox to target_size, no masks/patches
+  target_size: 256
+  fill: 128
+
+image_filters:
+  darkness_max: 75
+  allowed_areas:
+    - breast
+    - unknown
+  region_count_max: 1
+  require_crop_coords: true
+  aspect_ratio_min: 0.5
+  aspect_ratio_max: 4.0
+  min_dimension: 200
+  require_on_disk: true  # Only images that exist on disk
+
+# Scanner filtering - ONLY allow these 5 scanners
+scanner_filters:
+  allowed_scanners:
+    - "LOGIQE9"
+    - "LOGIQE10"
+    - "EPIQ 7G"
+    - "EPIQ 5G"
+    - "EPIQ Elite"
+
+# Study-level filters
+study_filters:
+  is_biopsy: 0          # Only non-biopsy exams
+  min_year: 2018        # Year >= 2018 (pre-2018 are biased comparison imports)
+
+study_processing:
+  bilateral_handling:
+    split_bilateral: true
+    remove_if_no_laterality: true
+  null_laterality_handling:
+    split_if_both_sides: true
+    keep_unsplit: true
+
+split:
+  method: hash
+  split_by: patient_id
+  train_ratio: 0.70
+  val_ratio: 0.15
+  test_ratio: 0.15
+
+# v6 output options
+v6:
+  enabled: true
+  mini_enabled: true
+  mini_fraction: 0.20
+  mini_seed: "v6mini"
+
+output:
+  apply_image_filters: true  # Filter out excluded images
+  subfolder: "v6_dataset"    # Output CSVs to subfolder
+  files:
+    - BreastData.csv
+    - ImageData.csv
