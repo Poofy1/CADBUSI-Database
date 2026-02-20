@@ -231,6 +231,12 @@ def apply_filters(CONFIG):
         breast_df.loc[left_mask & ~both_null, 'has_malignant'] = left_malignant[left_mask & ~both_null].astype(int)
         breast_df.loc[right_mask & ~both_null, 'has_malignant'] = right_malignant[right_mask & ~both_null].astype(int)
 
+        # Persist has_malignant back to DB
+        db.insert_study_cases_batch(
+            breast_df[['accession_number', 'has_malignant']].to_dict('records'),
+            update_only=True,
+        )
+
         # Keep only images whose patient_id exists in breast_df
         valid_patient_ids = breast_df['patient_id'].unique()
         image_df = image_df[image_df['patient_id'].isin(valid_patient_ids)]
