@@ -128,6 +128,27 @@ def apply_image_filters(df: pd.DataFrame, config: ExportConfig) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
+# Output directory helpers
+# ---------------------------------------------------------------------------
+
+def resolve_output_dir(base: Path, resume: bool) -> Path:
+    """Return the output directory to use, auto-incrementing if needed.
+
+    If --resume is set, always use base as-is (even if it exists).
+    Otherwise, if base already exists, find the next free _NNNN suffix:
+      output/P2 → output/P2_0001 → output/P2_0002 → ...
+    """
+    if resume or not base.exists():
+        return base
+    i = 1
+    while True:
+        candidate = base.parent / f"{base.name}_{i:04d}"
+        if not candidate.exists():
+            return candidate
+        i += 1
+
+
+# ---------------------------------------------------------------------------
 # Storage
 # ---------------------------------------------------------------------------
 

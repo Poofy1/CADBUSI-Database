@@ -35,7 +35,7 @@ sys.path.insert(0, str(_export / "config_processing"))
 from config import CONFIG
 from tools.storage_adapter import StorageClient
 from export_configurable import ExportConfig
-from pipeline_common import build_query, load_from_db, apply_image_filters, download_bytes
+from pipeline_common import build_query, load_from_db, apply_image_filters, download_bytes, resolve_output_dir
 
 
 # ---------------------------------------------------------------------------
@@ -179,7 +179,9 @@ def main():
         df = sample
 
     # Output dirs
-    output_dir = args.output_dir
+    output_dir = resolve_output_dir(args.output_dir, args.resume)
+    if output_dir != args.output_dir:
+        print(f"  Output dir   : {output_dir}  (auto-incremented)")
     (output_dir / "images").mkdir(parents=True, exist_ok=True)
     shutil.copy(args.dataset, output_dir / "export_config.yaml")
 

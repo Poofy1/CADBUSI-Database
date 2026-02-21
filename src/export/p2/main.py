@@ -40,7 +40,7 @@ from config import CONFIG
 from tools.storage_adapter import StorageClient
 from ui_mask import compute_ui_mask
 from export_configurable import ExportConfig
-from pipeline_common import build_query, load_from_db, apply_image_filters, download_bytes
+from pipeline_common import build_query, load_from_db, apply_image_filters, download_bytes, resolve_output_dir
 from infer_us_region import load_model, predict_mask_from_array
 from simplify_region import simplify_us_region, polygon_to_storage
 from align_polygon_axes import align_polygon
@@ -307,7 +307,9 @@ def main():
         df = sample
 
     # Output dirs
-    output_dir = args.output_dir
+    output_dir = resolve_output_dir(args.output_dir, args.resume)
+    if output_dir != args.output_dir:
+        print(f"  Output dir   : {output_dir}  (auto-incremented)")
     for sub in ["images", "masks", "patch_tissue"]:
         (output_dir / sub).mkdir(parents=True, exist_ok=True)
     shutil.copy(args.dataset, output_dir / "export_config.yaml")
