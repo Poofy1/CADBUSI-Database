@@ -73,8 +73,11 @@ def _compute_fov_mask(us_polygon_str, debris_polygons_str, h, w):
     return mask
 
 
-def _tighten_one(gray, fov_mask, crop_y, crop_h):
-    """Core tightening: returns (new_y, new_h)."""
+def tighten_crop_intensity(gray, fov_mask, crop_y, crop_h):
+    """Trim dark empty rows from crop top/bottom based on intensity within FOV.
+
+    Returns (new_y, new_h). Safety: never shrinks below 50% of original height.
+    """
     h = gray.shape[0]
 
     masked = np.where(fov_mask > 0, gray.astype(np.float32), np.nan)
@@ -140,7 +143,7 @@ def _process_one(args):
     h, w = img.shape
     fov_mask = _compute_fov_mask(us_poly, debris_poly, h, w)
 
-    new_y, new_h = _tighten_one(img, fov_mask, int(crop_y), int(crop_h))
+    new_y, new_h = tighten_crop_intensity(img, fov_mask, int(crop_y), int(crop_h))
 
     orig_area = int(crop_w) * int(crop_h)
     new_area = int(crop_w) * new_h

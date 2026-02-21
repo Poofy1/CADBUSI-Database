@@ -74,12 +74,15 @@ def _rasterize_fov(us_polygon_str, debris_polygons_str, h, w):
     return mask
 
 
-def _process_one(args):
-    """Worker: clip one crop to FOV extent. Returns (idx, new_x, new_y, new_w, new_h, h_reduction, v_reduction)."""
-    idx, us_poly, debris_poly, img_rows, img_cols, crop_x, crop_y, crop_w, crop_h = args
+def clip_crop_to_fov(us_poly, debris_poly, img_rows, img_cols,
+                     crop_x, crop_y, crop_w, crop_h):
+    """Clip a crop box to the FOV polygon's pixel extent. Purely geometric.
 
+    Returns (new_x, new_y, new_w, new_h). Falls back to original values if
+    clipping would be too aggressive (safety: never shrink below 90%).
+    """
     if not us_poly:
-        return (idx, None, None, None, None, 0.0, 0.0)
+        return crop_x, crop_y, crop_w, crop_h
 
     h, w = int(img_rows), int(img_cols)
     cx, cy, cw, ch = int(crop_x), int(crop_y), int(crop_w), int(crop_h)
@@ -90,82 +93,57 @@ def _process_one(args):
     ch = min(ch, h - cy)
     cw = min(cw, w - cx)
     if cw <= 0 or ch <= 0:
-        return (idx, None, None, None, None, 0.0, 0.0)
+        return crop_x, crop_y, crop_w, crop_h
 
-    # Rasterize FOV mask (purely from geometry)
     fov_mask = _rasterize_fov(us_poly, debris_poly, h, w)
-
-    # Extract crop region of the mask
     mask_crop = fov_mask[cy:cy+ch, cx:cx+cw]
     if mask_crop.size == 0:
-        return (idx, None, None, None, None, 0.0, 0.0)
+        return crop_x, crop_y, crop_w, crop_h
 
-    # --- Horizontal clipping ---
-    # Per-column FOV pixel count within crop
+    # Horizontal clipping
     col_counts = np.sum(mask_crop > 0, axis=0)
-
-    # Find first/last columns with sufficient FOV
-    first_col = cw  # sentinel
-    for c in range(cw):
-        if col_counts[c] >= MIN_FOV_PIXELS_COL:
-            first_col = c
-            break
-
-    last_col = -1  # sentinel
-    for c in range(cw - 1, -1, -1):
-        if col_counts[c] >= MIN_FOV_PIXELS_COL:
-            last_col = c
-            break
-
-    if first_col >= last_col:
-        # No valid columns found — keep original
-        return (idx, None, None, None, None, 0.0, 0.0)
+    first_col = next((c for c in range(cw) if col_counts[c] >= MIN_FOV_PIXELS_COL), None)
+    last_col = next((c for c in range(cw - 1, -1, -1) if col_counts[c] >= MIN_FOV_PIXELS_COL), None)
+    if first_col is None or last_col is None or first_col >= last_col:
+        return crop_x, crop_y, crop_w, crop_h
 
     new_x = cx + max(0, first_col - MARGIN_H)
-    new_right = cx + min(cw, last_col + MARGIN_H + 1)
-    new_w = new_right - new_x
+    new_w = cx + min(cw, last_col + MARGIN_H + 1) - new_x
 
-    # --- Vertical clipping (FOV boundary only, not intensity) ---
-    # Per-row FOV pixel count within crop
+    # Vertical clipping (FOV boundary only, not intensity)
     row_counts = np.sum(mask_crop > 0, axis=1)
-
-    first_row = ch
-    for r in range(ch):
-        if row_counts[r] >= MIN_FOV_PIXELS_ROW:
-            first_row = r
-            break
-
-    last_row = -1
-    for r in range(ch - 1, -1, -1):
-        if row_counts[r] >= MIN_FOV_PIXELS_ROW:
-            last_row = r
-            break
-
-    if first_row >= last_row:
-        return (idx, None, None, None, None, 0.0, 0.0)
+    first_row = next((r for r in range(ch) if row_counts[r] >= MIN_FOV_PIXELS_ROW), None)
+    last_row = next((r for r in range(ch - 1, -1, -1) if row_counts[r] >= MIN_FOV_PIXELS_ROW), None)
+    if first_row is None or last_row is None or first_row >= last_row:
+        return crop_x, crop_y, crop_w, crop_h
 
     new_y = cy + max(0, first_row - MARGIN_V)
-    new_bottom = cy + min(ch, last_row + MARGIN_V + 1)
-    new_h = new_bottom - new_y
+    new_h = cy + min(ch, last_row + MARGIN_V + 1) - new_y
 
-    # Safety checks
-    if new_w < cw * MIN_WIDTH_RATIO and new_w < cw:
-        # Horizontal reduction too aggressive — skip horizontal
-        new_x = cx
-        new_w = cw
+    # Safety: revert if reduction too aggressive
+    if new_w < cw * MIN_WIDTH_RATIO:
+        new_x, new_w = cx, cw
+    if new_h < ch * MIN_HEIGHT_RATIO:
+        new_y, new_h = cy, ch
 
-    if new_h < ch * MIN_HEIGHT_RATIO and new_h < ch:
-        # Vertical reduction too aggressive — skip vertical
-        new_y = cy
-        new_h = ch
+    return new_x, new_y, new_w, new_h
 
-    # Compute reductions
+
+def _process_one(args):
+    """Worker: clip one crop to FOV extent. Returns (idx, new_x, new_y, new_w, new_h, h_reduction, v_reduction)."""
+    idx, us_poly, debris_poly, img_rows, img_cols, crop_x, crop_y, crop_w, crop_h = args
+
+    cx, cy, cw, ch = int(crop_x), int(crop_y), int(crop_w), int(crop_h)
+    new_x, new_y, new_w, new_h = clip_crop_to_fov(
+        us_poly, debris_poly, img_rows, img_cols, crop_x, crop_y, crop_w, crop_h
+    )
+
+    if new_x == cx and new_y == cy and new_w == cw and new_h == ch:
+        return (idx, None, None, None, None, 0.0, 0.0)
+
     h_reduction = (1 - new_w / cw) * 100 if cw > 0 else 0.0
     v_reduction = (1 - new_h / ch) * 100 if ch > 0 else 0.0
-
-    # Only report changes > 0.1%
-    changed = (h_reduction > 0.1) or (v_reduction > 0.1)
-    if not changed:
+    if h_reduction <= 0.1 and v_reduction <= 0.1:
         return (idx, None, None, None, None, 0.0, 0.0)
 
     return (idx, new_x, new_y, new_w, new_h, h_reduction, v_reduction)
