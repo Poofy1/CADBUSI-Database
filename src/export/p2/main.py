@@ -252,7 +252,7 @@ def main():
     )
     parser.add_argument(
         "--model",
-        default=None,
+        default=str(_p2 / "us_region_mobilenet_v2_v3_best.pth"),
         help="U-Net checkpoint path for inferring missing us_polygon values (Stage 1 pre-pass)",
     )
     parser.add_argument(
@@ -292,8 +292,7 @@ def main():
         print("No images to process — exiting.")
         return
 
-    if args.model:
-        df = fill_missing_polygons(df, args.model, image_dir, storage, args.device)
+    df = fill_missing_polygons(df, args.model, image_dir, storage, args.device)
 
     if args.dry_run:
         sample = df.head(1_000).copy()
