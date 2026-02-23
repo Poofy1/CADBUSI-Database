@@ -44,7 +44,7 @@ def build_query(config: ExportConfig) -> str:
     if stf.is_biopsy is not None:
         conditions.append(f"s.is_biopsy = {stf.is_biopsy}")
     if stf.exclude_unknown_label:
-        conditions.append("(s.has_malignant != -1 OR s.has_malignant IS NULL)")
+        conditions.append("s.has_malignant IN (0, 1)")
 
     imf = config.image_filters
     if imf.darkness_max is not None:

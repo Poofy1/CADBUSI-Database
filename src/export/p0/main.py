@@ -230,7 +230,7 @@ def main():
     print("\nWriting manifest ...")
     img_dir = output_dir / "images"
     manifest_rows = [
-        {**row, "image_path": f"images/{row['image_name']}"}
+        {**row, "label": int(row["has_malignant"]), "image_path": f"images/{row['image_name']}"}
         for row in df.to_dict("records")
         if (img_dir / row["image_name"]).exists()
     ]

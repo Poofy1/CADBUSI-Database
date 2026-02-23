@@ -361,6 +361,7 @@ def main():
     manifest_rows = [
         {
             **row,
+            "label": int(row["has_malignant"]),
             "image_path": f"images/{row['image_name']}",
             "mask_path": f"masks/{row['image_name']}",
             "patch_tissue_path": f"patch_tissue/{row['image_name']}",
