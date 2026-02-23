@@ -43,7 +43,7 @@ from pipeline_common import build_query, load_from_db, apply_image_filters, down
 # ---------------------------------------------------------------------------
 
 def preprocess_p0(img: np.ndarray, row: dict, target_size: int, fill: int) -> np.ndarray:
-    """Simple crop + center letterbox. No polygons, no masks, no patch maps."""
+    """Simple crop + top-left aligned resize. No polygons, no masks, no patch maps."""
     cx = max(0, int(row["crop_x"]))
     cy = max(0, int(row["crop_y"]))
     cw = min(int(row["crop_w"]), img.shape[1] - cx)
@@ -56,9 +56,7 @@ def preprocess_p0(img: np.ndarray, row: dict, target_size: int, fill: int) -> np
     img_resized = cv2.resize(img_crop, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
 
     canvas = np.full((target_size, target_size, 3), fill, dtype=np.uint8)
-    y_off = (target_size - new_h) // 2
-    x_off = (target_size - new_w) // 2
-    canvas[y_off:y_off + new_h, x_off:x_off + new_w] = img_resized
+    canvas[:new_h, :new_w] = img_resized
     return canvas
 
 
@@ -229,8 +227,14 @@ def main():
     # Manifest
     print("\nWriting manifest ...")
     img_dir = output_dir / "images"
+    _split_map = {0: "train", 1: "valid", 2: "test"}
     manifest_rows = [
-        {**row, "label": int(row["has_malignant"]), "image_path": f"images/{row['image_name']}"}
+        {
+            **row,
+            "label": int(row["has_malignant"]),
+            "split": _split_map.get(int(row["valid"]) if row.get("valid") is not None else 0, "train"),
+            "image_path": f"images/{row['image_name']}",
+        }
         for row in df.to_dict("records")
         if (img_dir / row["image_name"]).exists()
     ]

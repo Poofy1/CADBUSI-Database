@@ -358,10 +358,12 @@ def main():
     # Manifest
     print("\nWriting manifest ...")
     img_dir = output_dir / "images"
+    _split_map = {0: "train", 1: "valid", 2: "test"}
     manifest_rows = [
         {
             **row,
             "label": int(row["has_malignant"]),
+            "split": _split_map.get(int(row["valid"]) if row.get("valid") is not None else 0, "train"),
             "image_path": f"images/{row['image_name']}",
             "mask_path": f"masks/{row['image_name']}",
             "patch_tissue_path": f"patch_tissue/{row['image_name']}",

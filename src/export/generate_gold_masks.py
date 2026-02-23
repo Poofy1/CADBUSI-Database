@@ -33,7 +33,7 @@ sys.path.insert(0, str(_export / "config_processing"))
 
 from config import CONFIG
 from tools.storage_adapter import StorageClient
-from export_configurable import ExportConfig, compute_split
+from export_configurable import ExportConfig
 from pipeline_common import resolve_output_dir
 
 
@@ -79,6 +79,7 @@ def build_gold_mask_query(config: ExportConfig) -> str:
         i.manufacturer_model_name,
         i.crop_x, i.crop_y, i.crop_w, i.crop_h,
         s.has_malignant,
+        s.valid,
         s.date
     FROM LesionLabels ll
     JOIN Images i ON ll.dicom_hash = i.dicom_hash
@@ -181,9 +182,9 @@ def main():
     conn.close()
     print(f"  {len(df):,} lesion masks found")
 
-    # Compute split
-    df["split"] = df["patient_id"].apply(
-        lambda pid: ["test", "val", "train"][compute_split(pid, config.split)]
+    _split_map = {0: "train", 1: "valid", 2: "test"}
+    df["split"] = df["valid"].apply(
+        lambda v: _split_map.get(int(v) if pd.notna(v) else 0, "train")
     )
     df["label"] = df["has_malignant"].astype(int)
 
@@ -191,8 +192,8 @@ def main():
         df = df.head(args.limit)
         print(f"  Limited to first {args.limit}")
 
-    print(f"\nSplit distribution:")
-    print(df["split"].value_counts().to_string())
+    print(f"\nSplit distribution (0=train, 1=val, 2=test):")
+    print(df["split"].value_counts().sort_index().to_string())
     print(f"\nLabel distribution:")
     print(df["label"].value_counts().to_string())
 
