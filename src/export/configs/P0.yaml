@@ -20,6 +20,7 @@ image_filters:
   aspect_ratio_max: 4.0
   min_dimension: 200
   require_on_disk: true  # Only images that exist on disk
+  exclude_calipers: true # Exclude images with measurement calipers
 
 # Scanner filtering - ONLY allow these 5 scanners
 scanner_filters:

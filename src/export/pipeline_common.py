@@ -49,6 +49,8 @@ def build_query(config: ExportConfig) -> str:
     imf = config.image_filters
     if imf.darkness_max is not None:
         conditions.append(f"(i.darkness IS NULL OR i.darkness <= {imf.darkness_max})")
+    if imf.exclude_calipers:
+        conditions.append("(i.has_calipers IS NULL OR i.has_calipers = 0)")
 
     where = "\n    AND ".join(conditions)
     return f"""

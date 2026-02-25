@@ -41,6 +41,7 @@ class ImageFilters:
     min_dimension: int = 200
     require_on_disk: bool = False  # Only images that exist on disk
     on_disk_image_dir: Optional[str] = None  # Compute on_disk from this dir if column missing
+    exclude_calipers: bool = False  # Exclude images with measurement calipers (has_calipers = 1)
 
 
 @dataclass
@@ -144,6 +145,7 @@ class ExportConfig:
                 min_dimension=f.get("min_dimension", 200),
                 require_on_disk=f.get("require_on_disk", False),
                 on_disk_image_dir=f.get("on_disk_image_dir"),
+                exclude_calipers=f.get("exclude_calipers", False),
             )
 
         if "study_processing" in data:
