@@ -57,6 +57,7 @@ def build_query(config: ExportConfig) -> str:
     SELECT
         i.image_id,
         i.image_name,
+        i.dicom_hash,
         i.accession_number,
         i.patient_id,
         i.laterality,

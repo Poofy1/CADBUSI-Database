@@ -11,7 +11,7 @@ Outputs:
 Usage:
   python main.py
   python main.py --dataset ../configs/P2.yaml --output-dir ./output/P2
-  python main.py --model ../ML_processing/models/us_region_2026_02_06.pth --workers 24 --resume
+  python main.py --workers 24 --resume
 """
 
 import argparse
@@ -24,8 +24,6 @@ from pathlib import Path
 import cv2
 import numpy as np
 import pandas as pd
-import torch
-from tqdm import tqdm
 
 # Set up sys.path: repo root, src/export/, src/export/p2/, src/export/config_processing/
 _p2 = Path(__file__).resolve().parent
@@ -38,11 +36,9 @@ sys.path.insert(0, str(_export / "config_processing"))
 
 from config import CONFIG
 from tools.storage_adapter import StorageClient
-from ui_mask import compute_ui_mask
+from ui_mask import compute_ui_mask, parse_polygon
 from export_configurable import ExportConfig
 from pipeline_common import build_query, load_from_db, apply_image_filters, download_bytes, resolve_output_dir
-from infer_us_region import load_model, predict_mask_from_array
-from simplify_region import simplify_us_region, polygon_to_storage
 from align_polygon_axes import align_polygon
 from tighten_crops import tighten_crop_intensity
 from tighten_crops_fov import clip_crop_to_fov
@@ -99,53 +95,94 @@ def preprocess_image(img: np.ndarray, row: dict, target_size: int, fill: int):
 
 
 # ---------------------------------------------------------------------------
-# Stage 1 pre-pass: fill missing us_polygon via U-Net inference
+# Stage visualization
 # ---------------------------------------------------------------------------
 
-def fill_missing_polygons(
-    df: pd.DataFrame,
-    model_path: str,
-    image_dir: str,
-    storage: StorageClient,
-    device: str,
-) -> pd.DataFrame:
-    """Infer us_polygon for images where it is null/empty.
+_VIS_PANEL_H = 300   # pixel height of each panel in the montage
+_CROP_COLOR  = (0, 220, 0)    # green  — crop box
+_POLY_COLOR  = (0, 100, 255)  # orange — us_polygon
 
-    Downloads each affected image, runs U-Net (Stage 1), simplifies to a
-    polygon string (Stage 3), and patches the dataframe in memory.
-    Does not write back to the DB — permanent storage is ultrasound_cropping.py.
+
+def _make_panel(img: np.ndarray, cx: int, cy: int, cw: int, ch: int,
+                poly_str: str | None, label: str) -> np.ndarray:
+    """Draw crop box + polygon on a scaled-down copy of the image."""
+    vis = img.copy()
+
+    # Polygon (orange)
+    if poly_str and not isinstance(poly_str, float):
+        poly = parse_polygon(poly_str)
+        if len(poly) >= 3:
+            cv2.polylines(vis, [poly.astype(np.int32).reshape(-1, 1, 2)],
+                          True, _POLY_COLOR, 2)
+
+    # Crop box (green)
+    x1, y1 = max(0, int(cx)), max(0, int(cy))
+    x2, y2 = x1 + max(1, int(cw)), y1 + max(1, int(ch))
+    cv2.rectangle(vis, (x1, y1), (x2, y2), _CROP_COLOR, 2)
+
+    # Scale to fixed height
+    h, w = vis.shape[:2]
+    scale = _VIS_PANEL_H / h
+    vis = cv2.resize(vis, (max(1, round(w * scale)), _VIS_PANEL_H))
+
+    # Label bar
+    cv2.rectangle(vis, (0, 0), (vis.shape[1], 22), (0, 0, 0), -1)
+    cv2.putText(vis, label, (4, 16), cv2.FONT_HERSHEY_SIMPLEX,
+                0.5, (0, 255, 255), 1, cv2.LINE_AA)
+    return vis
+
+
+def save_stage_visualization(
+    img: np.ndarray,
+    final_img: np.ndarray,
+    row_orig: dict,
+    row_7a: dict,
+    row_7b: dict,
+    row_7c: dict,
+    name: str,
+    vis_dir: Path,
+) -> None:
+    """Save a 5-panel montage: Original | 7a | 7b | 7c | P2 output.
+
+    Green rectangle = crop box at that stage.
+    Orange outline  = us_polygon at that stage (7a shows the aligned version
+                      in all subsequent panels so the polygon change is visible).
     """
-    missing_mask = df["us_polygon"].isna() | (df["us_polygon"] == "")
-    n_missing = int(missing_mask.sum())
-    if n_missing == 0:
-        print("  All images have us_polygon — skipping inference pre-pass.")
-        return df
+    def _r(row, key, fallback=0):
+        return row.get(key, fallback) or fallback
 
-    print(f"\n=== Polygon Inference Pre-pass: {n_missing:,} images missing us_polygon ===")
-    model, img_size = load_model(model_path, device)
+    orig_poly    = row_orig.get("us_polygon")
+    aligned_poly = row_7a.get("us_polygon")
 
-    inferred: dict[str, str] = {}
-    for row in tqdm(df[missing_mask].to_dict("records"), desc="Infer polygons"):
-        name = row["image_name"]
-        try:
-            img_bytes = download_bytes(name, image_dir, storage)
-            nparr = np.frombuffer(img_bytes, np.uint8)
-            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-            if img is None:
-                continue
-            mask = predict_mask_from_array(model, img, img_size, device)
-            scanner = row.get("manufacturer_model_name")
-            _, polygon, _ = simplify_us_region(mask, scanner)
-            if len(polygon) > 0:
-                inferred[name] = polygon_to_storage(polygon, precision=1)
-        except Exception as e:
-            print(f"  Warning: inference failed for {name}: {e}")
+    panels = [
+        _make_panel(img,
+                    _r(row_orig, "crop_x"), _r(row_orig, "crop_y"),
+                    _r(row_orig, "crop_w"), _r(row_orig, "crop_h"),
+                    orig_poly, "Original"),
+        _make_panel(img,
+                    _r(row_orig, "crop_x"), _r(row_orig, "crop_y"),
+                    _r(row_orig, "crop_w"), _r(row_orig, "crop_h"),
+                    aligned_poly, "7a: Axis align"),
+        _make_panel(img,
+                    _r(row_7b, "crop_x"), _r(row_7b, "crop_y"),
+                    _r(row_7b, "crop_w"), _r(row_7b, "crop_h"),
+                    aligned_poly, "7b: Intensity tighten"),
+        _make_panel(img,
+                    _r(row_7c, "crop_x"), _r(row_7c, "crop_y"),
+                    _r(row_7c, "crop_w"), _r(row_7c, "crop_h"),
+                    aligned_poly, "7c: FOV clip"),
+    ]
 
-    df = df.copy()
-    for name, poly_str in inferred.items():
-        df.loc[df["image_name"] == name, "us_polygon"] = poly_str
-    print(f"  Inferred {len(inferred):,}/{n_missing:,} polygons")
-    return df
+    # Final P2 output panel — upscale 256px to match panel height
+    out_h, out_w = final_img.shape[:2]
+    scale = _VIS_PANEL_H / out_h
+    out_panel = cv2.resize(final_img, (max(1, round(out_w * scale)), _VIS_PANEL_H))
+    cv2.rectangle(out_panel, (0, 0), (out_panel.shape[1], 22), (0, 0, 0), -1)
+    cv2.putText(out_panel, "P2 output", (4, 16), cv2.FONT_HERSHEY_SIMPLEX,
+                0.5, (0, 255, 255), 1, cv2.LINE_AA)
+    panels.append(out_panel)
+
+    cv2.imwrite(str(vis_dir / name), np.hstack(panels))
 
 
 # ---------------------------------------------------------------------------
@@ -159,6 +196,7 @@ def process_one(
     target_size: int,
     fill: int,
     storage: StorageClient,
+    vis_dir: Path | None = None,
 ) -> tuple[str, bool, str]:
     """Download + Stage 7 refinement + Stage 8 preprocessing + save one image.
 
@@ -173,19 +211,22 @@ def process_one(
             raise ValueError("cv2.imdecode returned None")
 
         img_h, img_w = img.shape[:2]
-        row = dict(row)  # mutable copy
+        row = dict(row)       # mutable copy
+        row_orig = dict(row)  # snapshot before any stage 7 changes
 
         # Stage 7a: snap near-axis polygon edges to perfect alignment (geometric)
         us_poly = row.get("us_polygon") or ""
         if us_poly and not isinstance(us_poly, float):
             aligned, _, _, _ = align_polygon(us_poly, img_shape=(img_h, img_w))
             row["us_polygon"] = aligned
+        row_7a = dict(row)
 
         # Stage 7b: trim dark empty rows from crop top/bottom via intensity
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         fov_mask = compute_ui_mask(row.get("us_polygon"), row.get("debris_polygons"), img_h, img_w)
         new_y, new_h = tighten_crop_intensity(gray, fov_mask, int(row["crop_y"]), int(row["crop_h"]))
         row["crop_y"], row["crop_h"] = new_y, new_h
+        row_7b = dict(row)
 
         # Stage 7c: clip crop box to FOV polygon boundary (geometric)
         row["crop_x"], row["crop_y"], row["crop_w"], row["crop_h"] = clip_crop_to_fov(
@@ -193,12 +234,17 @@ def process_one(
             img_h, img_w,
             row["crop_x"], row["crop_y"], row["crop_w"], row["crop_h"],
         )
+        row_7c = dict(row)
 
         # Stage 8: crop + mask + fill + resize + 16x16 patch map
         canvas_img, canvas_mask, patch_counts = preprocess_image(img, row, target_size, fill)
         cv2.imwrite(str(output_dir / "images" / name), canvas_img)
         cv2.imwrite(str(output_dir / "masks" / name), canvas_mask)
         cv2.imwrite(str(output_dir / "patch_tissue" / name), patch_counts)
+
+        if vis_dir is not None:
+            save_stage_visualization(img, canvas_img, row_orig, row_7a, row_7b, row_7c, name, vis_dir)
+
         return (name, True, "")
     except Exception as exc:
         return (name, False, str(exc))
@@ -251,14 +297,10 @@ def main():
         help="Print stats and exit without processing",
     )
     parser.add_argument(
-        "--model",
-        default=str(_p2 / "us_region_mobilenet_v2_v3_best.pth"),
-        help="U-Net checkpoint path for inferring missing us_polygon values (Stage 1 pre-pass)",
-    )
-    parser.add_argument(
-        "--device",
-        default="cuda" if torch.cuda.is_available() else "cpu",
-        help="Device for U-Net inference (default: cuda if available)",
+        "--vis-dir",
+        type=Path,
+        default=None,
+        help="Save per-image stage montages (Original|7a|7b|7c|P2) to this directory",
     )
     args = parser.parse_args()
 
@@ -292,8 +334,6 @@ def main():
         print("No images to process — exiting.")
         return
 
-    df = fill_missing_polygons(df, args.model, image_dir, storage, args.device)
-
     if args.dry_run:
         sample = df.head(1_000).copy()
         print(f"\n[DRY RUN] {len(sample):,} of {len(df):,} images")
@@ -314,6 +354,11 @@ def main():
         (output_dir / sub).mkdir(parents=True, exist_ok=True)
     shutil.copy(args.dataset, output_dir / "export_config.yaml")
 
+    vis_dir = args.vis_dir
+    if vis_dir is not None:
+        vis_dir.mkdir(parents=True, exist_ok=True)
+        print(f"  Visualizations: {vis_dir}")
+
     rows = df.to_dict("records")
 
     if args.resume:
@@ -333,7 +378,7 @@ def main():
 
     with ThreadPoolExecutor(max_workers=args.workers) as executor:
         futures = {
-            executor.submit(process_one, row, image_dir, output_dir, target_size, fill, storage): row["image_name"]
+            executor.submit(process_one, row, image_dir, output_dir, target_size, fill, storage, vis_dir): row["image_name"]
             for row in rows
         }
         for i, future in enumerate(as_completed(futures)):
