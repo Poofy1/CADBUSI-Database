@@ -94,55 +94,40 @@ def load_region_labels(db_path: str) -> pd.DataFrame:
 def preprocess_p0(
     img: np.ndarray, row: dict, target_size: int, fill: int
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Simple crop + top-left-aligned resize. No masking applied to the image.
+    """Simple crop + top-left-aligned resize. No polygon masking of any kind.
 
-    Also returns a fill mask (255 = where gray fill would be placed = outside
-    us_polygon) and a 16×16 patch tissue count map (matching P2 convention:
-    counts tissue pixels per patch). The original (unshrunk) polygon is used.
+    The mask shows only canvas padding: 0 = image content, 255 = fill padding.
+    The 16×16 patch map counts image-content pixels (mask == 0) per patch.
 
     Returns (canvas_img, canvas_mask, patch_counts).
     """
     img_h, img_w = img.shape[:2]
-
-    us_poly = row.get("us_polygon") or None
-    if isinstance(us_poly, float):
-        us_poly = None
-    debris_poly = row.get("debris_polygons") or None
-    if isinstance(debris_poly, float):
-        debris_poly = None
-
-    tissue_mask = compute_ui_mask(us_poly, debris_poly, img_h, img_w)
-    # fill_mask: 255 = outside FOV = where fill would go
-    fill_mask = (255 - tissue_mask).astype(np.uint8)
 
     cx = max(0, int(row["crop_x"]))
     cy = max(0, int(row["crop_y"]))
     cw = min(int(row["crop_w"]), img_w - cx)
     ch = min(int(row["crop_h"]), img_h - cy)
 
-    img_crop  = img[cy : cy + ch, cx : cx + cw]
-    mask_crop = fill_mask[cy : cy + ch, cx : cx + cw]
+    img_crop = img[cy : cy + ch, cx : cx + cw]
 
     scale = min(target_size / cw, target_size / ch)
     new_w = min(round(cw * scale), target_size)
     new_h = min(round(ch * scale), target_size)
-    img_resized  = cv2.resize(img_crop,  (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
-    mask_resized = cv2.resize(mask_crop, (new_w, new_h), interpolation=cv2.INTER_NEAREST)
+    img_resized = cv2.resize(img_crop, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
 
-    # Canvas padding is fill-colored → mark as fill region (255)
+    # Canvas: fill everywhere, image content top-left
     canvas      = np.full((target_size, target_size, 3), fill, dtype=np.uint8)
     canvas_mask = np.full((target_size, target_size),    255,  dtype=np.uint8)
     canvas[:new_h, :new_w]      = img_resized
-    canvas_mask[:new_h, :new_w] = mask_resized
+    canvas_mask[:new_h, :new_w] = 0   # image content = not padding
 
-    # 16×16 patch tissue counts (tissue = where canvas_mask == 0)
-    tissue = (canvas_mask == 0).astype(np.uint8) * 255
+    # 16×16 patch counts: image-content pixels per patch (mask == 0)
     ps = target_size // 16
     patch_counts = np.zeros((16, 16), dtype=np.uint8)
     for py in range(16):
         for px in range(16):
-            patch = tissue[py * ps : (py + 1) * ps, px * ps : (px + 1) * ps]
-            patch_counts[py, px] = min(int(np.count_nonzero(patch)), 255)
+            patch = canvas_mask[py * ps : (py + 1) * ps, px * ps : (px + 1) * ps]
+            patch_counts[py, px] = min(int(np.count_nonzero(patch == 0)), 255)
 
     return canvas, canvas_mask, patch_counts
 
