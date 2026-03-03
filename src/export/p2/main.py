@@ -39,9 +39,23 @@ from tools.storage_adapter import StorageClient
 from ui_mask import compute_ui_mask, parse_polygon
 from export_configurable import ExportConfig
 from pipeline_common import build_query, load_from_db, apply_image_filters, download_bytes, resolve_output_dir
-from align_polygon_axes import align_polygon
-from tighten_crops import tighten_crop_intensity
-from tighten_crops_fov import clip_crop_to_fov
+
+
+# ---------------------------------------------------------------------------
+# Polygon helpers
+# ---------------------------------------------------------------------------
+
+def shrink_polygon(poly_str: str, factor: float = 0.97) -> str:
+    """Scale each vertex toward the centroid by factor (0.97 = 3% shrink).
+
+    Only the us_polygon (FOV boundary) is shrunk; debris polygons are unchanged.
+    """
+    pts = parse_polygon(poly_str)
+    if len(pts) == 0:
+        return poly_str
+    centroid = pts.mean(axis=0)
+    shrunk = centroid + factor * (pts - centroid)
+    return ";".join(f"{x:.2f},{y:.2f}" for x, y in shrunk)
 
 
 # ---------------------------------------------------------------------------
@@ -50,6 +64,9 @@ from tighten_crops_fov import clip_crop_to_fov
 
 def preprocess_image(img: np.ndarray, row: dict, target_size: int, fill: int):
     """Crop, mask, resize one image.
+
+    The us_polygon is shrunk 5% inward before masking; debris polygons are
+    passed through unchanged.
 
     Returns (canvas_img, canvas_mask, patch_counts).
     """
@@ -61,12 +78,28 @@ def preprocess_image(img: np.ndarray, row: dict, target_size: int, fill: int):
         us_poly = None
     if isinstance(debris_poly, float):
         debris_poly = None
-    mask_full = compute_ui_mask(us_poly, debris_poly, img_h, img_w)
 
-    cx = max(0, int(row["crop_x"]))
-    cy = max(0, int(row["crop_y"]))
-    cw = min(int(row["crop_w"]), img_w - cx)
-    ch = min(int(row["crop_h"]), img_h - cy)
+    if us_poly:
+        us_poly = shrink_polygon(us_poly)
+        # Derive crop box from shrunk polygon bounding box
+        pts = parse_polygon(us_poly)
+        if len(pts) > 0:
+            cx = max(0, int(np.floor(pts[:, 0].min())))
+            cy = max(0, int(np.floor(pts[:, 1].min())))
+            cw = min(img_w - cx, int(np.ceil(pts[:, 0].max())) - cx)
+            ch = min(img_h - cy, int(np.ceil(pts[:, 1].max())) - cy)
+        else:
+            cx = max(0, int(row["crop_x"]))
+            cy = max(0, int(row["crop_y"]))
+            cw = min(int(row["crop_w"]), img_w - cx)
+            ch = min(int(row["crop_h"]), img_h - cy)
+    else:
+        cx = max(0, int(row["crop_x"]))
+        cy = max(0, int(row["crop_y"]))
+        cw = min(int(row["crop_w"]), img_w - cx)
+        ch = min(int(row["crop_h"]), img_h - cy)
+
+    mask_full = compute_ui_mask(us_poly, debris_poly, img_h, img_w)
 
     img_crop = img[cy : cy + ch, cx : cx + cw].copy()
     mask_crop = mask_full[cy : cy + ch, cx : cx + cw]
@@ -135,45 +168,23 @@ def _make_panel(img: np.ndarray, cx: int, cy: int, cw: int, ch: int,
 def save_stage_visualization(
     img: np.ndarray,
     final_img: np.ndarray,
-    row_orig: dict,
-    row_7a: dict,
-    row_7b: dict,
-    row_7c: dict,
+    row: dict,
     name: str,
     vis_dir: Path,
 ) -> None:
-    """Save a 5-panel montage: Original | 7a | 7b | 7c | P2 output.
+    """Save a 2-panel montage: Original (with original polygon) | P2 output.
 
-    Green rectangle = crop box at that stage.
-    Orange outline  = us_polygon at that stage (7a shows the aligned version
-                      in all subsequent panels so the polygon change is visible).
+    Green rectangle = crop box.  Orange outline = us_polygon (original, unshrunk).
     """
-    def _r(row, key, fallback=0):
+    def _r(key, fallback=0):
         return row.get(key, fallback) or fallback
-
-    orig_poly    = row_orig.get("us_polygon")
-    aligned_poly = row_7a.get("us_polygon")
 
     panels = [
         _make_panel(img,
-                    _r(row_orig, "crop_x"), _r(row_orig, "crop_y"),
-                    _r(row_orig, "crop_w"), _r(row_orig, "crop_h"),
-                    orig_poly, "Original"),
-        _make_panel(img,
-                    _r(row_orig, "crop_x"), _r(row_orig, "crop_y"),
-                    _r(row_orig, "crop_w"), _r(row_orig, "crop_h"),
-                    aligned_poly, "7a: Axis align"),
-        _make_panel(img,
-                    _r(row_7b, "crop_x"), _r(row_7b, "crop_y"),
-                    _r(row_7b, "crop_w"), _r(row_7b, "crop_h"),
-                    aligned_poly, "7b: Intensity tighten"),
-        _make_panel(img,
-                    _r(row_7c, "crop_x"), _r(row_7c, "crop_y"),
-                    _r(row_7c, "crop_w"), _r(row_7c, "crop_h"),
-                    aligned_poly, "7c: FOV clip"),
+                    _r("crop_x"), _r("crop_y"), _r("crop_w"), _r("crop_h"),
+                    row.get("us_polygon"), "Original"),
     ]
 
-    # Final P2 output panel — upscale 256px to match panel height
     out_h, out_w = final_img.shape[:2]
     scale = _VIS_PANEL_H / out_h
     out_panel = cv2.resize(final_img, (max(1, round(out_w * scale)), _VIS_PANEL_H))
@@ -210,40 +221,16 @@ def process_one(
         if img is None:
             raise ValueError("cv2.imdecode returned None")
 
-        img_h, img_w = img.shape[:2]
-        row = dict(row)       # mutable copy
-        row_orig = dict(row)  # snapshot before any stage 7 changes
+        row = dict(row)   # local mutable copy
 
-        # Stage 7a: snap near-axis polygon edges to perfect alignment (geometric)
-        us_poly = row.get("us_polygon") or ""
-        if us_poly and not isinstance(us_poly, float):
-            aligned, _, _, _ = align_polygon(us_poly, img_shape=(img_h, img_w))
-            row["us_polygon"] = aligned
-        row_7a = dict(row)
-
-        # Stage 7b: trim dark empty rows from crop top/bottom via intensity
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        fov_mask = compute_ui_mask(row.get("us_polygon"), row.get("debris_polygons"), img_h, img_w)
-        new_y, new_h = tighten_crop_intensity(gray, fov_mask, int(row["crop_y"]), int(row["crop_h"]))
-        row["crop_y"], row["crop_h"] = new_y, new_h
-        row_7b = dict(row)
-
-        # Stage 7c: clip crop box to FOV polygon boundary (geometric)
-        row["crop_x"], row["crop_y"], row["crop_w"], row["crop_h"] = clip_crop_to_fov(
-            row.get("us_polygon"), row.get("debris_polygons"),
-            img_h, img_w,
-            row["crop_x"], row["crop_y"], row["crop_w"], row["crop_h"],
-        )
-        row_7c = dict(row)
-
-        # Stage 8: crop + mask + fill + resize + 16x16 patch map
+        # Crop + mask (us_polygon shrunk 5%) + fill + resize + 16x16 patch map
         canvas_img, canvas_mask, patch_counts = preprocess_image(img, row, target_size, fill)
         cv2.imwrite(str(output_dir / "images" / name), canvas_img)
         cv2.imwrite(str(output_dir / "masks" / name), canvas_mask)
         cv2.imwrite(str(output_dir / "patch_tissue" / name), patch_counts)
 
         if vis_dir is not None:
-            save_stage_visualization(img, canvas_img, row_orig, row_7a, row_7b, row_7c, name, vis_dir)
+            save_stage_visualization(img, canvas_img, row, name, vis_dir)
 
         return (name, True, "")
     except Exception as exc:
@@ -300,7 +287,7 @@ def main():
         "--vis-dir",
         type=Path,
         default=None,
-        help="Save per-image stage montages (Original|7a|7b|7c|P2) to this directory",
+        help="Save per-image montages (Original | P2 output) to this directory",
     )
     args = parser.parse_args()
 

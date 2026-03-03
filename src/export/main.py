@@ -56,12 +56,9 @@ from pipeline_common import (
     build_query, load_from_db, apply_image_filters,
     download_bytes, resolve_output_dir,
 )
-from ui_mask import compute_ui_mask
-from align_polygon_axes import align_polygon
-from tighten_crops import tighten_crop_intensity
-from tighten_crops_fov import clip_crop_to_fov
+from ui_mask import compute_ui_mask, parse_polygon
 
-_P0_REGION_VERSION = "2026_1_13_crops"
+_P0_REGION_VERSION = "2025_11_25_crops"
 
 
 # ---------------------------------------------------------------------------
@@ -94,26 +91,81 @@ def load_region_labels(db_path: str) -> pd.DataFrame:
 # P0 — baseline crop + resize
 # ---------------------------------------------------------------------------
 
-def preprocess_p0(img: np.ndarray, row: dict, target_size: int, fill: int) -> np.ndarray:
-    """Simple crop + top-left-aligned resize. No masking of any kind."""
+def preprocess_p0(
+    img: np.ndarray, row: dict, target_size: int, fill: int
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Simple crop + top-left-aligned resize. No masking applied to the image.
+
+    Also returns a fill mask (255 = where gray fill would be placed = outside
+    us_polygon) and a 16×16 patch tissue count map (matching P2 convention:
+    counts tissue pixels per patch). The original (unshrunk) polygon is used.
+
+    Returns (canvas_img, canvas_mask, patch_counts).
+    """
+    img_h, img_w = img.shape[:2]
+
+    us_poly = row.get("us_polygon") or None
+    if isinstance(us_poly, float):
+        us_poly = None
+    debris_poly = row.get("debris_polygons") or None
+    if isinstance(debris_poly, float):
+        debris_poly = None
+
+    tissue_mask = compute_ui_mask(us_poly, debris_poly, img_h, img_w)
+    # fill_mask: 255 = outside FOV = where fill would go
+    fill_mask = (255 - tissue_mask).astype(np.uint8)
+
     cx = max(0, int(row["crop_x"]))
     cy = max(0, int(row["crop_y"]))
-    cw = min(int(row["crop_w"]), img.shape[1] - cx)
-    ch = min(int(row["crop_h"]), img.shape[0] - cy)
-    img_crop = img[cy : cy + ch, cx : cx + cw]
+    cw = min(int(row["crop_w"]), img_w - cx)
+    ch = min(int(row["crop_h"]), img_h - cy)
+
+    img_crop  = img[cy : cy + ch, cx : cx + cw]
+    mask_crop = fill_mask[cy : cy + ch, cx : cx + cw]
 
     scale = min(target_size / cw, target_size / ch)
     new_w = min(round(cw * scale), target_size)
     new_h = min(round(ch * scale), target_size)
-    img_resized = cv2.resize(img_crop, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
+    img_resized  = cv2.resize(img_crop,  (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
+    mask_resized = cv2.resize(mask_crop, (new_w, new_h), interpolation=cv2.INTER_NEAREST)
 
-    canvas = np.full((target_size, target_size, 3), fill, dtype=np.uint8)
-    canvas[:new_h, :new_w] = img_resized
-    return canvas
+    # Canvas padding is fill-colored → mark as fill region (255)
+    canvas      = np.full((target_size, target_size, 3), fill, dtype=np.uint8)
+    canvas_mask = np.full((target_size, target_size),    255,  dtype=np.uint8)
+    canvas[:new_h, :new_w]      = img_resized
+    canvas_mask[:new_h, :new_w] = mask_resized
+
+    # 16×16 patch tissue counts (tissue = where canvas_mask == 0)
+    tissue = (canvas_mask == 0).astype(np.uint8) * 255
+    ps = target_size // 16
+    patch_counts = np.zeros((16, 16), dtype=np.uint8)
+    for py in range(16):
+        for px in range(16):
+            patch = tissue[py * ps : (py + 1) * ps, px * ps : (px + 1) * ps]
+            patch_counts[py, px] = min(int(np.count_nonzero(patch)), 255)
+
+    return canvas, canvas_mask, patch_counts
 
 
 # ---------------------------------------------------------------------------
-# P2 — structural tissue-aware (stages 7a-c + 8)
+# Polygon helpers
+# ---------------------------------------------------------------------------
+
+def shrink_polygon(poly_str: str, factor: float = 0.97) -> str:
+    """Scale each vertex toward the centroid by factor (0.97 = 3% shrink).
+
+    Only the us_polygon (FOV boundary) is shrunk; debris polygons are unchanged.
+    """
+    pts = parse_polygon(poly_str)
+    if len(pts) == 0:
+        return poly_str
+    centroid = pts.mean(axis=0)
+    shrunk = centroid + factor * (pts - centroid)
+    return ";".join(f"{x:.2f},{y:.2f}" for x, y in shrunk)
+
+
+# ---------------------------------------------------------------------------
+# P2 — tissue-aware: 5% polygon shrink + crop + mask + resize
 # ---------------------------------------------------------------------------
 
 def preprocess_p2(
@@ -122,51 +174,40 @@ def preprocess_p2(
     target_size: int,
     fill: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Apply P2 structural refinement + tissue masking.
+    """Apply P2 tissue masking with a 5%-inward-shrunk us_polygon.
 
     Returns (canvas_img, canvas_mask, patch_counts).
-    The row dict is not modified (a local copy is used for crop adjustments).
     """
-    row = dict(row)   # mutable local copy — do NOT mutate the original
     img_h, img_w = img.shape[:2]
 
-    # Stage 7a: snap near-axis polygon edges to perfect H/V alignment
-    us_poly = row.get("us_polygon") or ""
-    if us_poly and not isinstance(us_poly, float):
-        aligned, _, _, _ = align_polygon(us_poly, img_shape=(img_h, img_w))
-        row["us_polygon"] = aligned
+    us_poly = row.get("us_polygon") or None
+    if isinstance(us_poly, float):
+        us_poly = None
+    if us_poly:
+        us_poly = shrink_polygon(us_poly)
+        # Derive crop box from shrunk polygon bounding box
+        pts = parse_polygon(us_poly)
+        if len(pts) > 0:
+            cx = max(0, int(np.floor(pts[:, 0].min())))
+            cy = max(0, int(np.floor(pts[:, 1].min())))
+            cw = min(img_w - cx, int(np.ceil(pts[:, 0].max())) - cx)
+            ch = min(img_h - cy, int(np.ceil(pts[:, 1].max())) - cy)
+        else:
+            cx = max(0, int(row["crop_x"]))
+            cy = max(0, int(row["crop_y"]))
+            cw = min(int(row["crop_w"]), img_w - cx)
+            ch = min(int(row["crop_h"]), img_h - cy)
     else:
-        us_poly = ""
-        row["us_polygon"] = ""
+        cx = max(0, int(row["crop_x"]))
+        cy = max(0, int(row["crop_y"]))
+        cw = min(int(row["crop_w"]), img_w - cx)
+        ch = min(int(row["crop_h"]), img_h - cy)
 
-    # Stage 7b: trim dark empty rows from crop top/bottom via intensity
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    fov_mask = compute_ui_mask(
-        row.get("us_polygon"), row.get("debris_polygons"), img_h, img_w
-    )
-    new_y, new_h = tighten_crop_intensity(
-        gray, fov_mask, int(row["crop_y"]), int(row["crop_h"])
-    )
-    row["crop_y"], row["crop_h"] = new_y, new_h
-
-    # Stage 7c: clip crop box to FOV polygon extent (geometric, no image needed)
-    row["crop_x"], row["crop_y"], row["crop_w"], row["crop_h"] = clip_crop_to_fov(
-        row.get("us_polygon"), row.get("debris_polygons"),
-        img_h, img_w,
-        row["crop_x"], row["crop_y"], row["crop_w"], row["crop_h"],
-    )
-
-    # Stage 8: crop + mask + fill non-tissue + resize + 16×16 patch map
     debris_str = row.get("debris_polygons")
     if isinstance(debris_str, float):
         debris_str = None
 
-    mask_full = compute_ui_mask(row.get("us_polygon"), debris_str, img_h, img_w)
-
-    cx = max(0, int(row["crop_x"]))
-    cy = max(0, int(row["crop_y"]))
-    cw = min(int(row["crop_w"]), img_w - cx)
-    ch = min(int(row["crop_h"]), img_h - cy)
+    mask_full = compute_ui_mask(us_poly, debris_str, img_h, img_w)
 
     img_crop  = img[cy : cy + ch, cx : cx + cw].copy()
     mask_crop = mask_full[cy : cy + ch, cx : cx + cw]
@@ -204,10 +245,12 @@ def process_one(
     target_size: int,
     fill: int,
     storage: StorageClient,
+    run_p0: bool = True,
+    run_p2: bool = True,
 ) -> tuple[str, bool, str]:
-    """Download + process for P0 and P2 in one shot.
+    """Download + process for the requested pipeline(s) in one shot.
 
-    dirs  — {"p0": Path, "p2": Path}
+    dirs  — {"p0": Path, "p2": Path}  (only keys for active pipelines required)
 
     Returns (image_name, success, error_msg).
     """
@@ -221,19 +264,23 @@ def process_one(
             raise ValueError("cv2.imdecode returned None")
 
         # P0 — only for images that have a RegionLabels entry
-        p0_cx = row.get("p0_crop_x")
-        if p0_cx is not None and not (isinstance(p0_cx, float) and p0_cx != p0_cx):
-            row_p0 = {**row,
-                      "crop_x": row["p0_crop_x"], "crop_y": row["p0_crop_y"],
-                      "crop_w": row["p0_crop_w"], "crop_h": row["p0_crop_h"]}
-            p0 = preprocess_p0(img, row_p0, target_size, fill)
-            cv2.imwrite(str(dirs["p0"] / "images" / name), p0)
+        if run_p0:
+            p0_cx = row.get("p0_crop_x")
+            if p0_cx is not None and not (isinstance(p0_cx, float) and p0_cx != p0_cx):
+                row_p0 = {**row,
+                          "crop_x": row["p0_crop_x"], "crop_y": row["p0_crop_y"],
+                          "crop_w": row["p0_crop_w"], "crop_h": row["p0_crop_h"]}
+                p0, p0_mask, p0_patch = preprocess_p0(img, row_p0, target_size, fill)
+                cv2.imwrite(str(dirs["p0"] / "images"       / name), p0)
+                cv2.imwrite(str(dirs["p0"] / "masks"        / name), p0_mask)
+                cv2.imwrite(str(dirs["p0"] / "patch_tissue" / name), p0_patch)
 
-        # P2 (takes an internal copy of row; original unchanged)
-        p2_img, p2_mask, p2_patch = preprocess_p2(img, row, target_size, fill)
-        cv2.imwrite(str(dirs["p2"] / "images"       / name), p2_img)
-        cv2.imwrite(str(dirs["p2"] / "masks"        / name), p2_mask)
-        cv2.imwrite(str(dirs["p2"] / "patch_tissue" / name), p2_patch)
+        # P2
+        if run_p2:
+            p2_img, p2_mask, p2_patch = preprocess_p2(img, row, target_size, fill)
+            cv2.imwrite(str(dirs["p2"] / "images"       / name), p2_img)
+            cv2.imwrite(str(dirs["p2"] / "masks"        / name), p2_mask)
+            cv2.imwrite(str(dirs["p2"] / "patch_tissue" / name), p2_patch)
 
         return (name, True, "")
     except Exception as exc:
@@ -284,9 +331,17 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, default=Path("output/all_pipelines"))
     parser.add_argument("--workers",    type=int, default=16)
     parser.add_argument("--limit",      type=int, default=0, help="Process first N images only (debug)")
-    parser.add_argument("--resume",     action="store_true", help="Skip images already in P0/images/")
+    parser.add_argument("--resume",     action="store_true", help="Skip images already processed")
     parser.add_argument("--dry-run",    action="store_true", help="Print stats and exit")
+    parser.add_argument(
+        "--pipeline",
+        choices=["p0", "p2", "both"],
+        default="both",
+        help="Which pipeline(s) to run (default: both)",
+    )
     args = parser.parse_args()
+    run_p0 = args.pipeline in ("p0", "both")
+    run_p2 = args.pipeline in ("p2", "both")
 
     # Storage
     image_dir = CONFIG.get("DATABASE_DIR", "").rstrip("/\\") + "/images"
@@ -341,21 +396,23 @@ def main() -> None:
 
     # Output dirs
     base = resolve_output_dir(args.output_dir, args.resume)
-    dirs: dict[str, Path] = {
-        "p0": base / "P0",
-        "p2": base / "P2",
-    }
-    for d in dirs.values():
-        (d / "images").mkdir(parents=True, exist_ok=True)
-    for sub in ("masks", "patch_tissue"):
-        (dirs["p2"] / sub).mkdir(parents=True, exist_ok=True)
+    dirs: dict[str, Path] = {}
+    if run_p0:
+        dirs["p0"] = base / "P0"
+        for sub in ("images", "masks", "patch_tissue"):
+            (dirs["p0"] / sub).mkdir(parents=True, exist_ok=True)
+    if run_p2:
+        dirs["p2"] = base / "P2"
+        for sub in ("images", "masks", "patch_tissue"):
+            (dirs["p2"] / sub).mkdir(parents=True, exist_ok=True)
     shutil.copy(args.dataset, base / "export_config.yaml")
 
     rows = df.to_dict("records")
 
-    # Resume: use P2/images/ as reference (every image gets P2; P0 is a subset)
+    # Resume: check the primary pipeline's images/ dir
     if args.resume:
-        existing = {p.name for p in (dirs["p2"] / "images").iterdir()}
+        sentinel = dirs.get("p2", dirs.get("p0"))
+        existing = {p.name for p in (sentinel / "images").iterdir()}
         before = len(rows)
         rows = [r for r in rows if r["image_name"] not in existing]
         print(f"\nResume: skipped {before - len(rows):,}, {len(rows):,} remaining")
@@ -372,7 +429,7 @@ def main() -> None:
     with ThreadPoolExecutor(max_workers=args.workers) as executor:
         futures = {
             executor.submit(
-                process_one, row, image_dir, dirs, target_size, fill, storage
+                process_one, row, image_dir, dirs, target_size, fill, storage, run_p0, run_p2
             ): row["image_name"]
             for row in rows
         }
@@ -402,11 +459,16 @@ def main() -> None:
 
     # Manifests
     print("\nWriting manifests ...")
-    write_manifest(df, dirs["p0"], {})
-    write_manifest(df, dirs["p2"], {
-        "mask_path":         "masks/{name}",
-        "patch_tissue_path": "patch_tissue/{name}",
-    })
+    if run_p0:
+        write_manifest(df, dirs["p0"], {
+            "mask_path":         "masks/{name}",
+            "patch_tissue_path": "patch_tissue/{name}",
+        })
+    if run_p2:
+        write_manifest(df, dirs["p2"], {
+            "mask_path":         "masks/{name}",
+            "patch_tissue_path": "patch_tissue/{name}",
+        })
 
 
 if __name__ == "__main__":
