@@ -117,6 +117,34 @@ Example:
 
 `python main.py --database`
 
+## Labels Database
+
+Annotation labels (`ImageLabels`, `LesionLabels`, `CaliperLabels`) live in a separate `cadbusi_labels.db`, managed via `src/DB_processing/labels_database.py`.
+
+**Sync with GCS bucket:**
+
+Downloads from / uploads to `gs://<bucket_name>/databases/cadbusi_labels.db`. The local working copy is saved to `CONFIG["DATABASE_DIR"]/cadbusi_labels.db`.
+
+```python
+from src.DB_processing.labels_database import open_labels_db_from_bucket, update_labels_db_in_bucket
+from tools.storage_adapter import StorageClient
+from config import CONFIG
+
+StorageClient.get_instance(bucket_name=CONFIG["storage"]["bucket_name"])
+
+# Download latest version
+db = open_labels_db_from_bucket()
+
+# Edit database
+db.insert_image_labels_batch([{"dicom_hash": "abc123", "cyst": 1, "version": "v1"}])
+db.close()
+
+# Upload new database
+update_labels_db_in_bucket()
+```
+
+Override the local path or bucket path via `local_path=` / `bucket_path=` on any call.
+
 ## Data Pipeline
 - [CADBUSI-Database](https://github.com/Poofy1/CADBUSI-Database)
 - [CADBUSI-Training](https://github.com/Poofy1/CADBUSI-Training)
