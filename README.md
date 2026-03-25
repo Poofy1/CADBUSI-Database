@@ -130,7 +130,7 @@ from src.DB_processing.labels_database import open_labels_db_from_bucket, update
 from tools.storage_adapter import StorageClient
 from config import CONFIG
 
-StorageClient.get_instance(bucket_name=CONFIG["storage"]["bucket_name"])
+StorageClient.get_instance(bucket_name=CONFIG["storage"]["bucket_name"]) # Example: "DATABASE_DIR": "Databases/database_2026_1_13_main/",
 
 # Download latest version
 db = open_labels_db_from_bucket()
