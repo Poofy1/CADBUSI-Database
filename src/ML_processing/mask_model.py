@@ -1,32 +1,35 @@
-import os, torch
+"""
+OCR-mask detection using YOLOv11.
+
+The model was trained on bottom-half-cropped ultrasound images.
+At inference we crop the bottom half, run YOLO, then map the
+detected box coordinates back to full-image space.
+"""
+
+import os
+import numpy as np
 from PIL import Image
-from torchvision import transforms
+from ultralytics import YOLO
 from tqdm import tqdm
-import torchvision
-from torchvision.models.detection import FasterRCNN
-from torchvision.models.detection.rpn import AnchorGenerator
-from torch.utils.data import Dataset, DataLoader
-from tools.storage_adapter import *
-from torch.amp import autocast
+from tools.storage_adapter import read_image, list_files, StorageClient
 
 env = os.path.dirname(os.path.abspath(__file__))
-device = torch.device("cuda")
-torch.backends.cudnn.benchmark = True
-torch.backends.cuda.matmul.allow_tf32 = True
-torch.backends.cudnn.allow_tf32 = True
+MODEL_PATH = os.path.join(env, "models", "ocr_mask_yolo.pt")
+CONF = 0.25
+
 
 def get_first_image_in_each_folder(video_folder_path):
     first_images = []
     video_folder_path = os.path.normpath(video_folder_path)
-    
+
     storage = StorageClient.get_instance()
-    
+
     prefix = video_folder_path.replace('\\', '/').rstrip('/') + '/'
-    
+
     iterator = storage._bucket.list_blobs(prefix=prefix, delimiter='/')
     blobs = list(iterator)
     prefixes = iterator.prefixes
-    
+
     for folder_prefix in prefixes:
         folder_name = folder_prefix.rstrip('/').split('/')[-1]
         first_image_path = f"{folder_name}/{folder_name}_0.png"
@@ -34,188 +37,79 @@ def get_first_image_in_each_folder(video_folder_path):
 
     return first_images
 
-class MyDataset(Dataset):
-    def __init__(self, root_dir, db_to_process, max_width, max_height, transform=None):
-        """
-        Args:
-            root_dir: Root directory for images
-            db_to_process: DataFrame with image_name column (already renamed from image_name)
-            max_width: Maximum width for padding
-            max_height: Maximum height for padding
-        """
-        self.root_dir = root_dir
-        self.transform = transform
-        
-        # Get all files from the directory
-        all_files = list_files(root_dir)
-        file_dict = {os.path.basename(img): img for img in all_files}
-        
-        # Filter by the database image names
-        self.images = sorted([os.path.basename(file_dict[img_name]) 
-                            for img_name in db_to_process['image_name'].values 
-                            if img_name in file_dict])
-        
-        self.max_width = max_width
-        self.max_height = max_height
-        
-        self.preprocess = transforms.Compose([
-            transforms.Grayscale(num_output_channels=1),
-            transforms.ToTensor(),
-            transforms.Normalize([0.5], [0.5]),
-        ])
 
-    def __len__(self):
-        return len(self.images)
-
-    def __getitem__(self, idx):
-        img_name = os.path.join(self.root_dir, self.images[idx])
-        image = read_image(img_name, use_pil=True)
-
-        if image is None:
-            return None
-
-        img_before_pad = self.preprocess(image)
-        padding = transforms.Pad((0, 0,
-                                 self.max_width - img_before_pad.shape[-1],
-                                 self.max_height - img_before_pad.shape[-2]))
-        img_after_pad = padding(img_before_pad)
-        return img_after_pad, self.images[idx]
-
-class MyDatasetVideo(Dataset):
-    def __init__(self, root_dir, db_to_process, max_width, max_height, transform=None):
-        """
-        Args:
-            root_dir: Root directory for video frames
-            db_to_process: DataFrame with images_path column (already renamed from images_path)
-            max_width: Maximum width for padding
-            max_height: Maximum height for padding
-        """
-        self.root_dir = root_dir
-        self.transform = transform
-        
-        all_first_images = get_first_image_in_each_folder(root_dir)
-        
-        # Filter to only include images from db_to_process
-        images_to_process = set(db_to_process['images_path'].tolist())
-        
-        self.images = [img for img in all_first_images 
-                       if img.split('/')[0] in images_to_process]
-        
-        self.max_width = max_width
-        self.max_height = max_height
-        self.preprocess = transforms.Compose([
-            transforms.Grayscale(num_output_channels=1),
-            transforms.ToTensor(),
-            transforms.Normalize([0.5], [0.5]),
-        ])
-
-    def __len__(self):
-        return len(self.images)
-
-    def __getitem__(self, idx):
-        img_name = os.path.join(self.root_dir, self.images[idx])
-        image = read_image(img_name, use_pil=True)
-
-        if image is None:
-            return None
-
-        img_before_pad = self.preprocess(image)
-        padding = transforms.Pad((0, 0,
-                                 self.max_width - img_before_pad.shape[-1],
-                                 self.max_height - img_before_pad.shape[-2]))
-        img_after_pad = padding(img_before_pad)
-        return img_after_pad, self.images[idx]
-
-
-def collate_skip_none(batch):
-    """Custom collate function that filters out None values from failed image loads."""
-    batch = [item for item in batch if item is not None]
-    if len(batch) == 0:
-        return None
-    images, filenames = zip(*batch)
-    return torch.stack(images), filenames
-
-
-def find_masks(images_dir, model_name, db_to_process, max_width, max_height, 
+def find_masks(images_dir, model_name, db_to_process, max_width, max_height,
                video_format=False):
     """
-    Find masks/bounding boxes in images using object detection model.
-    
+    Find OCR text-region bounding boxes in images using YOLO.
+
     Args:
         images_dir: Directory containing images
-        model_name: Name of the model file (without .pt extension)
-        db_to_process: DataFrame with image data (with renamed columns: image_name or images_path)
-        max_width: Maximum width for padding
-        max_height: Maximum height for padding
+        model_name: Unused (kept for interface compatibility)
+        db_to_process: DataFrame with image data (image_name or images_path column)
+        max_width: Unused (kept for interface compatibility)
+        max_height: Unused (kept for interface compatibility)
         video_format: Whether processing video frames
-    
+
     Returns:
-        Tuple of (class1_results, class2_results) - lists of (filename, bbox) tuples
+        Tuple of ([], description_masks) where description_masks is a list
+        of (filename, bbox) tuples. bbox is [x0, y0, x1, y1] in full-image
+        pixel coords, or [] if no detection.
     """
-    # Load model
-    backbone = torchvision.models.squeezenet1_1(pretrained=True).features
-    backbone.out_channels = 512
-    anchor_generator = AnchorGenerator(
-        sizes=((32, 64, 128, 256, 512),), 
-        aspect_ratios=((0.5, 1.0, 2.0),)
-    )
-    num_classes = 3
-    model = FasterRCNN(backbone, num_classes=num_classes, 
-                      rpn_anchor_generator=anchor_generator)
+    model = YOLO(MODEL_PATH)
 
-    model.load_state_dict(torch.load(f"{env}/models/{model_name}.pt"))
-    model = model.to(device)
-    model.eval()
-
-    # Create dataset and dataloader
+    # Resolve which files to process
     if video_format:
-        dataset = MyDatasetVideo(images_dir, db_to_process, max_width, max_height)
+        all_first_images = get_first_image_in_each_folder(images_dir)
+        images_to_process = set(db_to_process['images_path'].tolist())
+        file_list = [img for img in all_first_images
+                     if img.split('/')[0] in images_to_process]
     else:
-        dataset = MyDataset(images_dir, db_to_process, max_width, max_height)
-        
-    dataloader = DataLoader(
-        dataset,
-        batch_size=64,
-        num_workers=8,
-        pin_memory=True,
-        collate_fn=collate_skip_none,
-    )
+        all_files = list_files(images_dir)
+        file_dict = {os.path.basename(img): img for img in all_files}
+        file_list = [img_name for img_name in db_to_process['image_name'].values
+                     if img_name in file_dict]
 
-    class1_results = []
-    class2_results = []
+    description_masks = []
 
-    # Run inference
-    with torch.no_grad():
-        for batch in tqdm(dataloader, total=len(dataloader), desc='Finding OCR Masks'):
-            if batch is None:
+    for filename in tqdm(file_list, desc='Finding OCR Masks'):
+        try:
+            img = read_image(os.path.join(images_dir, filename), use_pil=True)
+            if img is None:
+                description_masks.append((filename, []))
                 continue
-            images, filenames = batch
-            images = images.to(device, non_blocking=True)
-            with autocast('cuda'):
-                output = model(images)
 
-            for i in range(len(output)):
-                pred_boxes = output[i]['boxes']
-                pred_scores = output[i]['scores']
-                pred_labels = output[i]['labels']
+            w, h = img.size
+            mid_y = h // 2
 
-                best_boxes = []
-                for class_id in range(1, 3):
-                    class_mask = pred_labels == class_id
-                    class_scores = pred_scores[class_mask]
+            # Crop bottom half (model was trained on this)
+            cropped = img.crop((0, mid_y, w, h))
+            cropped_np = np.array(cropped)
 
-                    if len(class_scores) > 0:
-                        best_score_index = class_scores.argmax()
-                        best_box = pred_boxes[class_mask][best_score_index]
-                        best_boxes.append(best_box.cpu().numpy().astype(int))
-                    else:
-                        best_boxes.append(None)
+            # Run YOLO
+            results = model.predict(cropped_np, conf=CONF, verbose=False)
 
-                filename = filenames[i]
-                class1_box = best_boxes[0].tolist() if best_boxes[0] is not None else []
-                class2_box = best_boxes[1].tolist() if best_boxes[1] is not None else []
-                
-                class1_results.append((filename, class1_box))
-                class2_results.append((filename, class2_box))
+            # Get highest confidence detection
+            best_box = None
+            best_score = 0.0
+            for r in results:
+                for box in r.boxes:
+                    score = box.conf[0].cpu().item()
+                    if score > best_score:
+                        best_score = score
+                        best_box = box.xyxy[0].cpu().tolist()
 
-    return class1_results, class2_results
+            if best_box:
+                x0, y0, x1, y1 = best_box
+                # Map back to full-image coords
+                bbox = [int(x0), int(y0 + mid_y), int(x1), int(y1 + mid_y)]
+            else:
+                bbox = []
+
+            description_masks.append((filename, bbox))
+
+        except Exception as e:
+            tqdm.write(f"  [err] {filename}: {e}")
+            description_masks.append((filename, []))
+
+    return [], description_masks

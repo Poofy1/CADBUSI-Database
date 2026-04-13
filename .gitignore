@@ -22,6 +22,7 @@
 *.jsonl
 *.ndjson
 *.log
+*.yaml
 
 config.py
 src/ML_processing/models/*

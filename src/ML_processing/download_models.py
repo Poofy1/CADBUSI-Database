@@ -26,8 +26,8 @@ def download_models():
             "filename": "caliper_detect_10_7_25.pt"
         },
         "Mask": {
-            "url": "https://huggingface.co/poofy38/CADBUSI/resolve/main/mask_model.pt",
-            "filename": "mask_model.pt"
+            "url": "https://huggingface.co/poofy38/CADBUSI/resolve/main/ocr_mask_yolo_2026_4_13.pt",
+            "filename": "ocr_mask_yolo_2026_4_13.pt"
         },
         "N2N": {
             "url": "https://huggingface.co/poofy38/CADBUSI/resolve/main/N2N_7.pth",
