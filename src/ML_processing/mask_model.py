@@ -79,6 +79,9 @@ def find_masks(images_dir, model_name, db_to_process, max_width, max_height,
                 description_masks.append((filename, []))
                 continue
 
+            if img.mode != 'RGB':
+                img = img.convert('RGB')
+
             w, h = img.size
             mid_y = h // 2
 
