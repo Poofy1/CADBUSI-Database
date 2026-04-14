@@ -14,7 +14,7 @@ from tqdm import tqdm
 from tools.storage_adapter import read_image, list_files, StorageClient
 
 env = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH = os.path.join(env, "models", "ocr_mask_yolo.pt")
+MODEL_PATH = os.path.join(env, "models", "ocr_mask_yolo_2026_4_13.pt")
 CONF = 0.25
 
 
