@@ -32,6 +32,8 @@ class DatabaseManager:
     def __enter__(self):
         """Context manager entry."""
         self.connect()
+        self.create_schema()
+        self._migrate_inpainted_column()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -158,7 +160,7 @@ class DatabaseManager:
                 closest_fn TEXT,
                 distance REAL DEFAULT 99999,
                 file_name TEXT,
-                inpainted_from TEXT,
+                inpainted_version TEXT,
                 software_versions TEXT,
                 manufacturer_model_name TEXT,
                 exclusion_reason TEXT,
@@ -306,6 +308,48 @@ class DatabaseManager:
 
         self.conn.commit()
 
+    def _migrate_inpainted_column(self):
+        """Migrate inpainted_from → inpainted_version and flip pointer direction.
+
+        Old schema: inpainted derivative rows have inpainted_from = original image name.
+        New schema: original rows have inpainted_version = inpainted image filename.
+        """
+        cursor = self.conn.cursor()
+        columns = [row[1] for row in cursor.execute("PRAGMA table_info(Images)").fetchall()]
+
+        if 'inpainted_version' not in columns:
+            return  # already migrated or fresh DB
+
+        print("Migrating inpainted_from → inpainted_version ...")
+
+        # Rename the column
+        cursor.execute("ALTER TABLE Images RENAME COLUMN inpainted_from TO inpainted_version")
+
+        # Collect inpainted derivative rows (inpainted_version currently holds original name)
+        derivatives = cursor.execute(
+            "SELECT image_name, inpainted_version FROM Images "
+            "WHERE inpainted_version IS NOT NULL AND inpainted_version != ''"
+        ).fetchall()
+
+        if derivatives:
+            # Flip pointers: set the original row's inpainted_version to the derivative's filename
+            for inpainted_name, original_name in derivatives:
+                cursor.execute(
+                    "UPDATE Images SET inpainted_version = ? WHERE image_name = ?",
+                    (inpainted_name, original_name)
+                )
+
+            # Delete the derivative rows
+            derivative_names = [row[0] for row in derivatives]
+            placeholders = ','.join('?' * len(derivative_names))
+            cursor.execute(
+                f"DELETE FROM Images WHERE image_name IN ({placeholders})",
+                derivative_names
+            )
+            print(f"  Migrated {len(derivatives)} inpainted pointers, deleted derivative rows.")
+
+        self.conn.commit()
+
     def _batch_upsert_helper(
         self,
         table_name: str,
@@ -439,7 +483,7 @@ class DatabaseManager:
         all_columns = [
             'accession_number', 'patient_id', 'image_name', 'dicom_hash',
             'laterality', 'area', 'orientation', 'clock_pos', 'nipple_dist', 'description',
-            'region_spatial_format', 'region_data_type', 'inpainted_from',
+            'region_spatial_format', 'region_data_type', 'inpainted_version',
             'region_location_min_x0', 'region_location_min_y0',
             'region_location_max_x1', 'region_location_max_y1',
             'crop_x', 'crop_y', 'crop_w', 'crop_h', 'crop_aspect_ratio',
@@ -450,7 +494,7 @@ class DatabaseManager:
             'file_name', 'software_versions', 'manufacturer_model_name', 'exclusion_reason'
         ]
 
-        string_columns = ['accession_number', 'patient_id', 'image_name', 'dicom_hash', 'has_caliper_source', 'caliper_boxes', 'caliper_coordinates', 'yolo_confidence', 'samus_confidence', 'inpainted_from', 'exclusion_reason']
+        string_columns = ['accession_number', 'patient_id', 'image_name', 'dicom_hash', 'has_caliper_source', 'caliper_boxes', 'caliper_coordinates', 'yolo_confidence', 'samus_confidence', 'inpainted_version', 'exclusion_reason']
         boolean_columns = ['has_calipers', 'has_caliper_mask', 'label']
         
         return self._batch_upsert_helper(

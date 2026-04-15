@@ -81,7 +81,7 @@ def find_nearest_images(subset, image_folder_path):
 def process_nearest_given_ids(pid, subset, image_folder_path):
     # EARLY EXIT:
     subset = subset[subset['photometric_interpretation'] != 'RGB']
-    
+
     # Validate crop coordinates
     invalid_coords = (
         (subset['region_location_max_x1'] <= subset['region_location_min_x0']) |
@@ -334,20 +334,11 @@ def Select_Data(database_path):
             db_to_process.update(updated_df)
 
         # Build CaliperPairs from near-duplicate pairs (distance <= 5)
-        # Exclude inpainted images - they have has_calipers=0 and would falsely match as "clean" sisters
-        inpainted_names = set(
-            db_to_process.loc[
-                (db_to_process['inpainted_from'].notna()) & (db_to_process['inpainted_from'] != ''),
-                'image_name'
-            ]
-        )
-        real_images = db_to_process[~db_to_process['image_name'].isin(inpainted_names)]
-        caliper_lookup = real_images.set_index('image_name')['has_calipers']
+        caliper_lookup = db_to_process.set_index('image_name')['has_calipers']
 
-        near_dupes = real_images[
-            (real_images['distance'] <= 5) &
-            (real_images['closest_fn'] != '') &
-            (~real_images['closest_fn'].isin(inpainted_names))
+        near_dupes = db_to_process[
+            (db_to_process['distance'] <= 5) &
+            (db_to_process['closest_fn'] != '')
         ].copy()
 
         # Deduplicate pairs (A,B) and (B,A)

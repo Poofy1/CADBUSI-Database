@@ -20,7 +20,7 @@ def get_caliper_inpainted_pairs(db):
     Find all image pairs of original caliper images and their inpainted/clean versions.
     
     Two cases are handled:
-    1. Inpainted pairs: Images with inpainted_from not null paired with their originals
+    1. Inpainted pairs: Original images with inpainted_version set, paired with their inpainted clean version
     2. Closest clean pairs: Images with distance <= 5 and has_calipers = True paired with closest_fn
     
     Ignores pairs where either image has photometric_interpretation = 'RGB'
@@ -38,40 +38,23 @@ def get_caliper_inpainted_pairs(db):
             'data': row
         }
     
-    # CASE 1: Find inpainted pairs (existing logic)
+    # CASE 1: Find inpainted pairs — originals that have an inpainted_version
     inpainted_pairs = []
-    inpainted_images = data[data['inpainted_from'].notna() & (data['inpainted_from'] != '')]
+    originals_with_inpainted = data[
+        data['inpainted_version'].notna() & (data['inpainted_version'] != '')
+    ]
 
-    # Create a dictionary for original images (no inpainted_from value or empty string)
-    original_images_dict = {}
-    for index, row in data.iterrows():
-        inpainted_from = row.get('inpainted_from')
-        if pd.isna(inpainted_from) or inpainted_from == '':
-            original_images_dict[row['image_name']] = {
-                'index': index,
-                'data': row
-            }
-    
-    for index, inpainted_row in inpainted_images.iterrows():
-        original_filename = inpainted_row['inpainted_from']
-        
-        if original_filename in original_images_dict:
-            original_info = original_images_dict[original_filename]
-            
-            # Skip if either image has photometric_interpretation = 'RGB'
-            if (original_info['data'].get('photometric_interpretation') == 'RGB' or 
-                inpainted_row.get('photometric_interpretation') == 'RGB'):
-                continue
-            
-            pair = {
-                'type': 'inpainted',
-                'caliper_image': original_filename,
-                'clean_image': inpainted_row['image_name']
-            }
-            
-            inpainted_pairs.append(pair)
-        else:
-            print(f"Warning: Original image '{original_filename}' not found for inpainted image '{inpainted_row['image_name']}'")
+    for index, row in originals_with_inpainted.iterrows():
+        if row.get('photometric_interpretation') == 'RGB':
+            continue
+
+        pair = {
+            'type': 'inpainted',
+            'caliper_image': row['image_name'],
+            'clean_image': row['inpainted_version'],
+            'clean_image_dir': 'inpainted'
+        }
+        inpainted_pairs.append(pair)
     
     # CASE 2: Find closest clean pairs
     closest_pairs = []
@@ -114,11 +97,11 @@ def get_caliper_inpainted_pairs(db):
     return all_pairs
 
 
-def create_difference_mask(caliper_path, clean_path, input_folder, threshold=30):
-    
+def create_difference_mask(caliper_path, clean_path, input_folder, threshold=30, clean_folder=None):
+
     # Get image paths
     caliper_path = os.path.join(input_folder, caliper_path)
-    clean_path = os.path.join(input_folder, clean_path)
+    clean_path = os.path.join(clean_folder or input_folder, clean_path)
     caliper_path = os.path.normpath(caliper_path)
     clean_path = os.path.normpath(clean_path)
     
@@ -678,8 +661,13 @@ def process_single_image_pair(pair, image_dir, image_data_row, save_debug=False,
     caliper_path = pair['caliper_image']
     clean_path = pair['clean_image']
 
+    # Resolve clean image folder (inpainted pairs live in a separate directory)
+    clean_folder = None
+    if pair.get('clean_image_dir'):
+        clean_folder = os.path.join(os.path.dirname(image_dir.rstrip('/\\')), pair['clean_image_dir'])
+
     # Extract caliper centers from mask
-    caliper_img, clean_img, mask_img = create_difference_mask(caliper_path, clean_path, image_dir)
+    caliper_img, clean_img, mask_img = create_difference_mask(caliper_path, clean_path, image_dir, clean_folder=clean_folder)
 
     # Find Calipers
     # Mask out everything outside the crop region
@@ -879,7 +867,15 @@ def Locate_Calipers(image_dir, save_debug=False, debug_dir='debug_caliper_coords
         for pair in pairs:
             clean_image_name = pair['clean_image']
 
-            if clean_image_name in image_name_to_row:
+            if pair.get('type') == 'inpainted':
+                # Inpainted clean images live on disk, not in the DB
+                clean_dir = os.path.join(os.path.dirname(image_dir.rstrip('/\\')), 'inpainted')
+                clean_path = os.path.join(clean_dir, clean_image_name)
+                if os.path.exists(clean_path):
+                    valid_pairs.append(pair)
+                else:
+                    print(f"Warning: Inpainted image '{clean_image_name}' not found on disk")
+            elif clean_image_name in image_name_to_row:
                 valid_pairs.append(pair)
             else:
                 print(f"Warning: Clean image '{clean_image_name}' not found in database")

@@ -58,40 +58,28 @@ def parse_caliper_boxes(caliper_box_str):
 
 def filter_non_inpainted_images(image_df):
     """
-    Filter out images that have data in the inpainted_from column and RGB PhotometricInterpretation.
-    
+    Filter out RGB PhotometricInterpretation images.
+
+    Inpainted images no longer have their own rows in the database,
+    so only RGB filtering is needed.
+
     Args:
         image_df: DataFrame with image data
-        
+
     Returns:
-        DataFrame: Filtered dataframe excluding inpainted images and RGB images
+        DataFrame: Filtered dataframe excluding RGB images
     """
     initial_count = len(image_df)
-    
-    # Filter out rows where inpainted_from is not null/empty
-    filtered_df = image_df[
-        (pd.isna(image_df['inpainted_from'])) | 
-        (image_df['inpainted_from'] == '') |
-        (image_df['inpainted_from'] == 'null')
-    ].copy()
-    
-    inpainted_excluded = initial_count - len(filtered_df)
-    
+
     # Filter out RGB images
-    pre_rgb_count = len(filtered_df)
-    filtered_df = filtered_df[filtered_df['PhotometricInterpretation'] != 'RGB'].copy()
-    rgb_excluded = pre_rgb_count - len(filtered_df)
-    
-    filtered_count = len(filtered_df)
-    total_excluded = initial_count - filtered_count
-    
+    filtered_df = image_df[image_df['PhotometricInterpretation'] != 'RGB'].copy()
+    rgb_excluded = initial_count - len(filtered_df)
+
     print(f"Image filtering results:")
     print(f"  Initial images: {initial_count}")
-    print(f"  Excluded inpainted images: {inpainted_excluded}")
     print(f"  Excluded RGB images: {rgb_excluded}")
-    print(f"  Remaining images: {filtered_count}")
-    print(f"  Total exclusion rate: {total_excluded/initial_count*100:.1f}%")
-    
+    print(f"  Remaining images: {len(filtered_df)}")
+
     return filtered_df
 
 def create_balanced_cancer_dataset(lesion_df, image_df, target_count=25, max_images_per_accession=25):
