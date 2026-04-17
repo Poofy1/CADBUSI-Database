@@ -126,7 +126,7 @@ class DatabaseManager:
                 nipple_dist INTEGER,
                 description TEXT,
                 region_spatial_format INTEGER,
-                region_data_type INTEGER,
+                region_data_type TEXT,
                 region_location_min_x0 INTEGER,
                 region_location_min_y0 INTEGER,
                 region_location_max_x1 INTEGER,
@@ -181,7 +181,7 @@ class DatabaseManager:
                 laterality TEXT,
                 saved_frames INTEGER,
                 region_spatial_format INTEGER,
-                region_data_type INTEGER,
+                region_data_type TEXT,
                 region_location_min_x0 INTEGER,
                 region_location_min_y0 INTEGER,
                 region_location_max_x1 INTEGER,
@@ -494,7 +494,7 @@ class DatabaseManager:
             'file_name', 'software_versions', 'manufacturer_model_name', 'exclusion_reason'
         ]
 
-        string_columns = ['accession_number', 'patient_id', 'image_name', 'dicom_hash', 'has_caliper_source', 'caliper_boxes', 'caliper_coordinates', 'yolo_confidence', 'samus_confidence', 'inpainted_version', 'exclusion_reason']
+        string_columns = ['accession_number', 'patient_id', 'image_name', 'dicom_hash', 'has_caliper_source', 'caliper_boxes', 'caliper_coordinates', 'yolo_confidence', 'samus_confidence', 'inpainted_version', 'exclusion_reason', 'region_data_type']
         boolean_columns = ['has_calipers', 'has_caliper_mask', 'label']
         
         return self._batch_upsert_helper(
@@ -522,7 +522,7 @@ class DatabaseManager:
             'nipple_dist', 'orientation', 'clock_pos', 'area', 'description', 'crop_aspect_ratio'
         ]
         
-        string_columns = ['accession_number', 'patient_id', 'images_path', 'dicom_hash']
+        string_columns = ['accession_number', 'patient_id', 'images_path', 'dicom_hash', 'region_data_type']
         boolean_columns = []  # No boolean columns in Videos table
         
         return self._batch_upsert_helper(

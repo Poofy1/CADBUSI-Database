@@ -377,20 +377,29 @@ def parse_video_data(dcm, dataset, current_index, parsed_database, video_n_frame
         manufacturer_model = dataset.ManufacturerModelName
         
     data_dict = {}
-    
+    region_data_types = []
+
     for elem in dataset:
-        if elem.VR == "SQ" and elem.value and len(elem.value) > 0:  # if sequence
-            for sub_elem in elem.value[0]:  # only take the first item in the sequence
-                tag_name = pydicom.datadict.keyword_for_tag(sub_elem.tag)
-                if tag_name == "PixelData":
-                    continue
-                data_dict[tag_name] = str(sub_elem.value)
+        if elem.VR == "SQ":
+            # Collect RegionDataType from each region
+            if elem.keyword == 'SequenceOfUltrasoundRegions':
+                for region in elem:
+                    for sub in region:
+                        if pydicom.datadict.keyword_for_tag(sub.tag) == "RegionDataType":
+                            region_data_types.append(str(sub.value))
+
+            if elem.value and len(elem.value) > 0:
+                for sub_elem in elem.value[0]:  # only take the first item in the sequence
+                    tag_name = pydicom.datadict.keyword_for_tag(sub_elem.tag)
+                    if tag_name == "PixelData":
+                        continue
+                    data_dict[tag_name] = str(sub_elem.value)
         else:
             tag_name = pydicom.datadict.keyword_for_tag(elem.tag)
             if tag_name == "PixelData":
                 continue
             data_dict[tag_name] = str(elem.value)
-    
+
     #create video folder
     dicom_hash = os.path.splitext(os.path.basename(dcm))[0]
     video_path = dicom_hash
@@ -434,6 +443,7 @@ def parse_video_data(dcm, dataset, current_index, parsed_database, video_n_frame
     data_dict['ImagesPath'] = video_path
     data_dict['SavedFrames'] = image_count
     data_dict['DicomHash'] = dicom_hash
+    data_dict['RegionDataType'] = ','.join(region_data_types) if region_data_types else ''
     data_dict['SoftwareVersions'] = str(software_version)
     data_dict['ManufacturerModelName'] = str(manufacturer_model)
 
@@ -503,15 +513,19 @@ def parse_single_dcm(dcm, current_index, parsed_database, video_n_frames, birads
     # Continue with image
     data_dict = {}
     region_count = 0
-    
+    region_data_types = []
+
     for elem in dataset:
         # Check if element is a sequence
         if elem.VR == "SQ":
-            # Count regions
-            for i, sub_elem in enumerate(elem):
-                if elem.keyword == 'SequenceOfUltrasoundRegions':
+            # Count regions and collect RegionDataType from each
+            if elem.keyword == 'SequenceOfUltrasoundRegions':
+                for region in elem:
                     region_count += 1
-            
+                    for sub in region:
+                        if pydicom.datadict.keyword_for_tag(sub.tag) == "RegionDataType":
+                            region_data_types.append(str(sub.value))
+
             #Get Data
             if elem.value and len(elem.value) > 0:
                 for sub_elem in elem.value[0]:  # only take the first item in the sequence
@@ -579,6 +593,7 @@ def parse_single_dcm(dcm, current_index, parsed_database, video_n_frames, birads
     data_dict['ImageName'] = image_name
     data_dict['DicomHash'] = dicom_hash
     data_dict['RegionCount'] = region_count
+    data_dict['RegionDataType'] = ','.join(region_data_types) if region_data_types else ''
     data_dict['SoftwareVersions'] = str(software_version)
     data_dict['ManufacturerModelName'] = str(manufacturer_model)
 
