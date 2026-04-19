@@ -31,17 +31,23 @@ def find_nearest_images(subset, image_folder_path):
         file_name = subset.loc[image_id, 'image_name']
         full_filename = os.path.join(image_folder_path, file_name)
         img = read_image(full_filename, use_pil=True)
+        if img is None:
+            tqdm.write(f"  [skip] could not read {file_name}")
+            continue
         img = np.array(img).astype(np.uint8)
         if len(img.shape) == 3:
             img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-        
+
         rows, cols = img.shape[:2]
         if rows >= y + h and cols >= x + w:
             cropped = img[y:y+h, x:x+w]
         else:
             cropped = np.full((h, w), 255, dtype=np.uint8)
-        
+
         cropped_images[image_id] = cropped.flatten()
+
+    if len(cropped_images) < 2:
+        return {}
 
     image_ids = list(cropped_images.keys())
     image_matrix = np.array([cropped_images[id] for id in image_ids], dtype=np.uint8)
@@ -89,14 +95,16 @@ def process_nearest_given_ids(pid, subset, image_folder_path):
     )
     if invalid_coords.any():
         subset = subset[~invalid_coords]
-    
+
     # Early termination if no valid images
     if len(subset) < 2:
         return subset
-    
+
+    subset = subset.copy()
+
     # Group by crop coordinates
     coord_cols = ['region_location_min_x0', 'region_location_min_y0', 'region_location_max_x1', 'region_location_max_y1']
-    
+
     # Create coordinate groups
     subset['coord_key'] = list(zip(
         subset[coord_cols[0]], 
