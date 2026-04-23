@@ -1,11 +1,12 @@
 """Full extraction over all rad_pathology_txt records (~34K accessions).
 
-Writes results to a new table `pathology_extracted` in `bus_manifest_v3.db`.
-Supports resume — skips accessions already in the output table.
+Reads source pathology text from the CADBUSI DB (read-only) and writes
+results to a separate output DB (`pathology_extracted.db` by default) so
+the source is never modified. Supports resume — skips accessions already
+in the output table.
 """
 from __future__ import annotations
 import sys
-import json
 import time
 import sqlite3
 from pathlib import Path
@@ -14,10 +15,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 import pandas as pd
-from bus_data import ManifestDB
-from data.pathology_extraction import PathologyExtractor
+from labeling.pathology_extraction import PathologyExtractor
 
-MANIFEST_DB = '/home/jbaggett/BUS_framework/data/registry/bus_manifest_v3.db'
+DEFAULT_SOURCE_DB = str(PROJECT_ROOT / 'data' / 'cadbusi.db')
+DEFAULT_OUTPUT_DB = str(PROJECT_ROOT / 'data' / 'pathology_extracted.db')
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS pathology_extracted (
@@ -49,15 +50,16 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 
-def ensure_table():
-    conn = sqlite3.connect(MANIFEST_DB)
+def ensure_table(output_db: str):
+    Path(output_db).parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(output_db)
     conn.executescript(SCHEMA_SQL)
     conn.commit()
     conn.close()
 
 
-def already_extracted() -> set:
-    conn = sqlite3.connect(MANIFEST_DB)
+def already_extracted(output_db: str) -> set:
+    conn = sqlite3.connect(output_db)
     try:
         rows = conn.execute("SELECT accession_number FROM pathology_extracted").fetchall()
     finally:
@@ -65,8 +67,8 @@ def already_extracted() -> set:
     return set(r[0] for r in rows)
 
 
-def save_results(results, model_name: str):
-    conn = sqlite3.connect(MANIFEST_DB)
+def save_results(output_db: str, results, model_name: str):
+    conn = sqlite3.connect(output_db)
     cur = conn.cursor()
     for r in results:
         e = r.extraction
@@ -96,20 +98,37 @@ def save_results(results, model_name: str):
     conn.close()
 
 
-def main(batch_size: int = 200, max_workers: int = 16, use_vertex: bool = False,
-         project: str = None, location: str = None, model: str = None):
-    ensure_table()
-    done = already_extracted()
+def load_source_rows(source_db: str) -> pd.DataFrame:
+    conn = sqlite3.connect(f"file:{source_db}?mode=ro", uri=True)
+    try:
+        return pd.read_sql_query(
+            """
+            SELECT DISTINCT accession_number, rad_pathology_txt
+            FROM StudyCases
+            WHERE rad_pathology_txt IS NOT NULL
+              AND LENGTH(TRIM(rad_pathology_txt)) > 20
+            ORDER BY accession_number
+            """,
+            conn,
+        )
+    finally:
+        conn.close()
+
+
+def main(source_db: str = DEFAULT_SOURCE_DB, output_db: str = DEFAULT_OUTPUT_DB,
+         batch_size: int = 200, max_workers: int = 16,
+         use_vertex: bool = False, project: str = None, location: str = None,
+         model: str = None):
+    if not Path(source_db).exists():
+        raise SystemExit(f"Source DB not found: {source_db}")
+    print(f"Source DB (read-only): {source_db}")
+    print(f"Output DB:             {output_db}")
+
+    ensure_table(output_db)
+    done = already_extracted(output_db)
     print(f"Already extracted: {len(done):,}")
 
-    db = ManifestDB()
-    rows = db.query_df("""
-        SELECT DISTINCT accession_number, rad_pathology_txt
-        FROM src.StudyCases
-        WHERE rad_pathology_txt IS NOT NULL
-          AND LENGTH(TRIM(rad_pathology_txt)) > 20
-        ORDER BY accession_number
-    """)
+    rows = load_source_rows(source_db)
     todo = rows[~rows['accession_number'].isin(done)]
     print(f"Total records: {len(rows):,}, remaining: {len(todo):,}")
     if len(todo) == 0:
@@ -134,7 +153,7 @@ def main(batch_size: int = 200, max_workers: int = 16, use_vertex: bool = False,
         results = extractor.extract_batch_parallel(
             batch, max_workers=max_workers, show_progress=False
         )
-        save_results(results, extractor.model)
+        save_results(output_db, results, extractor.model)
         processed += len(batch)
         dt = time.time() - t0
         total_dt = time.time() - start
@@ -151,6 +170,10 @@ def main(batch_size: int = 200, max_workers: int = 16, use_vertex: bool = False,
 if __name__ == "__main__":
     import argparse
     p = argparse.ArgumentParser()
+    p.add_argument('--db', default=DEFAULT_SOURCE_DB,
+                   help='Source CADBUSI DB (read-only) — where rad_pathology_txt is read from')
+    p.add_argument('--out', default=DEFAULT_OUTPUT_DB,
+                   help='Output DB for pathology_extracted table')
     p.add_argument('--batch-size', type=int, default=200)
     p.add_argument('--workers', type=int, default=16)
     p.add_argument('--vertex', action='store_true',
@@ -161,6 +184,7 @@ if __name__ == "__main__":
                    help='Override default model (e.g. gemini-2.5-pro, gemini-3-flash-preview)')
     args = p.parse_args()
     main(
+        source_db=args.db, output_db=args.out,
         batch_size=args.batch_size, max_workers=args.workers,
         use_vertex=args.vertex, project=args.project, location=args.location,
         model=args.model,

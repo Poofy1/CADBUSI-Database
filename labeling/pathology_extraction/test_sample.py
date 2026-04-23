@@ -1,38 +1,61 @@
 """Quick sanity run: extract on 50 records, print a readable summary."""
+import argparse
+import sqlite3
 import sys
+import time
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-import random
-from bus_data import ManifestDB
-from data.pathology_extraction import PathologyExtractor
+import pandas as pd
+from labeling.pathology_extraction import PathologyExtractor
+
+DEFAULT_DB = PROJECT_ROOT / "data" / "cadbusi.db"
+
+
+def load_sample(db_path: Path, n: int) -> pd.DataFrame:
+    conn = sqlite3.connect(str(db_path))
+    try:
+        return pd.read_sql_query(
+            """
+            SELECT accession_number, rad_pathology_txt
+            FROM StudyCases
+            WHERE rad_pathology_txt IS NOT NULL
+              AND LENGTH(TRIM(rad_pathology_txt)) > 20
+            ORDER BY RANDOM()
+            LIMIT ?
+            """,
+            conn,
+            params=(n,),
+        )
+    finally:
+        conn.close()
 
 
 def main():
-    db = ManifestDB()
-    # Pull a diverse 50-row sample: mix of short and long texts
-    rows = db.query_df("""
-        SELECT accession_number, rad_pathology_txt
-        FROM src.StudyCases
-        WHERE rad_pathology_txt IS NOT NULL
-          AND LENGTH(TRIM(rad_pathology_txt)) > 20
-        ORDER BY RANDOM()
-        LIMIT 50
-    """)
-    print(f"Loaded {len(rows)} sample texts")
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--db", default=str(DEFAULT_DB), help="Path to cadbusi.db")
+    ap.add_argument("--n", type=int, default=50, help="Number of sample rows")
+    args = ap.parse_args()
+
+    db_path = Path(args.db)
+    if not db_path.exists():
+        raise SystemExit(f"DB not found: {db_path}")
+
+    rows = load_sample(db_path, args.n)
+    print(f"Loaded {len(rows)} sample texts from {db_path}")
+    if len(rows) == 0:
+        raise SystemExit("No rad_pathology_txt rows found — is this the populated DB?")
     print()
 
     extractor = PathologyExtractor()
     items = list(zip(rows["accession_number"], rows["rad_pathology_txt"]))
     print(f"Extracting with model={extractor.model}...")
-    import time
     t0 = time.time()
     results = extractor.extract_batch(items, show_progress=True)
     elapsed = time.time() - t0
 
-    # Stats
     ok = [r for r in results if r.extraction is not None]
     err = [r for r in results if r.extraction is None]
     print()
@@ -43,7 +66,6 @@ def main():
         for e in err[:5]:
             print(f"  {e.accession}: {e.error}")
 
-    # Print a few extractions for eyeballing
     print("\n=== Sample extractions ===")
     for r in ok[:12]:
         e = r.extraction

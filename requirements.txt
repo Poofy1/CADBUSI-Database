@@ -18,6 +18,7 @@ sentencepiece
 google-cloud-storage
 google-cloud-pubsub
 google-cloud-bigquery
+google-genai
 pydicom
 scikit-learn
 fastai
