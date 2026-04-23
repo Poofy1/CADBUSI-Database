@@ -17,7 +17,6 @@ sys.path.insert(0, str(PROJECT_ROOT))
 import pandas as pd
 from labeling.pathology_extraction import PathologyExtractor
 
-DEFAULT_SOURCE_DB = str(PROJECT_ROOT / 'data' / 'cadbusi.db')
 DEFAULT_OUTPUT_DB = str(PROJECT_ROOT / 'data' / 'pathology_extracted.db')
 
 SCHEMA_SQL = """
@@ -115,12 +114,13 @@ def load_source_rows(source_db: str) -> pd.DataFrame:
         conn.close()
 
 
-def main(source_db: str = DEFAULT_SOURCE_DB, output_db: str = DEFAULT_OUTPUT_DB,
+def main(source_db: str, output_db: str = DEFAULT_OUTPUT_DB,
          batch_size: int = 200, max_workers: int = 16,
          use_vertex: bool = False, project: str = None, location: str = None,
          model: str = None):
+    source_db = str(Path(source_db).expanduser().resolve())
     if not Path(source_db).exists():
-        raise SystemExit(f"Source DB not found: {source_db}")
+        raise SystemExit(f"Source DB not found: {source_db}  (cwd={Path.cwd()})")
     print(f"Source DB (read-only): {source_db}")
     print(f"Output DB:             {output_db}")
 
@@ -170,8 +170,8 @@ def main(source_db: str = DEFAULT_SOURCE_DB, output_db: str = DEFAULT_OUTPUT_DB,
 if __name__ == "__main__":
     import argparse
     p = argparse.ArgumentParser()
-    p.add_argument('--db', default=DEFAULT_SOURCE_DB,
-                   help='Source CADBUSI DB (read-only) — where rad_pathology_txt is read from')
+    p.add_argument('--db', required=True,
+                   help='Source CADBUSI DB (read-only) — e.g. data/cadbusi.db')
     p.add_argument('--out', default=DEFAULT_OUTPUT_DB,
                    help='Output DB for pathology_extracted table')
     p.add_argument('--batch-size', type=int, default=200)

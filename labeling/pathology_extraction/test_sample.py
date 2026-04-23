@@ -11,11 +11,8 @@ sys.path.insert(0, str(PROJECT_ROOT))
 import pandas as pd
 from labeling.pathology_extraction import PathologyExtractor
 
-DEFAULT_DB = PROJECT_ROOT / "data" / "cadbusi.db"
-
-
 def load_sample(db_path: Path, n: int) -> pd.DataFrame:
-    conn = sqlite3.connect(str(db_path))
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     try:
         return pd.read_sql_query(
             """
@@ -35,13 +32,19 @@ def load_sample(db_path: Path, n: int) -> pd.DataFrame:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--db", default=str(DEFAULT_DB), help="Path to cadbusi.db")
+    ap.add_argument("--db", required=True,
+                    help="Path to CADBUSI sqlite DB (e.g. data/cadbusi.db)")
     ap.add_argument("--n", type=int, default=50, help="Number of sample rows")
+    ap.add_argument("--vertex", action="store_true",
+                    help="Use Vertex AI auth instead of GEMINI_API_KEY")
+    ap.add_argument("--project", default=None, help="GCP project (for --vertex)")
+    ap.add_argument("--location", default=None, help="Vertex region (for --vertex)")
+    ap.add_argument("--model", default=None, help="Override default model")
     args = ap.parse_args()
 
-    db_path = Path(args.db)
+    db_path = Path(args.db).expanduser().resolve()
     if not db_path.exists():
-        raise SystemExit(f"DB not found: {db_path}")
+        raise SystemExit(f"DB not found: {db_path}  (cwd={Path.cwd()})")
 
     rows = load_sample(db_path, args.n)
     print(f"Loaded {len(rows)} sample texts from {db_path}")
@@ -49,7 +52,12 @@ def main():
         raise SystemExit("No rad_pathology_txt rows found — is this the populated DB?")
     print()
 
-    extractor = PathologyExtractor()
+    extractor_kwargs = {"use_vertex": args.vertex}
+    if args.project: extractor_kwargs["project"] = args.project
+    if args.location: extractor_kwargs["location"] = args.location
+    if args.model: extractor_kwargs["model"] = args.model
+    extractor = PathologyExtractor(**extractor_kwargs)
+    print(f"Mode: {extractor.mode}")
     items = list(zip(rows["accession_number"], rows["rad_pathology_txt"]))
     print(f"Extracting with model={extractor.model}...")
     t0 = time.time()

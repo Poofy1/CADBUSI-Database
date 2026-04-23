@@ -3,73 +3,74 @@
 Structured extraction of Mayo pathology text into a queryable table.
 Uses `google.genai` with Pydantic response schemas for reliable structured output.
 
-## Architecture
+Source: `StudyCases.rad_pathology_txt` in a CADBUSI sqlite DB.
+Output: `pathology_extracted` table in a **separate** sqlite DB — the source
+DB is opened read-only and never modified.
+
+## Layout
 
 ```
-data/pathology_extraction/
+labeling/pathology_extraction/
 ├── schema.py           # Pydantic models (enums + PathologyExtraction)
 ├── prompts.py          # Extraction prompt
 ├── extractor.py        # PathologyExtractor class (API-key OR Vertex AI mode)
 ├── test_sample.py      # 50-record eyeball test
-├── validate.py         # 924-overlap validation vs structured Pathology
-└── run_full.py         # Full extraction, resume-safe, writes to manifest DB
+├── run_full.py         # Full extraction, resume-safe, writes to output DB
+└── validate.py         # (not yet updated for this repo)
 ```
 
-## Two run modes
+## Setup
 
-### Mode A: Direct Gemini API (default, free tier)
 ```bash
-source ~/.bashrc  # loads GEMINI_API_KEY
-python data/pathology_extraction/run_full.py --workers 16 --batch-size 200
+pip install -r requirements.txt   # includes google-genai
 ```
 
-- Uses `GEMINI_API_KEY` from `~/.bashrc`.
-- Consumer-tier quotas. `gemini-2.5-flash` (GA) has reasonable quotas; preview models like `gemini-3-flash-preview` are very restricted and hit 429 after ~15K requests.
-- Best for prototyping, small runs, the current Phase 1 extraction.
+Auth — pick one:
 
-### Mode B: Vertex AI on GCP (recommended for Phase 2 synoptic extraction)
+- **API key** (simple): `export GEMINI_API_KEY=...` (or `$env:GEMINI_API_KEY=...` in PowerShell)
+- **Vertex AI** (higher quotas, pay-as-you-go): `gcloud auth application-default login`, then
+  `export VERTEX_PROJECT=your-project` and `export VERTEX_LOCATION=us-central1`
+
+## Quick test (50 records)
+
+`--db` is required — point it at whichever CADBUSI sqlite you want to read from.
+
 ```bash
-# One-time setup (local dev or GCP VM):
-gcloud auth application-default login    # sets Application Default Credentials
-export VERTEX_PROJECT=your-gcp-project-id
-export VERTEX_LOCATION=us-central1        # or your nearest region
+python labeling/pathology_extraction/test_sample.py --db data/cadbusi.db --n 50
+```
 
-# Run:
-python data/pathology_extraction/run_full.py \
-    --vertex \
-    --project $VERTEX_PROJECT \
-    --location $VERTEX_LOCATION \
+## Full run
+
+```bash
+# API key mode
+python labeling/pathology_extraction/run_full.py \
+    --db data/cadbusi.db \
+    --out data/pathology_extracted.db \
+    --workers 16 --batch-size 200
+
+# Vertex AI mode
+python labeling/pathology_extraction/run_full.py \
+    --db data/cadbusi.db \
+    --out data/pathology_extracted.db \
+    --vertex --project $VERTEX_PROJECT --location $VERTEX_LOCATION \
     --workers 32 --batch-size 200
 ```
 
-- Auth via IAM (service account on GCP VMs, or ADC locally). **No API key in .bashrc.**
-- Higher quotas + pay-as-you-go pricing — no preview-model rate limits.
-- Same `google.genai` SDK; just constructs the client with `vertexai=True`.
-- On a GCP VM with a service account that has `aiplatform.user` role, everything just works.
-- **Recommended for Phase 2** (50K synoptic reports, larger token budget per record).
+`--out` defaults to `data/pathology_extracted.db` if omitted.
+Re-running `run_full.py` skips accessions already in the output table (resume-safe).
 
-## Extracted table
+## Output table
 
-Schema: `data/registry/SCHEMA_GUIDE.md#pathology_extracted`. Key columns:
-`primary_diagnosis`, `cancer_subtypes`, `benign_subtypes`, `laterality`, `size_mm`,
-`grade`, `lymph_node_status`, `is_lymph_node_biopsy`, `confidence`, `notes`,
-`model_name`, `extraction_error`.
-
-## Phase 1 vs Phase 2
-
-| | Phase 1 (running) | Phase 2 (planned) |
-|---|---|---|
-| Source | `StudyCases.rad_pathology_txt` | `Pathology.synoptic_report` |
-| Rows | ~34K | ~50K (per-Pathology-row, not per-accession) |
-| Avg text length | ~200 chars | ~3,158 chars |
-| Output table | `pathology_extracted` | `pathology_synoptic_extracted` |
-| Schema richness | Coarse (primary + subtype) | Full (grade, size, margin, pTNM, ER/PR, LN counts) |
-| Auth | API key OK | Vertex AI strongly recommended |
-| Cost | <$1 | ~$16 on Gemini 2.5 Flash |
+`pathology_extracted` columns:
+`accession_number`, `source_text`, `primary_diagnosis`, `cancer_subtypes`,
+`benign_subtypes`, `laterality`, `size_mm`, `grade`, `lymph_node_status`,
+`is_lymph_node_biopsy`, `confidence`, `notes`, `model_name`,
+`extraction_error`, `created_at`.
 
 ## Gotchas
 
 - **Rate limits** bite quickly on preview models (`gemini-3-flash-preview`). Use GA models (`gemini-2.5-flash`) for production volume — ~5× the RPM budget.
-- **Resume works**: re-running `run_full.py` skips accessions already in the output table. Useful when quota resets or you want to retry errors.
-- **Errors are written as rows** with `extraction_error` populated — good for post-hoc triage. If you want to retry them, `DELETE FROM pathology_extracted WHERE extraction_error IS NOT NULL;` before rerunning.
+- **Errors are written as rows** with `extraction_error` populated — good for post-hoc triage. To retry them:
+  `DELETE FROM pathology_extracted WHERE extraction_error IS NOT NULL;` then rerun.
 - **`Warning: thought_signature` in stdout** is Gemini 3's thinking-mode artifacts. Harmless; filter out of logs with `grep -v thought_signature`.
+- **`GCP_VM_RUNBOOK.md`** in this folder is stale — it references the BUS_framework repo layout and the Phase-2 jsonl-export scripts, which haven't been ported to CADBUSI-Database.
