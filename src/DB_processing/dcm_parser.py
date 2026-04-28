@@ -46,7 +46,7 @@ NAMES_TO_REMOVE = frozenset({
 })
 
 NAMES_TO_ANON_TIME = frozenset({
-    'Study Time', 'Series Time', 'Content Time',
+    'Study Time', 'Series Time', 'Content Time', 'Acquisition Time',
 })
 
 # Machine-specific coordinates (as ratios of width, height) to check for color
@@ -702,7 +702,7 @@ def parse_anon_file(anon_location, image_df):
         'region_location_min_x0', 'region_location_min_y0', 'region_location_max_x1',
         'region_location_max_y1', 'photometric_interpretation', 'rows', 'columns',
         'file_name', 'dicom_hash', 'software_versions', 'manufacturer_model_name',
-        'physical_delta_x'
+        'physical_delta_x', 'acquisition_time'
     ]
 
     # Keep only necessary columns from dataframes

@@ -163,6 +163,7 @@ class DatabaseManager:
                 inpainted_version TEXT,
                 software_versions TEXT,
                 manufacturer_model_name TEXT,
+                acquisition_time TEXT,
                 exclusion_reason TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (accession_number) REFERENCES StudyCases(accession_number) ON DELETE CASCADE
@@ -197,6 +198,7 @@ class DatabaseManager:
                 file_name TEXT,
                 software_versions TEXT,
                 manufacturer_model_name TEXT,
+                acquisition_time TEXT,
                 nipple_dist REAL,
                 orientation TEXT,
                 clock_pos INTEGER,
@@ -491,10 +493,10 @@ class DatabaseManager:
             'has_calipers', 'has_calipers_prediction', 'has_caliper_source', 'has_caliper_prob_uncropped', 'has_caliper_prob_cropped',
             'caliper_n_peaks', 'caliper_peak_max_score', 'caliper_boxes', 'caliper_coordinates', 'yolo_confidence', 'has_caliper_mask', 'samus_confidence',
             'darkness', 'label', 'region_count', 'closest_fn', 'distance',
-            'file_name', 'software_versions', 'manufacturer_model_name', 'exclusion_reason'
+            'file_name', 'software_versions', 'manufacturer_model_name', 'acquisition_time', 'exclusion_reason'
         ]
 
-        string_columns = ['accession_number', 'patient_id', 'image_name', 'dicom_hash', 'has_caliper_source', 'caliper_boxes', 'caliper_coordinates', 'yolo_confidence', 'samus_confidence', 'inpainted_version', 'exclusion_reason', 'region_data_type']
+        string_columns = ['accession_number', 'patient_id', 'image_name', 'dicom_hash', 'has_caliper_source', 'caliper_boxes', 'caliper_coordinates', 'yolo_confidence', 'samus_confidence', 'inpainted_version', 'exclusion_reason', 'region_data_type', 'acquisition_time']
         boolean_columns = ['has_calipers', 'has_caliper_mask', 'label']
         
         return self._batch_upsert_helper(
@@ -518,11 +520,11 @@ class DatabaseManager:
             'region_location_max_x1', 'region_location_max_y1',
             'crop_x', 'crop_y', 'crop_w', 'crop_h',
             'photometric_interpretation', 'rows', 'columns', 'physical_delta_x',
-            'file_name', 'software_versions', 'manufacturer_model_name',
+            'file_name', 'software_versions', 'manufacturer_model_name', 'acquisition_time',
             'nipple_dist', 'orientation', 'clock_pos', 'area', 'description', 'crop_aspect_ratio'
         ]
-        
-        string_columns = ['accession_number', 'patient_id', 'images_path', 'dicom_hash', 'region_data_type']
+
+        string_columns = ['accession_number', 'patient_id', 'images_path', 'dicom_hash', 'region_data_type', 'acquisition_time']
         boolean_columns = []  # No boolean columns in Videos table
         
         return self._batch_upsert_helper(
