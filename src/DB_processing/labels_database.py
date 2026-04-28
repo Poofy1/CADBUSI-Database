@@ -150,6 +150,120 @@ class LabelsDatabase:
             )
         """)
 
+        # users — preparer / radiologist accounts (populated from IAP headers)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                user_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+                name        TEXT UNIQUE NOT NULL,
+                role        TEXT NOT NULL,            -- 'preparer' | 'radiologist' | 'admin'
+                created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # lesion_annotations — one skeleton row per physical lesion per exam
+        # See MASK_SAVE_SPEC.md §2 and Tristan_Tasks_04_22_26.md Task 2b.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS lesion_annotations (
+                lesion_annot_id      INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_lesion_ids    TEXT,             -- JSON list of cadbusi.Lesions.lesion_id collapsed into this row
+                accession_number     TEXT NOT NULL,
+                laterality           TEXT,             -- 'LEFT' | 'RIGHT' | NULL
+                clock_hr             REAL,
+                distance_cm          REAL,
+                size_mm              REAL,
+                -- LLM-extracted descriptors (BI-RADS lexicon, populated by lesion_descriptor_extraction)
+                shape                TEXT,
+                orientation          TEXT,
+                margin_clarity       TEXT,
+                margin_detail        TEXT,
+                echo_pattern         TEXT,
+                posterior_features   TEXT,
+                calcifications       TEXT,
+                vascularity          TEXT,
+                lesion_kind          TEXT,             -- 'mass' | 'cyst' | 'lymph_node' | 'other'
+                -- workflow
+                pathology            TEXT,
+                notes                TEXT,
+                preparer_user_id     INTEGER,
+                preparer_ts          TIMESTAMP,
+                radiologist_user_id  INTEGER,
+                radiologist_ts       TIMESTAMP,
+                stage                TEXT,             -- 'preparer_pass' | 'radiologist_review' | 'finalized'
+                status               TEXT,             -- 'seeded' | 'in_progress' | 'done' | 'flagged'
+                created_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (preparer_user_id)    REFERENCES users(user_id),
+                FOREIGN KEY (radiologist_user_id) REFERENCES users(user_id)
+            )
+        """)
+        cursor.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_lesion_annot_dedupe
+            ON lesion_annotations(accession_number, clock_hr, distance_cm)
+            WHERE clock_hr IS NOT NULL AND distance_cm IS NOT NULL
+        """)
+        # Idempotency for nullish rows (NULL clock or distance): each
+        # source lesion_id is preserved as its own skeleton row, so the
+        # source_lesion_ids JSON list is the natural dedupe key.
+        cursor.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_lesion_annot_src_when_null
+            ON lesion_annotations(source_lesion_ids)
+            WHERE clock_hr IS NULL OR distance_cm IS NULL
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_lesion_annot_acc ON lesion_annotations(accession_number)")
+
+        # frame_lesion_views — which frames show which lesion (and in what view)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS frame_lesion_views (
+                frame_lesion_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+                dicom_hash        TEXT NOT NULL,
+                lesion_annot_id   INTEGER NOT NULL,
+                view_type         TEXT,             -- 'LONG' | 'TRANS' | 'DOPPLER' | 'OBLIQUE' | 'OTHER'
+                doppler_on        INTEGER,
+                is_best_view      INTEGER,
+                created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (lesion_annot_id) REFERENCES lesion_annotations(lesion_annot_id),
+                UNIQUE(dicom_hash, lesion_annot_id)
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_flv_dicom  ON frame_lesion_views(dicom_hash)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_flv_lesion ON frame_lesion_views(lesion_annot_id)")
+
+        # mask_artifacts — capture record per (frame_lesion, stage), max two stages
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS mask_artifacts (
+                mask_id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                frame_lesion_id    INTEGER NOT NULL,
+                stage              TEXT NOT NULL,    -- 'preparer_pass' | 'radiologist_review'
+                format             TEXT NOT NULL,    -- 'png' | 'polygon'
+                gcs_path_json      TEXT NOT NULL,
+                gcs_path_png       TEXT,
+                image_width        INTEGER,
+                image_height       INTEGER,
+                annotator_user_id  INTEGER,
+                created_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (frame_lesion_id)   REFERENCES frame_lesion_views(frame_lesion_id),
+                FOREIGN KEY (annotator_user_id) REFERENCES users(user_id),
+                UNIQUE(frame_lesion_id, stage)
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_mask_frame_lesion ON mask_artifacts(frame_lesion_id)")
+
+        # tasks — assignment / workflow tracking
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS tasks (
+                task_id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                target_type       TEXT NOT NULL,    -- 'lesion_annot' | 'frame_lesion' | 'exam'
+                target_id         INTEGER NOT NULL,
+                assignee_user_id  INTEGER,
+                stage             TEXT,             -- 'preparer_pass' | 'radiologist_review'
+                status            TEXT,             -- 'open' | 'in_progress' | 'done' | 'blocked'
+                created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at        TIMESTAMP,
+                FOREIGN KEY (assignee_user_id) REFERENCES users(user_id)
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_tasks_assignee ON tasks(assignee_user_id, status)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_tasks_target   ON tasks(target_type, target_id)")
+
         # Indexes
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_imagelabels_dicom   ON ImageLabels(dicom_hash)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_lesionlabels_dicom  ON LesionLabels(dicom_hash)")
