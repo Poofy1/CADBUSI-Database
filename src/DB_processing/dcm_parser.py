@@ -32,7 +32,7 @@ ENCRYPTION_KEY = None
 
 # Define sets at module level for better performance
 NAMES_TO_REMOVE = frozenset({
-    'SOP Instance UID', 'Study Time', 'Series Time', 'Content Time',
+    'SOP Instance UID',
     'Study Instance UID', 'Series Instance UID', 'Private Creator',
     'Media Storage SOP Instance UID', 'Implementation Class UID',
     "Patient's Name", "Referring Physician's Name", "Acquisition DateTime",
@@ -138,6 +138,39 @@ def has_red_pixels(image, n=100, min_r=200):
             if r >= min_r and r - b >= n and r - g >= n:
                 return True
     return False
+
+
+ACQUISITION_TIME_TAG_FALLBACK = ('AcquisitionTime', 'ContentTime', 'SeriesTime', 'StudyTime')
+
+
+def format_dicom_tm(tm):
+    """Format DICOM TM 'HHMMSS[.FFFFFF]' as 'HH:MM:SS[.fff]'. Returns '' if unparseable."""
+    if not tm:
+        return ''
+    s = str(tm).strip()
+    if '.' in s:
+        hms, frac = s.split('.', 1)
+    else:
+        hms, frac = s, ''
+    if len(hms) < 6 or not hms[:6].isdigit():
+        return ''
+    h, m, sec = hms[0:2], hms[2:4], hms[4:6]
+    if frac:
+        ms = (frac + '000')[:3]
+        return f"{h}:{m}:{sec}.{ms}"
+    return f"{h}:{m}:{sec}"
+
+
+def pick_acquisition_time(ds):
+    """Try AcquisitionTime → ContentTime → SeriesTime → StudyTime, return (formatted_str, source_tag).
+    Returns ('', '') if nothing parseable."""
+    for tag in ACQUISITION_TIME_TAG_FALLBACK:
+        raw = getattr(ds, tag, '') or ''
+        if raw:
+            formatted = format_dicom_tm(str(raw))
+            if formatted:
+                return formatted, tag
+    return '', ''
 
 
 def anon_callback(ds, element):
@@ -446,6 +479,7 @@ def parse_video_data(dcm, dataset, current_index, parsed_database, video_n_frame
     data_dict['RegionDataType'] = ','.join(region_data_types) if region_data_types else ''
     data_dict['SoftwareVersions'] = str(software_version)
     data_dict['ManufacturerModelName'] = str(manufacturer_model)
+    data_dict['AcquisitionTime'], _ = pick_acquisition_time(dataset)
 
     return data_dict
 
@@ -596,6 +630,7 @@ def parse_single_dcm(dcm, current_index, parsed_database, video_n_frames, birads
     data_dict['RegionDataType'] = ','.join(region_data_types) if region_data_types else ''
     data_dict['SoftwareVersions'] = str(software_version)
     data_dict['ManufacturerModelName'] = str(manufacturer_model)
+    data_dict['AcquisitionTime'], _ = pick_acquisition_time(dataset)
 
     return data_dict
 
