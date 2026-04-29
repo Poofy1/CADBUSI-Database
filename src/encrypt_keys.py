@@ -90,6 +90,45 @@ def ff1_encrypt(key, number, domain_size):
     return str(encrypted_value).zfill(length)
 
 
+def encrypt_mixed_id(key, id_value):
+    """Encrypt the digit runs inside an ID that may carry a letter prefix
+    or other non-digit characters (e.g. 'IDMPROD30048230').
+
+    Non-digit characters pass through unchanged; each contiguous digit run
+    is FF1-encrypted with the shared key, preserving its length. Round-trips
+    with decrypt_mixed_id.
+    """
+    if id_value is None:
+        return id_value
+    s = str(id_value).strip()
+    if not s:
+        return s
+
+    def _enc(match):
+        num_str = match.group(0)
+        return ff1_encrypt(key, int(num_str), 10 ** len(num_str))
+
+    return re.sub(r'\d+', _enc, s)
+
+
+def decrypt_mixed_id(encrypted_id, key=None):
+    """Inverse of encrypt_mixed_id."""
+    if encrypted_id is None:
+        return encrypted_id
+    if key is None:
+        key = get_encryption_key()
+    s = str(encrypted_id).strip()
+    if not s:
+        return s
+
+    def _dec(match):
+        num_str = match.group(0)
+        length = len(num_str)
+        return str(ff1_decrypt(key, int(num_str), 10 ** length)).zfill(length)
+
+    return re.sub(r'\d+', _dec, s)
+
+
 def encrypt_single_id(key, id_value):
     """Encrypt a single ID value using the provided key with NIST FF1.
     
@@ -230,17 +269,23 @@ def encrypt_ids(input_file=None, output_file_local=None, key_output=None):
         # Find indices of date columns to be anonymized
         birth_date_index = -1
         death_date_index = -1
-        
+        result_employee_id_index = -1
+
         try:
             birth_date_index = header.index("BIRTH_DATE")
         except ValueError:
             pass
-            
+
         try:
             death_date_index = header.index("DEATH_DATE")
         except ValueError:
             pass
-            
+
+        try:
+            result_employee_id_index = header.index("RESULT_EMPLOYEE_ID")
+        except ValueError:
+            pass
+
         for row in reader:
             encrypted_row = []
             
@@ -260,6 +305,10 @@ def encrypt_ids(input_file=None, output_file_local=None, key_output=None):
                     # Anonymize date columns
                     anonymized_date = anonymize_date(value)
                     encrypted_row.append(anonymized_date)
+                elif i == result_employee_id_index:
+                    # Employee IDs may have a letter prefix (e.g. IDMPROD30048230);
+                    # encrypt only the digit runs so the numeric portion round-trips.
+                    encrypted_row.append(encrypt_mixed_id(key, value))
                 elif i == left_diagnosis_index or i == right_diagnosis_index:
                     # Simplify diagnosis by removing the number at the end
                     # Matches patterns like "BENIGN2", "MALIGNANT3" etc.
