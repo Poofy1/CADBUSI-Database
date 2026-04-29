@@ -89,7 +89,8 @@ def get_radiology_data(limit=None):
       location.address_zip AS LOCATION_ZIP,
       location.address_line AS LOCATION_ADDRESS,
       location.physical_type_text AS LOCATION_TYPE,
-      dim_location.LOCATION_DESCRIPTION
+      dim_location.LOCATION_DESCRIPTION,
+      RES_PVDR_DIM_HEALTHCARE_PROVIDER.PROVIDER_EMPLOYEE_ID AS RESULT_EMPLOYEE_ID
     FROM us_imaging_patients
     INNER JOIN 
       deduplicated_patients PAT_PATIENT 
@@ -109,10 +110,13 @@ def get_radiology_data(limit=None):
     LEFT JOIN 
       `ml-mps-adl-intfhr-phi-p-3b6e.phi_secondary_use_fhir_clinicnumber_us_p.Endpoint` ENDPOINT 
       ON (imaging_studies.gcp_endpoint_id = ENDPOINT.id)
-    INNER JOIN 
-      `ml-mps-adl-intudp-phi-p-d5cb.phi_udpwh_etl_us_p.DIM_RADIOLOGY_TEST_NAME` RADTEST_DIM_RADIOLOGY_TEST_NAME 
+    INNER JOIN
+      `ml-mps-adl-intudp-phi-p-d5cb.phi_udpwh_etl_us_p.DIM_RADIOLOGY_TEST_NAME` RADTEST_DIM_RADIOLOGY_TEST_NAME
       ON (RAD_FACT_RADIOLOGY.RADIOLOGY_TEST_NAME_DK = RADTEST_DIM_RADIOLOGY_TEST_NAME.RADIOLOGY_TEST_NAME_DK)
-    LEFT JOIN 
+    LEFT JOIN
+      `ml-mps-adl-intudp-phi-p-d5cb.phi_udpwh_etl_us_p.DIM_HEALTHCARE_PROVIDER` RES_PVDR_DIM_HEALTHCARE_PROVIDER
+      ON (RAD_FACT_RADIOLOGY.RESULT_PROVIDER_DK = RES_PVDR_DIM_HEALTHCARE_PROVIDER.PROVIDER_DK)
+    LEFT JOIN
       `ml-mps-adl-intudp-phi-p-d5cb.phi_rad_udpwh_us_p.DIM_RADIOLOGY_EXAM` rad_exam
       ON (RAD_FACT_RADIOLOGY.ACCESSION_NBR = rad_exam.ACCESSION_NBR_ID)
     LEFT JOIN 

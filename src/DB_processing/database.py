@@ -83,6 +83,7 @@ class DatabaseManager:
                 race TEXT,
                 zipcode TEXT,
                 site TEXT,
+                result_employee_id TEXT,
                 margin TEXT,
                 shape TEXT,
                 orientation TEXT,
@@ -549,7 +550,7 @@ class DatabaseManager:
             'radiology_review_dtm', 'death_date', 'density_desc',
             'rad_pathology_txt', 'rad_impression', 'date',
             'bi_rads', 'biopsy', 'modality', 'modality_guidance', 'days_to_biopsy',
-            'age_at_event', 'ethnicity', 'race', 'zipcode', 'site', 'margin', 'shape',
+            'age_at_event', 'ethnicity', 'race', 'zipcode', 'site', 'result_employee_id', 'margin', 'shape',
             'orientation', 'echo', 'posterior', 'boundary',
             'left_prior_breast_biopsies', 'right_prior_breast_biopsies',
             'left_prior_breast_cancer', 'right_prior_breast_cancer',
@@ -562,9 +563,9 @@ class DatabaseManager:
             'was_bilateral'
         ]
         
-        string_columns = ['accession_number', 'patient_id']
+        string_columns = ['accession_number', 'patient_id', 'result_employee_id']
         boolean_columns = ['has_malignant', 'has_benign', 'is_biopsy', 'is_us_biopsy']
-        
+
         return self._batch_upsert_helper(
             table_name='StudyCases',
             data=study_data,
