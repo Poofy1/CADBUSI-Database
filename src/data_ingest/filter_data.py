@@ -649,7 +649,10 @@ def create_final_dataset(rad_df, path_df, output_path):
     pathology_subset = pathology_subset[pathology_subset['ACCESSION_NUMBER'].isin(final_df_filtered['ACCESSION_NUMBER'])]
     pathology_subset['cancer_type'] = pathology_subset['lesion_diag'].apply(extract_cancer_type)
     
-    # Save the filtered dataset
+    # Save the filtered dataset. ENCOUNTER_NUMBER is carried through earlier
+    # steps for diagnostics (it's in combined_dataset_debug.csv) but should not
+    # leak into endpoint_data.csv -- drop it right at the boundary.
+    final_df_filtered = final_df_filtered.drop(columns=['ENCOUNTER_NUMBER'], errors='ignore')
     final_df_filtered.to_csv(f'{env}/data/endpoint_data.csv', index=False)
     pathology_subset.to_csv(f'{output_path}/lesion_pathology.csv', index=False)
 
