@@ -1,3 +1,74 @@
+"""
+Classification of breast US studies into final diagnoses.
+
+Each US row gets a label in `left_diagnosis` and/or `right_diagnosis`. The label
+encodes both the call (BENIGN / MALIGNANT) and the source of evidence. The
+trailing digit ranks evidence type, NOT severity:
+
+  0 = direct foreign-key link: rad row shares ENCOUNTER_ID with a pathology
+      record on the matching breast (most direct evidence available)
+  1 = inferred from US-side stability alone (no pathology required)
+  2 = confirmed by a downstream pathology record matching laterality
+  3 = BI-RADS-3-specific stability rule (benign only -- no MALIGNANT3 exists)
+  4 = direct override from A1/A2_PATHOLOGY_CATEGORY_DESC addendum fields
+      (highest priority -- overrides any prior classification)
+
+LABELS
+------
+BENIGN0     check_encounter_linked_path    Rad row shares PATIENT_ID + ENCOUNTER_ID
+                                           with a BENIGN pathology row on the rad's
+                                           breast, and no MALIGNANT path on that breast
+                                           in the same encounter.
+                                           Source: 'encounter linked path'.
+
+BENIGN1     check_assumed_benign           BI-RADS 1/2 + no biopsy in [-30,+120]d
+                                           + no non-{1,2} BI-RADS in 24mo follow-up
+                                           + no MALIGNANT path in 15mo + >=6mo follow-up.
+                                           Source: 'assumed benign'.
+
+BENIGN2     check_from_next_diagnosis      US w/ empty diagnosis, BI-RADS in
+                                           {1,2,3,4,4A,4B}, + future BENIGN path
+                                           within 240d on matching laterality
+                                           (no malignant in same window).
+                                           Source: 'benign pathology'.
+
+BENIGN3     check_assumed_benign_birads3   BI-RADS 3 + stable 36mo US follow-up
+                                           (all future BI-RADS in {1,2}, OR all in
+                                           {1,2,3} with at least one exam >=24mo out)
+                                           + no biopsy in [-30,+120]d + no MALIGNANT
+                                           path in 15mo. Source: 'assumed benign - birads 3'.
+
+BENIGN4     check_pathology_override       A2 (or A1 if A2 empty) PATHOLOGY_CATEGORY_DESC
+                                           is non-empty and does NOT contain
+                                           'malignant' or 'invasive'. OVERRIDES prior
+                                           classifications. Source: 'addendum A2'/'addendum A1'.
+
+MALIGNANT0  check_encounter_linked_path    Rad row shares PATIENT_ID + ENCOUNTER_ID
+                                           with a MALIGNANT pathology row on the rad's
+                                           breast (MALIGNANT wins if BENIGN is also
+                                           present). Source: 'encounter linked path'.
+
+MALIGNANT1  check_malignant_from_biopsy    BI-RADS 6 + the patient has a MALIGNANT
+                                           path_interpretation on the matching breast.
+                                           Only fills empty cells.
+                                           Source: 'birads 6 with malignancy'.
+
+MALIGNANT2  check_from_next_diagnosis      US w/ empty diagnosis, BI-RADS in
+                                           {4,4A,4B,4C,5,6}, + future MALIGNANT path
+                                           within 240d on matching laterality + a
+                                           biopsy (is_biopsy='T') in that window.
+                                           Source: 'malignant pathology'.
+
+MALIGNANT4  check_pathology_override       A2 (or A1) PATHOLOGY_CATEGORY_DESC contains
+                                           'malignant' or 'invasive'. OVERRIDES prior
+                                           classifications. Source: 'addendum A2'/'A1'.
+
+RUN ORDER
+---------
+{BENIGN0, MALIGNANT0} -> BENIGN1 -> BENIGN3 -> MALIGNANT1
+   -> {BENIGN2, MALIGNANT2} -> {BENIGN4, MALIGNANT4}.
+Only the *4 family overrides existing values; the others fill empty cells only.
+"""
 import pandas as pd
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
@@ -33,6 +104,146 @@ def get_diagnosis_column(study_laterality, pathology_laterality=None):
             # If no pathology laterality specified, populate both
             return ['left_diagnosis', 'right_diagnosis']
     return []
+
+
+def check_encounter_linked_path(final_df):
+    """
+    BENIGN0 / MALIGNANT0 -- direct encounter linkage.
+
+    For each radiology row, look up pathology rows in the SAME encounter on the
+    same patient. If those pathology rows have a known interpretation
+    (MALIGNANT or BENIGN), copy the corresponding label onto the rad row's
+    diagnosis column for the matching breast.
+
+    Rules:
+      - join key: (PATIENT_ID, ENCOUNTER_ID)
+      - path interpretations are bucketed by Pathology_Laterality into LEFT,
+        RIGHT, and UNKNOWN (UNKNOWN covers null/empty/'UNKNOWN'/etc); the
+        LEFT and RIGHT buckets go to left_diagnosis and right_diagnosis
+        respectively
+      - the UNKNOWN bucket is folded into a unilateral rad's side (encounter
+        scope already ties the path to that breast) but ignored for BILATERAL
+        rads (genuinely ambiguous)
+      - on a given breast within a given encounter, MALIGNANT wins over BENIGN
+        when both appear (a benign sentinel-node finding shouldn't downgrade a
+        positive primary in the same workup)
+      - only fills empty diagnosis cells; never overrides
+
+    This runs FIRST so subsequent checks (which all only fill empty cells,
+    except the *4 family which intentionally overrides) treat *0 as the
+    baseline. *4 disagreements still surface in pathology_override_disagreements.csv.
+    """
+    if 'ENCOUNTER_ID' not in final_df.columns:
+        return final_df
+
+    # Normalize encounter values: warehouse stores STRINGs but pandas may load
+    # them as INT64. Strip the trailing .0 if so. We never write the normalized
+    # column back to final_df -- it's used only for joining within this function.
+    enc_norm = (final_df['ENCOUNTER_ID']
+                .astype(str)
+                .str.replace(r'\.0$', '', regex=True))
+    enc_norm = enc_norm.where(enc_norm.str.lower() != 'nan', None)
+
+    # Path rows: have a path_interpretation and an encounter. Pathology_Laterality
+    # is allowed to be null or 'UNKNOWN' here -- we'll resolve that against the
+    # rad-side laterality below.
+    path_mask = final_df['path_interpretation'].notna() & enc_norm.notna()
+    if not path_mask.any():
+        return final_df
+
+    path_subset = final_df.loc[
+        path_mask, ['PATIENT_ID', 'Pathology_Laterality', 'path_interpretation']
+    ].copy()
+    path_subset['enc'] = enc_norm.loc[path_mask].values
+    # Bucket: LEFT/RIGHT/UNKNOWN. Anything that isn't LEFT or RIGHT (incl null,
+    # empty string, and the literal 'UNKNOWN') goes to the UNKNOWN bucket.
+    lat_upper = path_subset['Pathology_Laterality'].astype(str).str.upper()
+    path_subset['lat_bucket'] = lat_upper.where(
+        lat_upper.isin(['LEFT', 'RIGHT']), 'UNKNOWN'
+    )
+    path_subset['interp_upper'] = (path_subset['path_interpretation']
+                                   .astype(str).str.upper())
+    path_subset = path_subset[path_subset['interp_upper'].isin(['MALIGNANT', 'BENIGN'])]
+    if path_subset.empty:
+        return final_df
+
+    # For each (patient, encounter, lat_bucket): does this bucket contain a
+    # MALIGNANT or just BENIGN?
+    grouped = (path_subset
+               .groupby(['PATIENT_ID', 'enc', 'lat_bucket'])['interp_upper']
+               .apply(lambda s: 'MALIGNANT' if (s == 'MALIGNANT').any() else 'BENIGN'))
+
+    # Lookup: (patient, encounter) -> {'LEFT': interp, 'RIGHT': interp, 'UNKNOWN': interp}
+    bucket_lookup = {}
+    for (pid, enc, lat), interp in grouped.items():
+        bucket_lookup.setdefault((pid, enc), {})[lat] = interp
+
+    def _resolve(interps):
+        """Pick MALIGNANT0 / BENIGN0 / None from a set/list of interp strings."""
+        if not interps:
+            return None
+        if any(i == 'MALIGNANT' for i in interps):
+            return 'MALIGNANT0'
+        return 'BENIGN0'
+
+    # Rad rows: have an encounter + Study_Laterality, and are not pure path rows.
+    # path_interpretation is null on the radiology side after combine_dataframes.
+    rad_mask = (
+        enc_norm.notna()
+        & final_df['Study_Laterality'].notna()
+        & final_df['path_interpretation'].isna()
+    )
+    if not rad_mask.any():
+        return final_df
+
+    rad_view = final_df.loc[
+        rad_mask, ['PATIENT_ID', 'Study_Laterality', 'left_diagnosis', 'right_diagnosis']
+    ].copy()
+    rad_view['enc'] = enc_norm.loc[rad_mask].values
+
+    updates = []
+    for idx, row in rad_view.iterrows():
+        buckets = bucket_lookup.get((row['PATIENT_ID'], row['enc']))
+        if not buckets:
+            continue
+
+        study_lat = row['Study_Laterality']
+        if study_lat == 'LEFT':
+            # Fold UNKNOWN-laterality path into LEFT
+            label = _resolve([
+                v for k, v in buckets.items() if k in ('LEFT', 'UNKNOWN')
+            ])
+            targets = [('left_diagnosis', label)]
+        elif study_lat == 'RIGHT':
+            # Fold UNKNOWN-laterality path into RIGHT
+            label = _resolve([
+                v for k, v in buckets.items() if k in ('RIGHT', 'UNKNOWN')
+            ])
+            targets = [('right_diagnosis', label)]
+        elif study_lat == 'BILATERAL':
+            # UNKNOWN is genuinely ambiguous here -- ignore it
+            left_label  = _resolve([buckets['LEFT']]) if 'LEFT' in buckets else None
+            right_label = _resolve([buckets['RIGHT']]) if 'RIGHT' in buckets else None
+            targets = [
+                ('left_diagnosis',  left_label),
+                ('right_diagnosis', right_label),
+            ]
+        else:
+            continue
+
+        for col, label in targets:
+            if label is None:
+                continue
+            existing = row.get(col)
+            if pd.isna(existing) or existing == '':
+                updates.append((idx, col, label))
+
+    for idx, col, label in updates:
+        final_df.at[idx, col] = label
+        source_col = col.replace('diagnosis', 'diagnosis_source')
+        final_df.at[idx, source_col] = 'encounter linked path'
+
+    return final_df
 
 
 def check_assumed_benign(final_df):
@@ -586,7 +797,11 @@ def _process_patient_batch_worker(args):
     # Reconstruct the batch dataframe from the subset
     batch_df = batch_data.copy(deep=True)
 
-    # Process locally
+    # Process locally. Order matters: check_encounter_linked_path runs first so
+    # the BENIGN0/MALIGNANT0 baseline is in place; the other checks only fill
+    # empty cells (so they leave *0 alone), and check_pathology_override's *4
+    # family is the only one allowed to override existing values.
+    batch_df = check_encounter_linked_path(batch_df)
     batch_df = check_assumed_benign(batch_df)
     batch_df = check_assumed_benign_birads3(batch_df)
     batch_df = check_malignant_from_biopsy(batch_df)
@@ -634,7 +849,8 @@ def determine_final_interpretation(final_df, batch_size=100, max_workers=None, u
         'PATIENT_ID', 'DATE', 'BI-RADS', 'MODALITY', 'ACCESSION_NUMBER',
         'Study_Laterality', 'Pathology_Laterality', 'is_biopsy',
         'path_interpretation', 'A1_PATHOLOGY_CATEGORY_DESC', 'A2_PATHOLOGY_CATEGORY_DESC',
-        'left_diagnosis', 'right_diagnosis', 'left_diagnosis_source', 'right_diagnosis_source'
+        'left_diagnosis', 'right_diagnosis', 'left_diagnosis_source', 'right_diagnosis_source',
+        'ENCOUNTER_ID',  # used by check_encounter_linked_path
     ]
     existing_cols = [col for col in needed_cols if col in final_df.columns]
 
@@ -728,15 +944,19 @@ def audit_interpretations(final_df):
 
     # After all processing, search for specific categories in both diagnosis columns
     # Count each diagnosis type from both columns
+    benign0_count = sum((final_df['left_diagnosis'] == 'BENIGN0') | (final_df['right_diagnosis'] == 'BENIGN0'))
     benign1_count = sum((final_df['left_diagnosis'] == 'BENIGN1') | (final_df['right_diagnosis'] == 'BENIGN1'))
     benign2_count = sum((final_df['left_diagnosis'] == 'BENIGN2') | (final_df['right_diagnosis'] == 'BENIGN2'))
     benign3_count = sum((final_df['left_diagnosis'] == 'BENIGN3') | (final_df['right_diagnosis'] == 'BENIGN3'))
     benign4_count = sum((final_df['left_diagnosis'] == 'BENIGN4') | (final_df['right_diagnosis'] == 'BENIGN4'))
+    malignant0_count = sum((final_df['left_diagnosis'] == 'MALIGNANT0') | (final_df['right_diagnosis'] == 'MALIGNANT0'))
     malignant1_count = sum((final_df['left_diagnosis'] == 'MALIGNANT1') | (final_df['right_diagnosis'] == 'MALIGNANT1'))
     malignant2_count = sum((final_df['left_diagnosis'] == 'MALIGNANT2') | (final_df['right_diagnosis'] == 'MALIGNANT2'))
     malignant4_count = sum((final_df['left_diagnosis'] == 'MALIGNANT4') | (final_df['right_diagnosis'] == 'MALIGNANT4'))
 
     # Create audit log with counts for each category
+    append_audit("query_clean.encounter_linked_benign", benign0_count)
+    append_audit("query_clean.encounter_linked_malignant", malignant0_count)
     append_audit("query_clean.assumed_benign", benign1_count)
     append_audit("query_clean.birads3_benign", benign3_count)
     append_audit("query_clean.path_confirmed_benign", benign2_count)
@@ -746,11 +966,11 @@ def audit_interpretations(final_df):
     append_audit("query_clean.pathology_override_malignant", malignant4_count)
 
     # Calculate total benign (all benign categories)
-    total_benign = benign1_count + benign2_count + benign3_count + benign4_count
+    total_benign = benign0_count + benign1_count + benign2_count + benign3_count + benign4_count
     append_audit("query_clean.final_benign_count", total_benign)
 
     # Calculate total malignant (all malignant categories)
-    total_malignant = malignant1_count + malignant2_count + malignant4_count
+    total_malignant = malignant0_count + malignant1_count + malignant2_count + malignant4_count
     append_audit("query_clean.final_malignant_count", total_malignant)
     
     # Calculate unknown (cases without a final interpretation)

@@ -274,28 +274,35 @@ def fill_pathology_accession_numbers(final_df):
 
 def prepare_dataframes(rad_df, path_df):
     """Prepare and standardize dataframes for combining."""
-    
+
     # Convert Patient_ID to string in both dataframes - use inplace for better performance
     rad_df['PATIENT_ID'] = rad_df['PATIENT_ID'].astype(str)
     path_df['PATIENT_ID'] = path_df['PATIENT_ID'].astype(str)
-    
+
     # Convert date columns and rename in one step
     rad_df['DATE'] = pd.to_datetime(rad_df['RADIOLOGY_DTM'], errors='coerce')
     path_df['DATE'] = pd.to_datetime(path_df['SPECIMEN_RECEIVED_DTM'], errors='coerce')
-    
+
+    # Unify the encounter column. The warehouse names differ between fact tables
+    # (FACT_RADIOLOGY.ENCOUNTER_NUMBER vs FACT_PATHOLOGY.ENCOUNTER_ID) but the
+    # values share a domain. Renaming here gives downstream code a single column.
+    if 'ENCOUNTER_NUMBER' in rad_df.columns:
+        rad_df = rad_df.rename(columns={'ENCOUNTER_NUMBER': 'ENCOUNTER_ID'})
+
     # Drop columns more efficiently (in-place)
     columns_to_drop = ['RADIOLOGY_NARRATIVE', 'PROCEDURE_CODE_TEXT', 'SERVICE_RESULT_STATUS', 'RADIOLOGY_REPORT', 'RAD_SERVICE_RESULT_STATUS']
     rad_df = rad_df.drop(columns=columns_to_drop, errors='ignore')
     rad_df.drop('RADIOLOGY_DTM', axis=1, inplace=True)
     path_df.drop('SPECIMEN_RECEIVED_DTM', axis=1, inplace=True)
-    
+
     return rad_df, path_df
 
 
 def combine_dataframes(rad_df, path_df):
     """Combine radiology and pathology dataframes, keeping pathology on separate rows."""
-    # Select only needed columns from path_df to reduce memory usage
-    needed_columns = ['PATIENT_ID', 'DATE', 'SPECIMEN_RESULT_DTM', 'Pathology_Laterality', 'final_diag', 'lesion_diag', 'SYNOPTIC_REPORT', 'path_interpretation']
+    # Select only needed columns from path_df to reduce memory usage. ENCOUNTER_ID
+    # is included so check_encounter_linked_path can join rad <-> path.
+    needed_columns = ['PATIENT_ID', 'DATE', 'SPECIMEN_RESULT_DTM', 'Pathology_Laterality', 'final_diag', 'lesion_diag', 'SYNOPTIC_REPORT', 'path_interpretation', 'ENCOUNTER_ID']
     path_needed = path_df[needed_columns] if all(col in path_df.columns for col in needed_columns) else path_df
     
     # Create a copy of path_needed with the same columns as rad_df, plus any additional columns we need
@@ -649,10 +656,11 @@ def create_final_dataset(rad_df, path_df, output_path):
     pathology_subset = pathology_subset[pathology_subset['ACCESSION_NUMBER'].isin(final_df_filtered['ACCESSION_NUMBER'])]
     pathology_subset['cancer_type'] = pathology_subset['lesion_diag'].apply(extract_cancer_type)
     
-    # Save the filtered dataset. ENCOUNTER_NUMBER is carried through earlier
-    # steps for diagnostics (it's in combined_dataset_debug.csv) but should not
-    # leak into endpoint_data.csv -- drop it right at the boundary.
-    final_df_filtered = final_df_filtered.drop(columns=['ENCOUNTER_NUMBER'], errors='ignore')
+    # Save the filtered dataset. ENCOUNTER_ID is carried through earlier steps
+    # (it powers check_encounter_linked_path and is visible in
+    # combined_dataset_debug.csv) but should not leak into endpoint_data.csv --
+    # drop it right at the boundary.
+    final_df_filtered = final_df_filtered.drop(columns=['ENCOUNTER_ID'], errors='ignore')
     final_df_filtered.to_csv(f'{env}/data/endpoint_data.csv', index=False)
     pathology_subset.to_csv(f'{output_path}/lesion_pathology.csv', index=False)
 
