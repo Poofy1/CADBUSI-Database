@@ -242,35 +242,215 @@ def extract_synoptic_report(text):
     """Extract synoptic report content from specimen note text."""
     if pd.isna(text):
         return None
-    
+
     # Use regex to find "SYNOPTIC REPORT" (must be capitalized), optionally followed by ":"
     start_match = re.search(r'SYNOPTIC REPORT:?', text)
     if not start_match:
         return None
-    
+
     # Get the position right after the match
     start_pos = start_match.end()
-    
+
     # Get the content after the match
     after_synoptic = text[start_pos:].strip()
-    
+
     return after_synoptic
-    
-    
+
+
+def _is_pre_2018(accession_number):
+    if pd.isna(accession_number):
+        return False
+    return str(accession_number).lower().startswith('amml')
+
+
+def _split_rtf_blobs(specimen_note):
+    if pd.isna(specimen_note):
+        return []
+    parts = re.split(r'(?=\{\\rtf1)', str(specimen_note))
+    return [p for p in parts if p.strip().startswith('{\\rtf1')]
+
+
+def _strip_rtf(rtf_blob):
+    if not rtf_blob:
+        return ""
+    text = rtf_blob
+
+    # Drop the RTF header up to the content marker. The font/color/stylesheet
+    # tables before `\plain\fN\fsNN ` are noise.
+    marker = re.search(r'\\plain\\f\d+\\fs\d+\s?', text)
+    if marker:
+        text = text[marker.end():]
+
+    text = re.sub(r'\\par\b', '\n', text)
+    text = re.sub(r'\\tab\b', ' ', text)
+    # Hex escapes (e.g. \'93 for typographic quote) — drop to a space.
+    text = re.sub(r"\\'[0-9a-fA-F]{2}", ' ', text)
+    # Remaining control words: `\name`, optionally followed by an integer and
+    # an optional delimiting space.
+    text = re.sub(r'\\[a-zA-Z]+-?\d*\s?', '', text)
+    # Lingering escapes like `\\`, `\{`, `\}`.
+    text = re.sub(r'\\[^a-zA-Z]', '', text)
+    text = text.replace('{', '').replace('}', '')
+
+    lines = [re.sub(r'[ \t]+', ' ', line).strip() for line in text.split('\n')]
+    cleaned = []
+    prev_blank = False
+    for line in lines:
+        if line:
+            cleaned.append(line)
+            prev_blank = False
+        elif not prev_blank:
+            cleaned.append('')
+            prev_blank = True
+    return '\n'.join(cleaned).strip()
+
+
+def _classify_blob(plain_text):
+    """Classify a stripped pre-2018 RTF blob as one of GROSS, MARKERS, FROZEN,
+    ADDENDUM, FINAL, or OTHER. Used to pick the final-diagnosis blob from the
+    multi-document SPECIMEN_NOTE."""
+    if not plain_text:
+        return "OTHER"
+
+    text = plain_text
+
+    if re.search(r'Received fresh', text):
+        return "GROSS"
+
+    has_organ_part = bool(re.search(
+        r'(?:^|\n)A\.\s+(Breast|Lymph nodes?|Skin|Nipple)[^:\n]{0,80}:', text
+    ))
+
+    if not has_organ_part:
+        if text.startswith('Source:') or (
+            'Estrogen:' in text and 'Progesterone:' in text and 'HER2' in text
+        ):
+            return "MARKERS"
+
+    if ('Frozen section histologic interpretation' in text
+            or 'HOLDOVER' in text
+            or 'HOLD OVER' in text):
+        return "FROZEN"
+
+    if len(text) < 200 or text.startswith('Stains for'):
+        return "ADDENDUM"
+
+    if has_organ_part:
+        return "FINAL"
+
+    return "OTHER"
+
+
+def extract_final_diagnosis_pre_2018(specimen_note):
+    if pd.isna(specimen_note):
+        return None
+
+    blobs = _split_rtf_blobs(specimen_note)
+    if not blobs:
+        return None
+
+    candidates = []
+    for blob in blobs:
+        plain = _strip_rtf(blob)
+        if _classify_blob(plain) == "FINAL":
+            candidates.append(plain)
+
+    if not candidates:
+        return None
+
+    with_synoptic = [c for c in candidates if re.search(r'Synoptic Report', c, re.IGNORECASE)]
+    if with_synoptic:
+        return max(with_synoptic, key=len)
+    return max(candidates, key=len)
+
+
+def extract_synoptic_report_pre_2018(specimen_note):
+    final_text = extract_final_diagnosis_pre_2018(specimen_note)
+    if not final_text:
+        return None
+
+    # Require the colon (and proper case) — lowercase "synoptic report" appears
+    # as a body reference (e.g. "See synoptic report and comment.") and is not
+    # the heading.
+    match = re.search(r'Synoptic Report\s*:', final_text)
+    if not match:
+        return None
+    return final_text[match.end():].strip()
+
+
+def _join_unique(series):
+    """Join unique non-null values with `; ` separator for fan-out aggregation."""
+    vals = sorted({str(v).strip() for v in series.dropna() if str(v).strip()})
+    return '; '.join(vals) if vals else None
+
+
+def _collapse_join_fanout(pathology_df):
+    """The BigQuery in query.py joins through DIM_PATHOLOGY_DIAGNOSIS_CODE_BRIDGE
+    and FACT_PATHOLOGY_SPECIMEN_DETAIL, both of which can produce multiple rows
+    per real pathology record. Group by SPECIMEN_ACCESSION_NUMBER and merge the
+    fan-out columns to unique values so each pathology record is a single row
+    before lesion-splitting."""
+    fanout_cols = [
+        c for c in ['DIAGNOSIS_NAME', 'SPECIMEN_PART_TYPE_NAME',
+                    'PART_DESCRIPTION', 'SPECIMEN_PART_TYPE_CODE']
+        if c in pathology_df.columns
+    ]
+    if not fanout_cols or 'SPECIMEN_ACCESSION_NUMBER' not in pathology_df.columns:
+        return pathology_df
+
+    has_accession = pathology_df['SPECIMEN_ACCESSION_NUMBER'].notna()
+    keyed = pathology_df[has_accession]
+    unkeyed = pathology_df[~has_accession]
+    if keyed.empty:
+        return pathology_df
+
+    other_cols = [c for c in keyed.columns
+                  if c not in fanout_cols and c != 'SPECIMEN_ACCESSION_NUMBER']
+    agg_spec = {c: _join_unique for c in fanout_cols}
+    for c in other_cols:
+        agg_spec[c] = 'first'
+
+    collapsed = keyed.groupby('SPECIMEN_ACCESSION_NUMBER', as_index=False).agg(agg_spec)
+    return pd.concat([collapsed, unkeyed], ignore_index=True)
+
+
 def filter_path_data(pathology_df, output_path):
     print("Parsing Pathology Data")
-    
+
     rows_before = len(pathology_df)
     pathology_df = pathology_df.drop_duplicates(keep='first')
     rows_after = len(pathology_df)
     duplicates_removed_early = rows_before - rows_after
     print(f"Removed {duplicates_removed_early} exact duplicate rows before processing.")
-    
-    # Extract final diagnosis from SPECIMEN_NOTE
-    pathology_df['final_diag'] = pathology_df['SPECIMEN_NOTE'].apply(extract_final_diagnosis)
-    
-    # Extract synoptic report from SPECIMEN_NOTE
-    pathology_df['SYNOPTIC_REPORT'] = pathology_df['SPECIMEN_NOTE'].apply(extract_synoptic_report)
+
+    rows_before_collapse = len(pathology_df)
+    pathology_df = _collapse_join_fanout(pathology_df)
+    fanout_collapsed = rows_before_collapse - len(pathology_df)
+    print(f"Collapsed {fanout_collapsed} fan-out rows from diagnosis/specimen-part joins.")
+    append_audit("query_clean_path.path_fanout_collapsed", fanout_collapsed)
+
+    # Pre-2018 records (SPECIMEN_ACCESSION_NUMBER prefixed with "amml") have a
+    # different SPECIMEN_NOTE shape (multiple concatenated RTF blobs) and need
+    # their own extraction path; downstream pipeline is shared.
+    pre_mask = pathology_df['SPECIMEN_ACCESSION_NUMBER'].apply(_is_pre_2018)
+    append_audit("query_clean_path.path_pre2018_count", int(pre_mask.sum()))
+    append_audit("query_clean_path.path_post2018_count", int((~pre_mask).sum()))
+
+    pathology_df['final_diag'] = None
+    pathology_df['SYNOPTIC_REPORT'] = None
+
+    pathology_df.loc[pre_mask, 'final_diag'] = (
+        pathology_df.loc[pre_mask, 'SPECIMEN_NOTE'].apply(extract_final_diagnosis_pre_2018)
+    )
+    pathology_df.loc[~pre_mask, 'final_diag'] = (
+        pathology_df.loc[~pre_mask, 'SPECIMEN_NOTE'].apply(extract_final_diagnosis)
+    )
+    pathology_df.loc[pre_mask, 'SYNOPTIC_REPORT'] = (
+        pathology_df.loc[pre_mask, 'SPECIMEN_NOTE'].apply(extract_synoptic_report_pre_2018)
+    )
+    pathology_df.loc[~pre_mask, 'SYNOPTIC_REPORT'] = (
+        pathology_df.loc[~pre_mask, 'SPECIMEN_NOTE'].apply(extract_synoptic_report)
+    )
     
     # Split cases into separate rows via lesions
     expanded_df = split_lesions(pathology_df)
@@ -318,6 +498,7 @@ def filter_path_data(pathology_df, output_path):
         'SPECIMEN_PART_TYPE_NAME',
         'SPECIMEN_RESULT_DTM',
         'SPECIMEN_RECEIVED_DTM',
+        'SPECIMEN_NOTE',
     ]
     
     # Create output dataframe with selected columns
