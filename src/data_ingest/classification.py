@@ -127,6 +127,10 @@ def check_encounter_linked_path(final_df):
       - on a given breast within a given encounter, MALIGNANT wins over BENIGN
         when both appear (a benign sentinel-node finding shouldn't downgrade a
         positive primary in the same workup)
+      - rad rows where the radiologist marked the biopsy as DISCORDANT
+        (concordance == 'F') are skipped: the radiologist disagrees with the
+        path result, so the path label can't be trusted to characterize the
+        imaging on that breast
       - only fills empty diagnosis cells; never overrides
 
     This runs FIRST so subsequent checks (which all only fill empty cells,
@@ -193,6 +197,11 @@ def check_encounter_linked_path(final_df):
         & final_df['Study_Laterality'].notna()
         & final_df['path_interpretation'].isna()
     )
+    # Skip rad rows where the biopsy was marked DISCORDANT by the radiologist.
+    # concordance='F' means the radiologist disagrees with the path result, so
+    # we shouldn't propagate that path label onto the imaging diagnosis.
+    if 'concordance' in final_df.columns:
+        rad_mask &= (final_df['concordance'] != 'F')
     if not rad_mask.any():
         return final_df
 
@@ -338,14 +347,16 @@ def check_assumed_benign(final_df):
             # If all checks pass, mark for update
             updates[idx] = ('BENIGN1', row.get('Study_Laterality'))
 
-    # Apply all updates at once
+    # Apply all updates at once -- only fill empty cells so we don't clobber a
+    # *0 label set by check_encounter_linked_path (or any earlier check).
     for idx, (value, laterality) in updates.items():
         diagnosis_cols = get_diagnosis_column(laterality)
         for col in diagnosis_cols:
-            final_df.at[idx, col] = value
-            # Set the source column
-            source_col = col.replace('diagnosis', 'diagnosis_source')
-            final_df.at[idx, source_col] = 'assumed benign'
+            existing = final_df.at[idx, col]
+            if pd.isna(existing) or existing == '':
+                final_df.at[idx, col] = value
+                source_col = col.replace('diagnosis', 'diagnosis_source')
+                final_df.at[idx, source_col] = 'assumed benign'
 
     return final_df
 
@@ -466,14 +477,16 @@ def check_assumed_benign_birads3(final_df):
             # If all checks pass, mark for update
             updates[idx] = ('BENIGN3', row.get('Study_Laterality'))
 
-    # Apply all updates at once
+    # Apply all updates at once -- only fill empty cells so we don't clobber a
+    # *0 label set by check_encounter_linked_path (or any earlier check).
     for idx, (value, laterality) in updates.items():
         diagnosis_cols = get_diagnosis_column(laterality)
         for col in diagnosis_cols:
-            final_df.at[idx, col] = value
-            # Set the source column
-            source_col = col.replace('diagnosis', 'diagnosis_source')
-            final_df.at[idx, source_col] = 'assumed benign - birads 3'
+            existing = final_df.at[idx, col]
+            if pd.isna(existing) or existing == '':
+                final_df.at[idx, col] = value
+                source_col = col.replace('diagnosis', 'diagnosis_source')
+                final_df.at[idx, source_col] = 'assumed benign - birads 3'
 
     return final_df
 

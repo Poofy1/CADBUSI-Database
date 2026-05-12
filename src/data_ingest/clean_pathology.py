@@ -162,8 +162,9 @@ def categorize_pathology(text):
         r"INVASIVE\s+CARCINOMA",
         r"CARCINOMA",
         r"\bMALIGNAN[CT]\b",
-        r"\bTUMOR\b",
+        r"\bTUMOR\s+CELLS\b",
         r"METASTATIC",
+        r"\bMELANOMA\b",
     ]
     
     # Flag to track if we found any non-negated malignant findings
@@ -190,12 +191,16 @@ def categorize_pathology(text):
     # 2. Check for explicit negation patterns
     negation_patterns = [
         r"NEGATIVE\s+FOR\s+(MALIGNAN[CT]|CARCINOMA|INVASIVE|DCIS|ATYPIA|TUMOR|NEOPLASM|METASTATIC)",
-        r"NO\s+EVIDENCE\s+OF\s+(MALIGNAN[CT]|CARCINOMA|INVASIVE|DCIS|TUMOR|NEOPLASM|ATYPIA)",
+        r"NO\s+EVIDENCE\s+OF\s+(RESIDUAL\s+)?(MALIGNAN[CT]|CARCINOMA|INVASIVE|DCIS|TUMOR|NEOPLASM|ATYPIA)",
         r"ABSENCE\s+OF\s+(MALIGNAN[CT]|CARCINOMA|INVASIVE|DCIS|TUMOR|NEOPLASM)",
         r"FREE\s+OF\s+(MALIGNAN[CT]|CARCINOMA|INVASIVE|TUMOR|NEOPLASM)",
         r"NO\s+(MALIGNAN[CT]|CARCINOMA|INVASIVE|TUMOR|NEOPLASM)\s+SEEN",
         r"NEGATIVE\s+LYMPH",
         r"NO\s+MALIGNANCY\s+PRESENT",
+        r"NO\s+RESIDUAL\s+(INVASIVE|CARCINOMA|DCIS|TUMOR|DISEASE|MALIGNAN[CT])",
+        r"NO\s+LYMPH\s+NODE\s+TISSUE",
+        r"WITHOUT\s+(HISTOLOGIC(AL)?\s+|SIGNIFICANT\s+)?ABNORMALITY",
+        r"NO\s+HISTOLOGIC(AL)?\s+ABNORMALITY",
     ]
     
     for pattern in negation_patterns:
@@ -229,6 +234,15 @@ def categorize_pathology(text):
         r"NEGATIVE",
         r"SCAR",
         r"FIBROTIC ",
+        r"BREAST\s+CAPSULE",
+        r"FIBROMUSCULAR\s+TISSUE",
+        r"FIBROADIPOSE\s+TISSUE",
+        r"FIBROUS\s+TISSUE",
+        r"BIOPSY\s+SITE\s+CHANGES?",
+        r"NEUROFIBROMA",
+        r"\bNEVUS\b",
+        r"PSEUDOANGIOMATOUS",
+        r"\bNODULAR\s+FASCIITIS\b",
     ]
     
     for pattern in benign_patterns:

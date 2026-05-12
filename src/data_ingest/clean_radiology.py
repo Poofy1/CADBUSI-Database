@@ -847,6 +847,17 @@ def remove_bad_data(radiology_df, output_path):
     
     return radiology_df
     
+def extract_concordance(text):
+    """Look for 'CONCORDANCE:' followed by Yes/No (case-insensitive, allowing
+    whitespace/punctuation in between). Returns 'T' / 'F' / None."""
+    if pd.isna(text):
+        return None
+    m = re.search(r'CONCORDANCE\s*:[\s\W]*(YES|NO)\b', str(text), re.IGNORECASE)
+    if not m:
+        return None
+    return 'T' if m.group(1).upper() == 'YES' else 'F'
+
+
 def filter_rad_data(radiology_df, output_path):
     print("Parsing Radiology Data:")
     
@@ -907,6 +918,9 @@ def filter_rad_data(radiology_df, output_path):
 
     # Check for addendum
     radiology_df['addendum'] = radiology_df.apply(extract_addendum, axis=1)
+
+    # Extract concordance (Yes/No after "CONCORDANCE:") from RADIOLOGY_REPORT
+    radiology_df['concordance'] = radiology_df['RADIOLOGY_REPORT'].apply(extract_concordance)
 
     # Extract modality guidance (must be after is_biopsy is created)
     radiology_df['MODALITY_GUIDANCE'] = radiology_df.apply(extract_modality_guidance, axis=1)
