@@ -55,22 +55,13 @@ def split_lesions(pathology_df):
                 part_letter = parts[i]
                 part_text = parts[i+1].strip()
                 
-                # Truncate at COMMENT or REPORT (case-insensitive)
+                # Truncate at any boilerplate section header that follows the
+                # actual diagnosis (case-insensitive). The earliest match wins.
                 text_upper = part_text.upper()
-                comment_pos = text_upper.find("COMMENT")
-                report_pos = text_upper.find("REPORT")
-                
-                # Find the earliest position (excluding -1 for not found)
-                truncate_pos = -1
-                if comment_pos != -1 and report_pos != -1:
-                    truncate_pos = min(comment_pos, report_pos)
-                elif comment_pos != -1:
-                    truncate_pos = comment_pos
-                elif report_pos != -1:
-                    truncate_pos = report_pos
-                
-                if truncate_pos != -1:
-                    part_text = part_text[:truncate_pos].strip()
+                truncate_markers = ["COMMENT", "REPORT", "CLINICAL HISTORY", "CASE NUMBER"]
+                positions = [p for p in (text_upper.find(m) for m in truncate_markers) if p != -1]
+                if positions:
+                    part_text = part_text[:min(positions)].strip()
                 
                 # Only include parts that have actual content
                 if part_text:
@@ -171,17 +162,26 @@ def categorize_pathology(text):
     found_malignant = False
     
     for pattern in malignant_patterns:
-        matches = list(re.finditer(pattern, text))
-        for match in matches:
-            # Get context around the match (50 characters before)
+        for match in re.finditer(pattern, text):
             start_pos = max(0, match.start() - 50)
             context_before = text[start_pos:match.start()]
-            
-            # Check if this is a negated finding
-            if not re.search(r"NEGATIVE\s+FOR|NO\s+EVIDENCE\s+OF|FREE\s+OF|ABSENCE\s+OF|NO\s+", context_before):
-                found_malignant = True
-                break
-        
+            context_after  = text[match.end():match.end() + 30]
+
+            # Negated mention -> skip
+            if re.search(r"NEGATIVE\s+FOR|NO\s+EVIDENCE\s+OF|FREE\s+OF|ABSENCE\s+OF|NOT\s+DIAGNOSTIC|NO\s+", context_before):
+                continue
+
+            # LCIS (lobular carcinoma in situ) is clinically a high-risk benign
+            # lesion, not invasive cancer. Skip when "LOBULAR " precedes and
+            # "IN SITU" follows the match. PLEOMORPHIC LCIS is also caught
+            # because LOBULAR still appears immediately before CARCINOMA.
+            if (re.search(r"\bLOBULAR\s*$", context_before) and
+                    re.search(r"^[\s,\-]*IN[\s\-]+SITU", context_after)):
+                continue
+
+            found_malignant = True
+            break
+
         if found_malignant:
             break
     
@@ -243,6 +243,11 @@ def categorize_pathology(text):
         r"\bNEVUS\b",
         r"PSEUDOANGIOMATOUS",
         r"\bNODULAR\s+FASCIITIS\b",
+        r"\bLCIS\b",
+        r"LOBULAR\s+CARCINOMA\s+IN[\s\-]+SITU",
+        r"ATYPICAL\s+LOBULAR\s+HYPERPLASIA",
+        r"\bALH\b",
+        r"LOBULAR\s+NEOPLASIA",
     ]
     
     for pattern in benign_patterns:
