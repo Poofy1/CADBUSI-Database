@@ -320,8 +320,8 @@ class DatabaseManager:
         cursor = self.conn.cursor()
         columns = [row[1] for row in cursor.execute("PRAGMA table_info(Images)").fetchall()]
 
-        if 'inpainted_version' not in columns:
-            return  # already migrated or fresh DB
+        if 'inpainted_from' not in columns:
+            return  # old column doesn't exist; fresh DB or already migrated
 
         print("Migrating inpainted_from → inpainted_version ...")
 
