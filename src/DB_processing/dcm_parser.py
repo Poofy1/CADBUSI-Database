@@ -1,4 +1,5 @@
 import os, pydicom
+import sqlite3
 import numpy as np
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import multiprocessing
@@ -913,22 +914,52 @@ def deduplicate_dcm_files(dcm_files_list):
 
     return unique_files
 
-def filter_dcm_files_by_anon_data(dcm_files_list, anon_location, encryption_key):
+def get_existing_study_pairs(db_path):
+    """Return the set of (patient_id, accession_number) pairs already stored in
+    StudyCases of the given cadbusi.db. Used by incremental --existing-db mode
+    to skip DICOMs whose case is already parsed. Read-only; returns empty set if
+    db_path is falsy or the table is missing."""
+    if not db_path:
+        return set()
+    if not os.path.exists(db_path):
+        print(f"WARNING: --existing-db path does not exist: {db_path}")
+        return set()
+    try:
+        conn = sqlite3.connect(f'file:{os.path.abspath(db_path)}?mode=ro', uri=True)
+        rows = conn.execute(
+            "SELECT DISTINCT patient_id, accession_number FROM StudyCases"
+        ).fetchall()
+        conn.close()
+        pairs = {(str(p), str(a)) for p, a in rows}
+        print(f"Loaded {len(pairs)} existing (patient_id, accession_number) pairs from {db_path}")
+        return pairs
+    except sqlite3.Error as e:
+        print(f"WARNING: could not read StudyCases from {db_path}: {e}")
+        return set()
+
+
+def filter_dcm_files_by_anon_data(dcm_files_list, anon_location, encryption_key, existing_pairs=None):
     """
     Filter DICOM files to only process those that exist in the anonymized input data.
 
     Parses non-anonymized patient_id and accession_number from file paths,
-    encrypts them, and matches against the anonymized CSV data.
+    encrypts them, and matches against the anonymized CSV data. If
+    `existing_pairs` is provided, additionally skips files whose (encrypted
+    patient_id, encrypted accession_number) is already in that set.
 
     Parameters:
     - dcm_files_list: List of DICOM file paths with pattern /{patient_id}_{accession_id}/{hash}.dcm
     - anon_location: Path to the CSV file containing anonymized patient_id and accession_number
     - encryption_key: Key used to encrypt the IDs
+    - existing_pairs: Optional set of (patient_id, accession_number) pairs already
+      parsed in a prior run (from --existing-db); files matching these are skipped.
 
     Returns:
     - Filtered list of DICOM file paths that match the anonymized input data
     """
     print("Filtering DICOM files based on anonymized input data...")
+    if existing_pairs is None:
+        existing_pairs = set()
 
     # Read the anonymized CSV with dtype=str to preserve leading zeros
     anon_csv = pd.read_csv(anon_location, dtype={'PATIENT_ID': str, 'ACCESSION_NUMBER': str})
@@ -946,6 +977,7 @@ def filter_dcm_files_by_anon_data(dcm_files_list, anon_location, encryption_key)
     # Filter DICOM files
     filtered_files = []
     skipped_count = 0
+    skipped_existing_db = 0
     parse_errors = 0
     found_pairs = set()  # Track which pairs we actually found
     all_file_pairs = set()  # Track all pairs found in files (including those not in CSV)
@@ -982,6 +1014,10 @@ def filter_dcm_files_by_anon_data(dcm_files_list, anon_location, encryption_key)
         all_file_pairs.add(pair)  # Track all pairs in files
         
         if pair in anon_pairs:
+            if pair in existing_pairs:
+                # Already parsed in a prior run; skip per --existing-db.
+                skipped_existing_db += 1
+                continue
             filtered_files.append(dcm_path)
             found_pairs.add(pair)
         else:
@@ -997,11 +1033,14 @@ def filter_dcm_files_by_anon_data(dcm_files_list, anon_location, encryption_key)
     print(f"Found {len(all_file_pairs)} unique patient-accession pairs in file list")
     print(f"Found {len(found_pairs)} unique patient-accession pairs matching CSV")
     print(f"{missing_percentage:.1f}% of anonymized accessions ({missing_count}/{total_anon_pairs}) were not found in DICOM files")
-    
+    if existing_pairs:
+        print(f"Skipped {skipped_existing_db} files whose (patient_id, accession_number) was already in --existing-db")
+        append_audit("dicom_parsing.skipped_existing_db_pairs", skipped_existing_db)
+
     return filtered_files
 
 # Main Method
-def Parse_Dicom_Files(CONFIG, anon_location, lesion_anon_file, birads_anon_file, raw_storage_database, encryption_key):
+def Parse_Dicom_Files(CONFIG, anon_location, lesion_anon_file, birads_anon_file, raw_storage_database, encryption_key, existing_db_path=None):
     """
     Main DICOM processing function.
 
@@ -1011,7 +1050,9 @@ def Parse_Dicom_Files(CONFIG, anon_location, lesion_anon_file, birads_anon_file,
         lesion_anon_file: Path to lesion data file
         raw_storage_database: Path to raw DICOM storage
         encryption_key: Encryption key for patient IDs
-        skip_dicom_processing: If True, skips 4-hour DICOM processing and loads from checkpoint
+        existing_db_path: Optional path to a previous cadbusi.db. When set,
+            (patient_id, accession_number) pairs already in its StudyCases are
+            skipped during the DICOM filter step.
     """
     database_path = CONFIG["DATABASE_DIR"]
     data_range = CONFIG["DEBUG_DATA_RANGE"]
@@ -1041,8 +1082,12 @@ def Parse_Dicom_Files(CONFIG, anon_location, lesion_anon_file, birads_anon_file,
     dcm_files_list = deduplicate_dcm_files(dcm_files_list)
     print(f'Unique DICOM files to process: {len(dcm_files_list)}')
 
+    # Load (patient_id, accession_number) pairs from an existing DB so we can
+    # skip already-parsed cases. Empty set if --existing-db wasn't supplied.
+    existing_pairs = get_existing_study_pairs(existing_db_path)
+
     # Filter files to only process those in the anonymized input data
-    dcm_files_list = filter_dcm_files_by_anon_data(dcm_files_list, anon_location, encryption_key)
+    dcm_files_list = filter_dcm_files_by_anon_data(dcm_files_list, anon_location, encryption_key, existing_pairs)
 
     # Read anon CSV to get BI-RADS 4 accessions for video filtering
     birads_4_accessions = None

@@ -33,7 +33,13 @@ def parse_arguments():
     # Anonymize arguments
     parser.add_argument('--database', action='store_true', help='Process database')
     parser.add_argument('--skip-inpaint', action='store_true', help='Skip the inpainting step')
-    
+    parser.add_argument('--existing-db', type=str, default=None,
+        help='Path to a previous cadbusi.db; skip (patient_id, accession_number) pairs already in it')
+
+    # Merge: takes SRC and DEST paths; runs INSERT OR IGNORE per table
+    parser.add_argument('--merge-db', nargs=2, metavar=('SRC', 'DEST'),
+        help='Merge SRC cadbusi.db into DEST cadbusi.db via INSERT OR IGNORE')
+
     return parser.parse_args()
 
 def main():
@@ -66,6 +72,11 @@ def main():
         # Filter data
         create_final_dataset(rad_df, path_df, OUTPUT_PATH)
     
+    elif args.merge_db:
+        from src.DB_processing.db_merge import merge_databases
+        src_path, dest_path = args.merge_db
+        merge_databases(src_path, dest_path)
+
     elif args.deploy or args.cleanup or args.rerun:
         from src.dicom_downloader.dicom_download import dicom_download_remote_start
         dicom_download_remote_start(DICOM_QUERY_PATH, args.deploy, args.cleanup)
@@ -143,7 +154,8 @@ def main():
         key = encrypt_ids(birads_descriptions, birads_anon_file, key_output)
         
         # Step 2: Parse DICOM files
-        Parse_Dicom_Files(CONFIG, anon_file, lesion_anon_file, birads_anon_file, BUCKET_PATH, encryption_key=key)
+        Parse_Dicom_Files(CONFIG, anon_file, lesion_anon_file, birads_anon_file, BUCKET_PATH,
+                          encryption_key=key, existing_db_path=args.existing_db)
         
         # Step 3: Run OCR
         print("Step 3/5: Processing image data...")

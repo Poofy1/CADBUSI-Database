@@ -64,7 +64,8 @@ The pipeline is operated through a single command-line interface in main.py, whi
 python main.py --query [optional: --limit=N]
 python main.py --deploy
 python main.py --cleanup
-python main.py --database
+python main.py --database [optional: --existing-db path/to/old_cadbusi.db]
+python main.py --merge-db <src.db> <dest.db>   # manual merge after an incremental --database run
 ```
 
 
@@ -116,6 +117,27 @@ This will:
 Example:
 
 `python main.py --database`
+
+### Incremental Processing
+
+To parse only DICOMs that aren't already in a previous database, pass `--existing-db`:
+
+`python main.py --database --existing-db path/to/old_cadbusi.db`
+
+This will:
+1. Open the provided DB read-only and collect every `(patient_id, accession_number)` pair in `StudyCases`.
+2. Skip any DICOM whose pair is already present, so only new data is parsed.
+3. Write a fresh `cadbusi.db` to `CONFIG["DATABASE_DIR"]/cadbusi.db` containing only the new cases.
+
+The old DB is never modified. Use the same encryption key as the previous run — the DB stores encrypted IDs.
+
+### Merging Databases
+
+After verifying an incremental run, merge the new subset into the old DB:
+
+`python main.py --merge-db path/to/new_subset.db path/to/old_cadbusi.db`
+
+This copies every row from each table in `new_subset.db` into `old_cadbusi.db` via `INSERT OR IGNORE` (existing rows are kept). Only the `.db` is merged — you are responsible for copying the corresponding `images/` and `videos/` files from the new run's `DATABASE_DIR` into the destination's `images/` and `videos/` folders so the DB rows still point at files that exist on disk.
 
 ## Labels Database
 
